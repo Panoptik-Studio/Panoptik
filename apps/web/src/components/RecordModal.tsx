@@ -100,8 +100,10 @@ export function RecordModal() {
     try {
       const { screenBlob, facecamBlob } =
         await handlesRef.current.stop();
-      // For now, create a project from screen blob
-      // DEV A's loadRecording will handle proper demux on Day 3
+      console.log("[Record] blobs", { screen: `${screenBlob.type} ${screenBlob.size} bytes`, facecam: `${facecamBlob.type} ${facecamBlob.size} bytes` });
+      if (screenBlob.size < 1024) {
+        throw new Error(`Recording produced an empty file (${screenBlob.size} bytes). Try recording for 3+ seconds and ensure you shared a screen/window.`);
+      }
       const { engine } = await import(
         "@/lib/engineProvider"
       );
@@ -113,6 +115,7 @@ export function RecordModal() {
       setProject(project);
       setIsOpen(false);
     } catch (err) {
+      console.error("[Record] loadRecording failed", err);
       setError(
         err instanceof Error ? err.message : String(err),
       );

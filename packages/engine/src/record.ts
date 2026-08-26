@@ -34,26 +34,29 @@ export async function startRecording(): Promise<RecordingHandles> {
     facecamStream = new MediaStream();
   }
 
-  // Screen recorder — pick supported mimeType
-  const screenMime = ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp8", "video/webm"].find(
-    (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
-  ) || "video/webm";
-  const screenRecorder = new MediaRecorder(screenStream, {
-    mimeType: screenMime,
-    audioBitsPerSecond: 128000,
-  });
+  // Screen recorder — pick supported mimeType (no audio on screen track)
+  const screenMime =
+    ["video/webm;codecs=vp8", "video/webm;codecs=vp9", "video/webm"].find(
+      (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
+    ) || "video/webm";
+  const screenRecorder = new MediaRecorder(
+    screenStream,
+    MediaRecorder.isTypeSupported(screenMime) ? { mimeType: screenMime } : {},
+  );
   const screenChunks: Blob[] = [];
   screenRecorder.ondataavailable = (e) => {
     if (e.data.size > 0) screenChunks.push(e.data);
   };
 
-  // Facecam recorder — pick supported mimeType
-  const facecamMime = ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp8", "video/webm"].find(
-    (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
-  ) || "video/webm";
-  const facecamRecorder = new MediaRecorder(facecamStream, {
-    mimeType: facecamMime,
-  });
+  // Facecam recorder — pick supported mimeType (has mic audio)
+  const facecamMime =
+    ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp9,opus", "video/webm"].find(
+      (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
+    ) || "video/webm";
+  const facecamRecorder = new MediaRecorder(
+    facecamStream,
+    MediaRecorder.isTypeSupported(facecamMime) ? { mimeType: facecamMime } : {},
+  );
   const facecamChunks: Blob[] = [];
   facecamRecorder.ondataavailable = (e) => {
     if (e.data.size > 0) facecamChunks.push(e.data);
@@ -90,12 +93,13 @@ export async function startRecording(): Promise<RecordingHandles> {
         check();
       });
 
+      // Use the actual mimeType that was negotiated
       return {
         screenBlob: new Blob(screenChunks, {
-          type: "video/webm",
+          type: screenRecorder.mimeType || "video/webm",
         }),
         facecamBlob: new Blob(facecamChunks, {
-          type: "video/webm",
+          type: facecamRecorder.mimeType || "video/webm",
         }),
       };
     },

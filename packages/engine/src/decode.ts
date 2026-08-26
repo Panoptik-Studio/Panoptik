@@ -44,10 +44,18 @@ let pump: Promise<void> | null = null;
 export async function loadClip(file: File): Promise<Project> {
   await teardown();
 
-  input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) });
+  if (file.size < 1024) {
+    throw new Error(`File too small (${file.size} bytes) — recording failed or was too short. Try recording for at least 2-3 seconds.`);
+  }
+
+  try {
+    input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) });
+  } catch (e) {
+    throw new Error(`Input has an unsupported or unrecognizable format (type=${file.type || "unknown"}, size=${file.size} bytes). Try a different browser (Chrome recommended) or import an MP4 file instead. Original: ${String(e)}`);
+  }
   const track = await input.getPrimaryVideoTrack();
-  if (!track) throw new Error("No video track found in file");
-  if (!(await track.canDecode())) throw new Error("This browser cannot decode the video codec");
+  if (!track) throw new Error("No video track found in file — the recording may be corrupted or too short.");
+  if (!(await track.canDecode())) throw new Error("This browser cannot decode the video codec. Try Chrome/Edge or re-export as MP4 Baseline.");
 
   const displayWidth = await track.getDisplayWidth();
   const displayHeight = await track.getDisplayHeight();
