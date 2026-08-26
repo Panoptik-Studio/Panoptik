@@ -22,6 +22,9 @@ coverage/
 *.log
 .vercel
 
+# playwright screenshots
+.playwright-mcp/
+
 # large media (regenerate, never commit big binaries) — except the known-good demo clip
 *.mp4
 *.webm

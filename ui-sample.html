@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Open Demo Studio — Editor</title>
+  <style>
+    /* ==========================================================================
+       1. DESIGN TOKENS & SYSTEM VARIABLES (Linear / Raycast Neutral Palette)
+       ========================================================================== */
+    :root {
+      --bg-app: #08090a;
+      --bg-panel: #0f1012;
+      --bg-panel-header: #141518;
+      --bg-surface: #18191d;
+      --bg-surface-hover: #22242a;
+      --bg-surface-active: #2a2c34;
+      
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-medium: rgba(255, 255, 255, 0.12);
+      --border-focus: rgba(99, 102, 241, 0.5);
+
+      --text-primary: #f3f4f6;
+      --text-secondary: #8b8f97;
+      --text-muted: #555861;
+
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --accent-light: rgba(99, 102, 241, 0.15);
+      --accent-glow: rgba(99, 102, 241, 0.35);
+
+      --semantic-green: #10b981;
+      --semantic-amber: #f59e0b;
+      --semantic-red: #ef4444;
+
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+
+      --font-sans: -apple-system, BlinkMacSystemFont, "Geist", "Inter", "Segoe UI", Roboto, sans-serif;
+      --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+
+      --transition-fast: 90ms cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-normal: 160ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg-app);
+      color: var(--text-primary);
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      font-size: 13px;
+      line-height: 1.4;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input, select {
+      font-family: inherit;
+      color: inherit;
+      font-size: inherit;
+      outline: none;
+      border: none;
+      background: transparent;
+    }
+
+    /* ==========================================================================
+       2. APP LAYOUT STRUCTURE
+       ========================================================================== */
+    .app-header {
+      height: 48px;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      z-index: 20;
+    }
+
+    .main-body {
+      flex: 1;
+      display: flex;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .left-sidebar {
+      width: 52px;
+      background: var(--bg-panel);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 0;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    .workspace {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-app);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .canvas-viewport {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+      background: radial-gradient(circle at center, #111216 0%, #08090a 100%);
+    }
+
+    .inspector-sidebar {
+      width: 290px;
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      z-index: 10;
+    }
+
+    .timeline-container {
+      height: 140px;
+      background: var(--bg-panel);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      z-index: 10;
+    }
+
+    /* ==========================================================================
+       3. TOP HEADER COMPONENTS
+       ========================================================================== */
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      letter-spacing: -0.2px;
+      color: var(--text-primary);
+    }
+
+    .logo-badge {
+      font-size: 10px;
+      background: var(--accent-light);
+      color: var(--accent);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .project-name-btn {
+      color: var(--text-secondary);
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+    .project-name-btn:hover {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+    }
+
+    .header-center {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-surface);
+      padding: 3px 6px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .time-readout {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+      padding: 0 6px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+    .icon-btn:hover {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+    }
+    .icon-btn.active {
+      background: var(--accent-light);
+      color: var(--accent);
+    }
+
+    .kbd-hint {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: var(--text-muted);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      font-weight: 500;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: var(--transition-fast);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    /* ==========================================================================
+       4. LEFT TOOL STRIP
+       ========================================================================== */
+    .tool-strip-btn {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: var(--transition-fast);
+      position: relative;
+    }
+    .tool-strip-btn:hover {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+    }
+    .tool-strip-btn.active {
+      background: var(--bg-surface-active);
+      color: var(--accent);
+    }
+    .tool-strip-btn.active::before {
+      content: "";
+      position: absolute;
+      left: -8px;
+      width: 3px;
+      height: 18px;
+      background: var(--accent);
+      border-radius: 0 3px 3px 0;
+    }
+
+    .tool-divider {
+      width: 24px;
+      height: 1px;
+      background: var(--border-subtle);
+      margin: 4px 0;
+    }
+
+    /* ==========================================================================
+       5. CANVAS WORKSPACE (Screen Studio Frame + Focal Simulation)
+       ========================================================================== */
+    .canvas-stage {
+      width: 720px;
+      height: 405px; /* 16:9 */
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+      transition: padding var(--transition-normal), background var(--transition-normal);
+      background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+      overflow: hidden;
+    }
+
+    .video-viewport {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      border-radius: var(--radius-md);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+      position: relative;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+
+    /* Simulated App Frame */
+    .simulated-video-content {
+      width: 100%;
+      height: 100%;
+      background: #121316;
+      display: flex;
+      flex-direction: column;
+      transform-origin: 50% 50%;
+      transition: transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    .mock-window-header {
+      height: 28px;
+      background: #1a1c21;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      gap: 6px;
+    }
+
+    .mock-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .mock-body {
+      flex: 1;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 12px;
+    }
+
+    .mock-nav-item {
+      height: 20px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+
+    .mock-card {
+      background: #1a1c22;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .mock-line {
+      height: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 3px;
+    }
+
+    /* Interactive Zoom Focal Overlay Point */
+    .focal-target {
+      position: absolute;
+      width: 32px;
+      height: 32px;
+      margin-left: -16px;
+      margin-top: -16px;
+      border: 2px solid var(--accent);
+      border-radius: 50%;
+      background: rgba(99, 102, 241, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: grab;
+      z-index: 10;
+      transition: box-shadow var(--transition-fast);
+      box-shadow: 0 0 16px var(--accent-glow);
+    }
+    .focal-target:active {
+      cursor: grabbing;
+    }
+    .focal-center-dot {
+      width: 6px;
+      height: 6px;
+      background: #fff;
+      border-radius: 50%;
+    }
+
+    .focal-tag {
+      position: absolute;
+      top: -24px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-medium);
+      color: var(--text-primary);
+      font-size: 10px;
+      font-family: var(--font-mono);
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    /* ==========================================================================
+       6. RIGHT CONTEXTUAL INSPECTOR
+       ========================================================================== */
+    .inspector-header {
+      height: 44px;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .inspector-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+    }
+
+    .inspector-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .control-label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .control-value {
+      font-family: var(--font-mono);
+      color: var(--text-primary);
+      font-size: 11px;
+    }
+
+    /* Sliders & Inputs */
+    .slider-range {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--bg-surface-active);
+      outline: none;
+    }
+    .slider-range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--text-primary);
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+      transition: transform var(--transition-fast);
+    }
+    .slider-range::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    .select-input {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .select-input:focus {
+      border-color: var(--border-focus);
+    }
+
+    .preset-swatches {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+    }
+
+    .swatch {
+      height: 28px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+    .swatch:hover, .swatch.active {
+      border-color: #fff;
+      transform: scale(1.05);
+    }
+
+    .btn-secondary {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      padding: 7px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      cursor: pointer;
+      text-align: center;
+      transition: var(--transition-fast);
+    }
+    .btn-secondary:hover {
+      background: var(--bg-surface-hover);
+      border-color: var(--border-medium);
+    }
+
+    .btn-danger {
+      color: var(--semantic-red);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      background: rgba(239, 68, 68, 0.05);
+    }
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.15);
+    }
+
+    /* ==========================================================================
+       7. TIMELINE (Diamond Point System)
+       ========================================================================== */
+    .timeline-header {
+      height: 32px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+    }
+
+    .timeline-ticks-bar {
+      height: 24px;
+      position: relative;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: flex-end;
+      padding: 0 20px;
+    }
+
+    .tick-label {
+      position: absolute;
+      bottom: 4px;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--text-muted);
+      transform: translateX(-50%);
+    }
+
+    .timeline-track-area {
+      flex: 1;
+      position: relative;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+    }
+
+    .timeline-strip {
+      width: 100%;
+      height: 36px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      position: relative;
+      cursor: pointer;
+    }
+
+    /* Diamond Keyframe Markers */
+    .timeline-diamond {
+      position: absolute;
+      top: 50%;
+      width: 14px;
+      height: 14px;
+      background: var(--semantic-green);
+      border: 2px solid #fff;
+      transform: translate(-50%, -50%) rotate(45deg);
+      cursor: grab;
+      transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+      z-index: 5;
+    }
+    .timeline-diamond.selected {
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+      transform: translate(-50%, -50%) rotate(45deg) scale(1.2);
+    }
+
+    .playhead-needle {
+      position: absolute;
+      top: -24px;
+      bottom: 0;
+      width: 2px;
+      background: var(--accent);
+      z-index: 10;
+      pointer-events: none;
+      transform: translateX(-50%);
+      transition: left 60ms linear;
+    }
+    .playhead-needle::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: -4px;
+      width: 10px;
+      height: 10px;
+      background: var(--accent);
+      border-radius: 2px;
+      transform: rotate(45deg);
+    }
+
+    /* ==========================================================================
+       8. RAYCAST-STYLE COMMAND PALETTE (⌘K)
+       ========================================================================== */
+    .command-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 15vh;
+      z-index: 100;
+    }
+    .command-overlay.open {
+      display: flex;
+    }
+
+    .command-box {
+      width: 540px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.8);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .command-search {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .command-search input {
+      flex: 1;
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+
+    .command-list {
+      max-height: 280px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .command-item {
+      padding: 9px 12px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .command-item:hover, .command-item.active {
+      background: var(--accent-light);
+      color: var(--text-primary);
+    }
+    .command-item-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* ==========================================================================
+       9. EXPORT DIALOG MODAL (Clean, Professional Progress State)
+       ========================================================================== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 110;
+    }
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .export-modal {
+      width: 440px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: 0 30px 60px rgba(0,0,0,0.7);
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 6px;
+      background: var(--bg-surface-active);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 150ms ease-out;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="logo">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/></svg>
+        Open Demo Studio
+        <span class="logo-badge">Local</span>
+      </div>
+      <span style="color:var(--border-medium)">/</span>
+      <button class="project-name-btn" id="projectNameBtn">
+        <span>product-demo.ods</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+    </div>
+
+    <div class="header-center">
+      <button class="icon-btn" id="playPauseBtn" title="Space">
+        <svg id="playIcon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <svg id="pauseIcon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+      </button>
+      <div class="time-readout" id="headerTime">00:03.2 / 00:12.0</div>
+    </div>
+
+    <div class="header-actions">
+      <button class="icon-btn" title="Undo (⌘Z)" id="undoBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+      </button>
+      <button class="icon-btn" title="Redo (⇧⌘Z)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
+      </button>
+      <div style="width:1px; height:16px; background:var(--border-subtle); margin:0 4px;"></div>
+      <button class="icon-btn" id="commandKBtn" title="Command Palette (⌘K)">
+        <span class="kbd-hint">⌘K</span>
+      </button>
+      <button class="btn-primary" id="openExportBtn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Export Video
+      </button>
+    </div>
+  </header>
+
+  <div class="main-body">
+
+    <aside class="left-sidebar">
+      <button class="tool-strip-btn active" title="Add / Edit Zoom (Z)" id="toolZoomBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+      </button>
+      <button class="tool-strip-btn" title="Media & Video Canvas" id="toolCanvasBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>
+      </button>
+      <button class="tool-strip-btn" title="Text Overlay">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+      </button>
+      <div class="tool-divider"></div>
+      <button class="tool-strip-btn" title="Project Settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </aside>
+
+    <main class="workspace">
+      <div class="canvas-viewport" id="canvasViewport">
+        
+        <div class="canvas-stage" id="canvasStage">
+          <div class="video-viewport" id="videoViewport">
+            
+            <div class="simulated-video-content" id="videoContent">
+              <div class="mock-window-header">
+                <div class="mock-dot" style="background:#ef4444"></div>
+                <div class="mock-dot" style="background:#f59e0b"></div>
+                <div class="mock-dot" style="background:#10b981"></div>
+                <span style="font-size:10px; color:#666; margin-left:8px; font-family:var(--font-mono)">panoptik-app.internal</span>
+              </div>
+              <div class="mock-body">
+                <div>
+                  <div class="mock-nav-item" style="width:90%"></div>
+                  <div class="mock-nav-item" style="width:75%"></div>
+                  <div class="mock-nav-item" style="width:80%; background:var(--accent-light)"></div>
+                  <div class="mock-nav-item" style="width:60%"></div>
+                </div>
+                <div class="mock-card">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div class="mock-line" style="width:40%; height:12px; background:var(--accent)"></div>
+                    <div style="width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,0.1)"></div>
+                  </div>
+                  <div class="mock-line" style="width:85%"></div>
+                  <div class="mock-line" style="width:70%"></div>
+                  <div style="height:60px; background:rgba(255,255,255,0.03); border-radius:6px; margin-top:8px; border:1px dashed rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; color:#555; font-size:11px;">
+                    Interactive Component Focal Area
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="focal-target" id="focalTarget" style="left:60%; top:50%;">
+              <div class="focal-tag">Zoom 1 · 2.2×</div>
+              <div class="focal-center-dot"></div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <section class="timeline-container">
+        <div class="timeline-header">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:11px; font-weight:600; text-transform:uppercase; color:var(--text-secondary)">Camera Zoom Track</span>
+            <span style="font-size:11px; color:var(--text-muted)">• 2 zoom points</span>
+          </div>
+          <button class="btn-secondary" id="addZoomAtPlayheadBtn" style="padding:3px 8px; font-size:11px;">
+            + Add Zoom at Playhead
+          </button>
+        </div>
+
+        <div class="timeline-ticks-bar" id="timelineTicks">
+          <span class="tick-label" style="left:0%">0:00</span>
+          <span class="tick-label" style="left:25%">0:03</span>
+          <span class="tick-label" style="left:50%">0:06</span>
+          <span class="tick-label" style="left:75%">0:09</span>
+          <span class="tick-label" style="left:100%">0:12</span>
+        </div>
+
+        <div class="timeline-track-area">
+          <div class="timeline-strip" id="timelineStrip">
+            <div class="playhead-needle" id="playheadNeedle" style="left:26.6%;"></div>
+
+            <div class="timeline-diamond selected" id="diamond1" style="left:26.6%;" title="Zoom 1 (0:03.2)"></div>
+            <div class="timeline-diamond" id="diamond2" style="left:65%;" title="Zoom 2 (0:07.8)"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="inspector-sidebar">
+      
+      <div id="zoomInspectorPanel">
+        <div class="inspector-header">
+          <span class="inspector-title">Zoom Point</span>
+          <span class="kbd-hint" id="zoomIdLabel">#1</span>
+        </div>
+
+        <div class="inspector-content">
+          <div class="control-group">
+            <div class="control-label-row">
+              <span>Depth</span>
+              <span class="control-value" id="depthValueLabel">2.2×</span>
+            </div>
+            <input type="range" class="slider-range" id="depthSlider" min="1.1" max="4.0" step="0.1" value="2.2" />
+          </div>
+
+          <div class="control-group">
+            <div class="control-label-row">
+              <span>Duration</span>
+              <span class="control-value" id="durationValueLabel">0.7 sec</span>
+            </div>
+            <input type="range" class="slider-range" id="durationSlider" min="0.2" max="2.0" step="0.1" value="0.7" />
+          </div>
+
+          <div class="control-group">
+            <div class="control-label-row">
+              <span>Motion Curve</span>
+            </div>
+            <select class="select-input" id="motionSelect">
+              <option value="smooth">Smooth (Cubic Ease)</option>
+              <option value="snappy">Snappy (Fast Out)</option>
+              <option value="linear">Linear</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <div class="control-label-row">
+              <span>Focal Coordinates</span>
+              <span class="control-value" id="coordValueLabel">X: 60% · Y: 50%</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-muted)">
+              Drag the focal ring on the preview canvas to reposition focus.
+            </div>
+          </div>
+
+          <div style="margin-top:auto; padding-top:12px; border-top:1px solid var(--border-subtle)">
+            <button class="btn-secondary btn-danger" style="width:100%" id="deleteZoomBtn">
+              Delete Zoom Point
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="canvasInspectorPanel" style="display:none;">
+        <div class="inspector-header">
+          <span class="inspector-title">Canvas & Style</span>
+        </div>
+
+        <div class="inspector-content">
+          <div class="control-group">
+            <div class="control-label-row"><span>Aspect Ratio</span></div>
+            <select class="select-input" id="aspectSelect">
+              <option value="16:9">16 : 9 (YouTube / Standard)</option>
+              <option value="9:16">9 : 16 (TikTok / Reels)</option>
+              <option value="1:1">1 : 1 (Square)</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <div class="control-label-row"><span>Background</span></div>
+            <div class="preset-swatches">
+              <div class="swatch active" style="background:linear-gradient(135deg, #6366f1, #a855f7)" data-bg="linear-gradient(135deg, #6366f1, #a855f7)"></div>
+              <div class="swatch" style="background:linear-gradient(135deg, #0ea5e9, #10b981)" data-bg="linear-gradient(135deg, #0ea5e9, #10b981)"></div>
+              <div class="swatch" style="background:linear-gradient(135deg, #f43f5e, #fb923c)" data-bg="linear-gradient(135deg, #f43f5e, #fb923c)"></div>
+              <div class="swatch" style="background:#18191d" data-bg="#18191d"></div>
+              <div class="swatch" style="background:#000000" data-bg="#000000"></div>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <div class="control-label-row">
+              <span>Padding</span>
+              <span class="control-value" id="paddingValueLabel">32px</span>
+            </div>
+            <input type="range" class="slider-range" id="paddingSlider" min="0" max="64" step="4" value="32" />
+          </div>
+
+          <div class="control-group">
+            <div class="control-label-row">
+              <span>Corner Radius</span>
+              <span class="control-value">14px</span>
+            </div>
+            <input type="range" class="slider-range" min="0" max="24" step="2" value="14" />
+          </div>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+
+  <div class="command-overlay" id="commandOverlay">
+    <div class="command-box">
+      <div class="command-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted)"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="commandInput" placeholder="Type a command or action..." autofocus />
+        <span class="kbd-hint">ESC</span>
+      </div>
+      <div class="command-list" id="commandList">
+        <div class="command-item active" data-action="add-zoom">
+          <div class="command-item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/></svg>
+            <span>Add Zoom at Playhead</span>
+          </div>
+          <span class="kbd-hint">Z</span>
+        </div>
+        <div class="command-item" data-action="toggle-play">
+          <div class="command-item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <span>Play / Pause Preview</span>
+          </div>
+          <span class="kbd-hint">Space</span>
+        </div>
+        <div class="command-item" data-action="export">
+          <div class="command-item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/></svg>
+            <span>Export Video...</span>
+          </div>
+          <span class="kbd-hint">⌘E</span>
+        </div>
+        <div class="command-item" data-action="bg-gradient">
+          <div class="command-item-left">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+            <span>Switch to Sunset Gradient</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="exportModal">
+    <div class="export-modal">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="font-size:15px; font-weight:600;">Export Demo Video</h3>
+        <button class="icon-btn" id="closeExportBtn">✕</button>
+      </div>
+      
+      <div id="exportConfigState">
+        <div class="control-group" style="margin-bottom:12px;">
+          <div class="control-label-row"><span>Resolution</span></div>
+          <select class="select-input">
+            <option>1080p (1920 × 1080) — Fast</option>
+            <option>4K (3840 × 2160) — Ultra</option>
+          </select>
+        </div>
+        <div class="control-group" style="margin-bottom:16px;">
+          <div class="control-label-row"><span>Format</span></div>
+          <select class="select-input">
+            <option>MP4 (H.264 Local WebCodecs)</option>
+            <option>WebM (VP9)</option>
+          </select>
+        </div>
+        <button class="btn-primary" id="startRenderBtn" style="width:100%; justify-content:center; padding:9px;">
+          Render Video (Client-Side)
+        </button>
+      </div>
+
+      <div id="exportProgressState" style="display:none; flex-direction:column; gap:12px;">
+        <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-secondary);">
+          <span id="renderFrameLabel">Rendering frame 0 / 360...</span>
+          <span id="renderPercentLabel">0%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar" id="renderProgressBar"></div>
+        </div>
+        <span style="font-size:11px; color:var(--text-muted); text-align:center;">
+          Processing 100% locally in browser memory via Canvas2D & WebCodecs.
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State Model
+    const state = {
+      currentTime: 3.2,
+      duration: 12.0,
+      isPlaying: false,
+      selectedZoomId: 'z1',
+      zooms: [
+        { id: 'z1', time: 3.2, depth: 2.2, duration: 0.7, x: 60, y: 50, ease: 'smooth' },
+        { id: 'z2', time: 7.8, depth: 1.8, duration: 0.7, x: 30, y: 40, ease: 'smooth' }
+      ]
+    };
+
+    // DOM Elements
+    const videoContent = document.getElementById('videoContent');
+    const focalTarget = document.getElementById('focalTarget');
+    const playheadNeedle = document.getElementById('playheadNeedle');
+    const depthSlider = document.getElementById('depthSlider');
+    const depthValueLabel = document.getElementById('depthValueLabel');
+    const headerTime = document.getElementById('headerTime');
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const playIcon = document.getElementById('playIcon');
+    const pauseIcon = document.getElementById('pauseIcon');
+    const zoomInspectorPanel = document.getElementById('zoomInspectorPanel');
+    const canvasInspectorPanel = document.getElementById('canvasInspectorPanel');
+    const toolZoomBtn = document.getElementById('toolZoomBtn');
+    const toolCanvasBtn = document.getElementById('toolCanvasBtn');
+    const commandOverlay = document.getElementById('commandOverlay');
+    const commandInput = document.getElementById('commandInput');
+    const exportModal = document.getElementById('exportModal');
+
+    // Live Camera Transform Updater (Preview equals Export)
+    function updateCameraPreview() {
+      const activeZoom = state.zooms.find(z => Math.abs(state.currentTime - z.time) < 1.5) || state.zooms[0];
+      if (activeZoom && state.currentTime >= activeZoom.time - 0.2) {
+        // Calculate smooth focal camera pan/zoom
+        const scale = activeZoom.depth;
+        const originX = activeZoom.x;
+        const originY = activeZoom.y;
+        videoContent.style.transformOrigin = `${originX}% ${originY}%`;
+        videoContent.style.transform = `scale(${scale})`;
+      } else {
+        videoContent.style.transform = 'scale(1)';
+      }
+    }
+
+    // Update Inspector from Selection
+    function syncInspector() {
+      const current = state.zooms.find(z => z.id === state.selectedZoomId);
+      if (!current) return;
+      depthSlider.value = current.depth;
+      depthValueLabel.textContent = `${current.depth}×`;
+      document.getElementById('coordValueLabel').textContent = `X: ${Math.round(current.x)}% · Y: ${Math.round(current.y)}%`;
+      document.getElementById('zoomIdLabel').textContent = `#${current.id === 'z1' ? '1' : '2'}`;
+      focalTarget.style.left = `${current.x}%`;
+      focalTarget.style.top = `${current.y}%`;
+      focalTarget.querySelector('.focal-tag').textContent = `Zoom ${current.id === 'z1' ? '1' : '2'} · ${current.depth}×`;
+      updateCameraPreview();
+    }
+
+    // Focal Point Drag Interaction on Canvas
+    let isDraggingFocal = false;
+    focalTarget.addEventListener('mousedown', (e) => {
+      isDraggingFocal = true;
+      e.stopPropagation();
+    });
+
+    document.getElementById('videoViewport').addEventListener('mousemove', (e) => {
+      if (!isDraggingFocal) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+      const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+      
+      const current = state.zooms.find(z => z.id === state.selectedZoomId);
+      if (current) {
+        current.x = x;
+        current.y = y;
+        syncInspector();
+      }
+    });
+
+    window.addEventListener('mouseup', () => { isDraggingFocal = false; });
+
+    // Slider Listeners
+    depthSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      depthValueLabel.textContent = `${val.toFixed(1)}×`;
+      const current = state.zooms.find(z => z.id === state.selectedZoomId);
+      if (current) {
+        current.depth = val;
+        syncInspector();
+      }
+    });
+
+    // Timeline Diamonds Selection
+    document.getElementById('diamond1').addEventListener('click', () => {
+      state.selectedZoomId = 'z1';
+      document.getElementById('diamond1').classList.add('selected');
+      document.getElementById('diamond2').classList.remove('selected');
+      state.currentTime = 3.2;
+      seek(3.2);
+      syncInspector();
+    });
+
+    document.getElementById('diamond2').addEventListener('click', () => {
+      state.selectedZoomId = 'z2';
+      document.getElementById('diamond2').classList.add('selected');
+      document.getElementById('diamond1').classList.remove('selected');
+      state.currentTime = 7.8;
+      seek(7.8);
+      syncInspector();
+    });
+
+    // Seek / Time update
+    function seek(time) {
+      state.currentTime = Math.max(0, Math.min(state.duration, time));
+      const percent = (state.currentTime / state.duration) * 100;
+      playheadNeedle.style.left = `${percent}%`;
+      const s = Math.floor(state.currentTime);
+      const ms = Math.floor((state.currentTime % 1) * 10);
+      headerTime.textContent = `00:0${s}.${ms} / 00:12.0`;
+      updateCameraPreview();
+    }
+
+    // Playback loop simulation
+    function togglePlay() {
+      state.isPlaying = !state.isPlaying;
+      playIcon.style.display = state.isPlaying ? 'none' : 'block';
+      pauseIcon.style.display = state.isPlaying ? 'block' : 'none';
+      if (state.isPlaying) animatePlayback();
+    }
+
+    function animatePlayback() {
+      if (!state.isPlaying) return;
+      seek(state.currentTime + 0.05);
+      if (state.currentTime >= state.duration) state.currentTime = 0;
+      requestAnimationFrame(animatePlayback);
+    }
+
+    playPauseBtn.addEventListener('click', togglePlay);
+
+    // Sidebar View Switching
+    toolZoomBtn.addEventListener('click', () => {
+      toolZoomBtn.classList.add('active');
+      toolCanvasBtn.classList.remove('active');
+      zoomInspectorPanel.style.display = 'block';
+      canvasInspectorPanel.style.display = 'none';
+    });
+
+    toolCanvasBtn.addEventListener('click', () => {
+      toolCanvasBtn.classList.add('active');
+      toolZoomBtn.classList.remove('active');
+      zoomInspectorPanel.style.display = 'none';
+      canvasInspectorPanel.style.display = 'block';
+    });
+
+    // Style Inspector: Background Swatches & Padding
+    document.querySelectorAll('.swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+        document.getElementById('canvasStage').style.background = swatch.dataset.bg;
+      });
+    });
+
+    document.getElementById('paddingSlider').addEventListener('input', (e) => {
+      const val = `${e.target.value}px`;
+      document.getElementById('canvasStage').style.padding = val;
+      document.getElementById('paddingValueLabel').textContent = val;
+    });
+
+    // Raycast Command Palette Trigger (⌘K)
+    function toggleCommand(open) {
+      commandOverlay.classList.toggle('open', open);
+      if (open) commandInput.focus();
+    }
+
+    document.getElementById('commandKBtn').addEventListener('click', () => toggleCommand(true));
+    commandOverlay.addEventListener('click', (e) => {
+      if (e.target === commandOverlay) toggleCommand(false);
+    });
+
+    // Keyboard Shortcuts
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        toggleCommand(true);
+      }
+      if (e.key === 'Escape') {
+        toggleCommand(false);
+        exportModal.classList.remove('open');
+      }
+      if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+        e.preventDefault();
+        togglePlay();
+      }
+    });
+
+    // Command Item Actions
+    document.querySelectorAll('.command-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const action = item.dataset.action;
+        toggleCommand(false);
+        if (action === 'toggle-play') togglePlay();
+        if (action === 'export') exportModal.classList.add('open');
+        if (action === 'bg-gradient') {
+          document.getElementById('canvasStage').style.background = 'linear-gradient(135deg, #f43f5e, #fb923c)';
+        }
+      });
+    });
+
+    // Export Flow Simulation
+    document.getElementById('openExportBtn').addEventListener('click', () => {
+      exportModal.classList.add('open');
+    });
+    document.getElementById('closeExportBtn').addEventListener('click', () => {
+      exportModal.classList.remove('open');
+    });
+
+    document.getElementById('startRenderBtn').addEventListener('click', () => {
+      document.getElementById('exportConfigState').style.display = 'none';
+      document.getElementById('exportProgressState').style.display = 'flex';
+      
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress += 4;
+        const frames = Math.floor((progress / 100) * 360);
+        document.getElementById('renderProgressBar').style.width = `${progress}%`;
+        document.getElementById('renderPercentLabel').textContent = `${progress}%`;
+        document.getElementById('renderFrameLabel').textContent = `Rendering frame ${frames} / 360...`;
+
+        if (progress >= 100) {
+          clearInterval(interval);
+          setTimeout(() => {
+            alert('🎉 Render Complete! demo-video.mp4 downloaded locally.');
+            exportModal.classList.remove('open');
+            document.getElementById('exportConfigState').style.display = 'block';
+            document.getElementById('exportProgressState').style.display = 'none';
+          }, 300);
+        }
+      }, 50);
+    });
+
+    // Initialize View
+    syncInspector();
+  </script>
+</body>
+</html>
