@@ -37,6 +37,8 @@ export function RecordModal() {
   const handlesRef = useRef<Awaited<
     ReturnType<typeof startRecording>
   > | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const previewStreamRef = useRef<MediaStream | null>(null);
 
   const { setProject } = useProjectStore();
 
@@ -54,9 +56,34 @@ export function RecordModal() {
       );
   }, []);
 
+  // Start webcam preview when modal opens
+  useEffect(() => {
+    if (!isOpen || state !== "idle") return;
+    let stream: MediaStream | null = null;
+    navigator.mediaDevices
+      .getUserMedia({ video: { width: 320, height: 180 }, audio: false })
+      .then((s) => {
+        stream = s;
+        previewStreamRef.current = s;
+        if (previewVideoRef.current) {
+          previewVideoRef.current.srcObject = s;
+        }
+      })
+      .catch(() => {
+        // Webcam not available — preview stays blank
+      });
+    return () => {
+      stream?.getTracks().forEach((t) => t.stop());
+      previewStreamRef.current = null;
+    };
+  }, [isOpen, state]);
+
   const handleStart = useCallback(async () => {
     try {
       setError(null);
+      // Stop preview stream before starting real recording
+      previewStreamRef.current?.getTracks().forEach((t) => t.stop());
+      previewStreamRef.current = null;
       setState("recording");
       handlesRef.current = await startRecording();
     } catch (err) {
@@ -116,6 +143,15 @@ export function RecordModal() {
               This will capture your screen and optionally
               your webcam + microphone.
             </p>
+            <div className="overflow-hidden rounded-lg bg-gray-800">
+              <video
+                ref={previewVideoRef}
+                autoPlay
+                muted
+                playsInline
+                className="mx-auto w-full max-w-[320px] rounded-lg bg-black"
+              />
+            </div>
             <div className="rounded-lg bg-gray-800 p-4">
               <p className="text-xs text-gray-500">
                 You&apos;ll be asked to select which screen

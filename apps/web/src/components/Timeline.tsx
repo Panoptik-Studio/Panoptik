@@ -29,6 +29,7 @@ export function Timeline() {
     id: string;
     committed: boolean;
   } | null>(null);
+  const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
 
   const {
     project,
@@ -37,6 +38,8 @@ export function Timeline() {
     selectedZoomId,
     setSelectedZoom,
     updateZoomPoint,
+    removeZoomPoint,
+    removeStagedZoom,
   } = useProjectStore();
 
   const duration = project?.clip.duration ?? 10;
@@ -202,9 +205,23 @@ export function Timeline() {
             onPointerDown={(e) =>
               handleDiamondPointerDown(e, zp.id, true)
             }
+            onMouseEnter={() => setHoveredDiamond(zp.id)}
+            onMouseLeave={() => setHoveredDiamond(null)}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="h-full w-full rounded-sm border border-emerald-400 bg-emerald-500/80" />
+            {hoveredDiamond === zp.id && !draggingDiamond && (
+              <button
+                className="absolute -right-3 -top-3 z-20 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[8px] text-white hover:bg-red-500"
+                style={{ transform: "rotate(-45deg)" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeZoomPoint(zp.id);
+                }}
+              >
+                x
+              </button>
+            )}
           </div>
         ))}
 
@@ -212,7 +229,11 @@ export function Timeline() {
         {stagedZooms.map((zp) => (
           <div
             key={zp.id}
-            className="absolute z-10 cursor-grab"
+            className={`absolute z-10 cursor-grab ${
+              selectedZoomId === zp.id
+                ? "ring-2 ring-white"
+                : ""
+            }`}
             style={{
               left: `${timeToX(zp.t, 100)}%`,
               top: TRACK_HEIGHT / 2 - DIAMOND_SIZE,
@@ -223,9 +244,23 @@ export function Timeline() {
             onPointerDown={(e) =>
               handleDiamondPointerDown(e, zp.id, false)
             }
+            onMouseEnter={() => setHoveredDiamond(zp.id)}
+            onMouseLeave={() => setHoveredDiamond(null)}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="h-full w-full rounded-sm border-2 border-dashed border-amber-400 bg-amber-500/30" />
+            {hoveredDiamond === zp.id && !draggingDiamond && (
+              <button
+                className="absolute -right-3 -top-3 z-20 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[8px] text-white hover:bg-red-500"
+                style={{ transform: "rotate(-45deg)" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeStagedZoom(zp.id);
+                }}
+              >
+                x
+              </button>
+            )}
           </div>
         ))}
       </div>

@@ -52,6 +52,7 @@ interface ProjectStore {
   currentTime: number;
   selectedZoomId: string | null;
   pendingBackgroundBadge: boolean;
+  whisperProgress: number | null; // null = idle, -1 = transcribing, 0-100 = model loading
 
   // Project lifecycle
   setProject: (project: Project) => void;
@@ -68,6 +69,7 @@ interface ProjectStore {
   removeZoomPoint: (id: string) => void;
   updateZoomPoint: (id: string, updates: Partial<ZoomPoint>) => void;
   setSelectedZoom: (id: string | null) => void;
+  commitDrag: () => void;
 
   // Zoom — staging
   stageZoomProposals: (proposals: ZoomPoint[]) => void;
@@ -111,6 +113,9 @@ interface ProjectStore {
 
   // Moment marks (M key during playback → click log)
   markMoment: (t: number) => void;
+
+  // Whisper progress (for agent-triggered runs)
+  setWhisperProgress: (p: number | null) => void;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -121,6 +126,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   currentTime: 0,
   selectedZoomId: null,
   pendingBackgroundBadge: false,
+  whisperProgress: null,
 
   // ── Project lifecycle ──
 
@@ -195,13 +201,34 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   updateZoomPoint: (id, updates) => {
     const state = get();
     if (!state.project) return;
+    const inCommitted = state.project.zoomPoints.some((z) => z.id === id);
     const project = {
       ...state.project,
-      zoomPoints: state.project.zoomPoints.map((z) =>
-        z.id === id ? { ...z, ...updates } : z,
-      ),
+      zoomPoints: inCommitted
+        ? state.project.zoomPoints.map((z) =>
+            z.id === id ? { ...z, ...updates } : z,
+          )
+        : state.project.zoomPoints,
+      stagedZoomPoints: !inCommitted
+        ? state.project.stagedZoomPoints.map((z) =>
+            z.id === id ? { ...z, ...updates } : z,
+          )
+        : state.project.stagedZoomPoints,
     };
     set({ project });
+  },
+
+  commitDrag: () => {
+    const state = get();
+    if (!state.project) return;
+    const history = [
+      ...state.history.slice(0, state.historyIndex + 1),
+      snapshot(state.project),
+    ];
+    set({
+      history,
+      historyIndex: history.length - 1,
+    });
   },
 
   setSelectedZoom: (id) => set({ selectedZoomId: id }),
@@ -523,4 +550,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     };
     set({ project });
   },
+
+  setWhisperProgress: (p) => set({ whisperProgress: p }),
 }));

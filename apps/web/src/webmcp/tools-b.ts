@@ -274,11 +274,16 @@ export function registerEditingTools(): void {
           const blob = new Blob([workerCode], { type: "application/javascript" });
           const worker = new Worker(URL.createObjectURL(blob));
           worker.onmessage = (e) => {
+            if (e.data.type === "progress") {
+              useProjectStore.getState().setWhisperProgress(e.data.progress);
+            }
             if (e.data.type === "result") {
+              useProjectStore.getState().setWhisperProgress(null);
               resolve(e.data.captions);
               worker.terminate();
             }
             if (e.data.type === "error") {
+              useProjectStore.getState().setWhisperProgress(null);
               reject(new Error(e.data.error));
               worker.terminate();
             }

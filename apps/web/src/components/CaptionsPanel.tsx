@@ -10,17 +10,20 @@ import { useProjectStore } from "@/stores/projectStore";
 import { extractMono16k } from "@/lib/audio16k";
 
 export function CaptionsPanel() {
-  const { project, stageCaptions, clearStagedCaptions } =
+  const { project, stageCaptions, clearStagedCaptions, whisperProgress } =
     useProjectStore();
-  const [progress, setProgress] = useState<number | null>(
+  const [localProgress, setLocalProgress] = useState<number | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
+  // Use local progress when generating locally, store progress when agent-triggered
+  const progress = localProgress ?? whisperProgress;
+
   const handleGenerate = useCallback(async () => {
     if (!project) return;
-    setProgress(0);
+    setLocalProgress(0);
     setError(null);
 
     try {
@@ -47,7 +50,7 @@ export function CaptionsPanel() {
 
       if (!audioBuffer) {
         setError("No audio track found in clip.");
-        setProgress(null);
+        setLocalProgress(null);
         return;
       }
 
@@ -81,17 +84,17 @@ export function CaptionsPanel() {
       worker.onmessage = (e) => {
         const msg = e.data;
         if (msg.type === "progress") {
-          setProgress(msg.progress);
+          setLocalProgress(msg.progress);
         }
         if (msg.type === "result") {
           stageCaptions(msg.captions);
-          setProgress(null);
+          setLocalProgress(null);
           worker.terminate();
           workerRef.current = null;
         }
         if (msg.type === "error") {
           setError(msg.error);
-          setProgress(null);
+          setLocalProgress(null);
           worker.terminate();
           workerRef.current = null;
         }
@@ -103,7 +106,7 @@ export function CaptionsPanel() {
       });
     } catch (err) {
       setError(String(err));
-      setProgress(null);
+      setLocalProgress(null);
     }
   }, [project, stageCaptions]);
 

@@ -68,6 +68,8 @@ export function PreviewCanvas() {
     pause,
     addZoomPoint,
     updateZoomPoint,
+    commitDrag,
+    markMoment,
     undo,
     redo,
   } = useProjectStore();
@@ -125,7 +127,7 @@ export function PreviewCanvas() {
     return () => cancelAnimationFrame(rafRef.current);
   }, [project]);
 
-  // ── Keyboard undo/redo (Phase 2.4) ──
+  // ── Keyboard undo/redo + moment mark (Phase 2.4 + 3.3) ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -140,6 +142,19 @@ export function PreviewCanvas() {
       if (mod && e.key === "y") {
         e.preventDefault();
         redo();
+      }
+      // M key during playback → mark moment
+      if (
+        e.key === "m" &&
+        !mod &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.target as HTMLElement).tagName !== "INPUT"
+      ) {
+        const st = useProjectStore.getState();
+        if (st.project && st.isPlaying) {
+          st.markMoment(st.currentTime);
+        }
       }
     };
     window.addEventListener("keydown", handler);
@@ -253,8 +268,11 @@ export function PreviewCanvas() {
   );
 
   const handlePointerUp = useCallback(() => {
+    if (dragging) {
+      commitDrag();
+    }
     setDragging(null);
-  }, []);
+  }, [dragging, commitDrag]);
 
   // ── Canvas sizing ──
   const [canvasSize, setCanvasSize] = useState({
