@@ -8,6 +8,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { extractMono16k } from "@/lib/audio16k";
+import { postProcessCaptions } from "@/lib/captionChunker";
 
 export function CaptionsPanel() {
   const { project, stageCaptions, clearStagedCaptions, whisperProgress } =
@@ -87,7 +88,7 @@ export function CaptionsPanel() {
           setLocalProgress(msg.progress);
         }
         if (msg.type === "result") {
-          stageCaptions(msg.captions);
+          stageCaptions(postProcessCaptions(msg.captions));
           setLocalProgress(null);
           worker.terminate();
           workerRef.current = null;

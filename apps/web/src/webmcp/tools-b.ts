@@ -7,6 +7,7 @@
 import { registerToolWithLifecycle } from "./lifecycle";
 import { useProjectStore } from "../stores/projectStore";
 import { showConfirmDialog } from "./confirm";
+import { postProcessCaptions } from "../lib/captionChunker";
 
 function generateId(): string {
   return (
@@ -294,7 +295,7 @@ export function registerEditingTools(): void {
           });
         });
 
-        store.stageCaptions(captions);
+        store.stageCaptions(postProcessCaptions(captions));
         return {
           stagedCount: captions.length,
           preview: captions

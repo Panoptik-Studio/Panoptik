@@ -81,6 +81,10 @@ export function PreviewCanvas() {
     startY: number;
   } | null>(null);
 
+  // Toast state (moment mark feedback)
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
+
   // ── Frame rect computation ──
   const getFrameRect = useCallback((): FrameRect | null => {
     const canvas = canvasRef.current;
@@ -154,6 +158,10 @@ export function PreviewCanvas() {
         const st = useProjectStore.getState();
         if (st.project && st.isPlaying) {
           st.markMoment(st.currentTime);
+          // Show toast
+          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+          setToast(`Moment marked at ${st.currentTime.toFixed(1)}s`);
+          toastTimerRef.current = setTimeout(() => setToast(null), 1500);
         }
       }
     };
@@ -329,7 +337,7 @@ export function PreviewCanvas() {
   return (
     <div
       ref={containerRef}
-      className="flex h-full w-full items-center justify-center bg-black"
+      className="relative flex h-full w-full items-center justify-center bg-black"
       onDrop={handleDrop}
       onDragOver={handleDragOver}
     >
@@ -343,6 +351,11 @@ export function PreviewCanvas() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       />
+      {toast && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-900 shadow-lg">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
