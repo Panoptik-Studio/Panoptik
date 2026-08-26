@@ -5,9 +5,9 @@
  */
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
-import { engine } from "@/lib/engineProvider";
+import { useVideoExport } from "@/lib/useVideoExport";
 import type { ExportOpts } from "@panoptik/schema";
 
 const RESOLUTIONS: ExportOpts["resolution"][] = ["720p", "1080p", "4k"];
@@ -18,46 +18,8 @@ export function ExportPanel() {
   const [resolution, setResolution] = useState<ExportOpts["resolution"]>("1080p");
   const [format, setFormat] = useState<ExportOpts["format"]>("mp4");
   const [burnCaptions, setBurnCaptions] = useState(true);
-  const [progress, setProgress] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ url: string; size: number } | null>(null);
-  const resultRef = useRef<string | null>(null);
-
-  // The engine reports progress by event so the encode loop stays decoupled.
-  useEffect(() => {
-    const onProgress = (e: Event) => setProgress((e as CustomEvent<number>).detail);
-    window.addEventListener("export-progress", onProgress);
-    return () => window.removeEventListener("export-progress", onProgress);
-  }, []);
-
-  // Object URLs outlive the component unless revoked.
-  useEffect(
-    () => () => {
-      if (resultRef.current) URL.revokeObjectURL(resultRef.current);
-    },
-    [],
-  );
-
-  const handleExport = useCallback(async () => {
-    if (!project) return;
-    setError(null);
-    setProgress(0);
-    if (resultRef.current) {
-      URL.revokeObjectURL(resultRef.current);
-      resultRef.current = null;
-    }
-    setResult(null);
-    try {
-      const blob = await engine.exportProject(project, { format, resolution, burnCaptions });
-      const url = URL.createObjectURL(blob);
-      resultRef.current = url;
-      setResult({ url, size: blob.size });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setProgress(null);
-    }
-  }, [project, format, resolution, burnCaptions]);
+  const { progress, error, result, run, isExporting } = useVideoExport();
+  const handleExport = () => run({ format, resolution, burnCaptions });
 
   if (!project) {
     return (
@@ -68,7 +30,7 @@ export function ExportPanel() {
     );
   }
 
-  const busy = progress !== null;
+  const busy = isExporting;
 
   return (
     <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
@@ -146,7 +108,7 @@ export function ExportPanel() {
       {result && (
         <a
           href={result.url}
-          download={`panoptik.${format}`}
+          download={`panoptik-${resolution}.${result.format}`}
           className="mt-2 flex items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-medium transition-colors hover:border-[#0070f3] hover:text-[#0070f3]"
           style={{ borderColor: "#ebebeb", color: "#171717" }}
         >

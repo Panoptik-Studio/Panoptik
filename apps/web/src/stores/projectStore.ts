@@ -24,6 +24,19 @@ type HistoryEntry = {
   background: Background;
 };
 
+/** Within this of the duration counts as "at the end" — the playhead lands on
+ *  exactly duration, but float drift and frame steps can leave it just short. */
+const END_EPSILON = 0.05;
+
+/**
+ * Playback parks the playhead at the end of the clip. Pressing play there would
+ * otherwise finish instantly, so start over instead.
+ */
+function rewindIfEnded(s: { project: Project | null; currentTime: number }) {
+  const duration = s.project?.clip.duration ?? 0;
+  return duration > 0 && s.currentTime >= duration - END_EPSILON ? { currentTime: 0 } : {};
+}
+
 function snapshot(project: Project): HistoryEntry {
   return {
     zoomPoints: project.zoomPoints.map((z) => ({ ...z })),
@@ -156,9 +169,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   // ── Playback ──
 
-  play: () => set({ isPlaying: true }),
+  play: () => set((s) => ({ isPlaying: true, ...rewindIfEnded(s) })),
   pause: () => set({ isPlaying: false }),
-  togglePlay: () => set((s) => ({ isPlaying: !s.isPlaying })),
+  togglePlay: () =>
+    set((s) => (s.isPlaying ? { isPlaying: false } : { isPlaying: true, ...rewindIfEnded(s) })),
   seek: (t) => set({ currentTime: t, isPlaying: false }),
   setCurrentTime: (t) => set({ currentTime: t }),
 

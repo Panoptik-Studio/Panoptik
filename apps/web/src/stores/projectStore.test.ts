@@ -187,6 +187,40 @@ describe("projectStore", () => {
     expect(useProjectStore.getState().isPlaying).toBe(false);
   });
 
+  it("play restarts from the top once the clip has finished", () => {
+    const duration = useProjectStore.getState().project!.clip.duration;
+    // Playback parks the playhead at the end; play there should replay, not
+    // sit at the end and stop again immediately.
+    useProjectStore.getState().setCurrentTime(duration);
+    useProjectStore.getState().play();
+    expect(useProjectStore.getState().currentTime).toBe(0);
+    expect(useProjectStore.getState().isPlaying).toBe(true);
+  });
+
+  it("togglePlay also restarts from the end", () => {
+    const duration = useProjectStore.getState().project!.clip.duration;
+    useProjectStore.getState().setCurrentTime(duration);
+    useProjectStore.getState().togglePlay();
+    expect(useProjectStore.getState().currentTime).toBe(0);
+    expect(useProjectStore.getState().isPlaying).toBe(true);
+  });
+
+  it("play mid-clip resumes where it was", () => {
+    useProjectStore.getState().setCurrentTime(3);
+    useProjectStore.getState().play();
+    expect(useProjectStore.getState().currentTime).toBe(3);
+  });
+
+  it("pausing at the end does not rewind", () => {
+    const duration = useProjectStore.getState().project!.clip.duration;
+    useProjectStore.getState().setCurrentTime(duration);
+    useProjectStore.getState().play();
+    useProjectStore.getState().setCurrentTime(duration);
+    useProjectStore.getState().togglePlay(); // pause
+    expect(useProjectStore.getState().isPlaying).toBe(false);
+    expect(useProjectStore.getState().currentTime).toBe(duration);
+  });
+
   it("seek sets time and pauses", () => {
     useProjectStore.getState().play();
     useProjectStore.getState().seek(5.5);

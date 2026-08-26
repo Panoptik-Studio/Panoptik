@@ -6,6 +6,7 @@
 "use client";
 
 import { useProjectStore } from "@/stores/projectStore";
+import { useVideoExport } from "@/lib/useVideoExport";
 
 function fmtTime(s: number): string {
   const m = Math.floor(s / 60);
@@ -30,6 +31,7 @@ export function Toolbar() {
   const redo = useProjectStore((s) => s.redo);
   const canUndo = useProjectStore((s) => s.historyIndex > 0);
   const canRedo = useProjectStore((s) => s.historyIndex < s.history.length - 1);
+  const quickExport = useVideoExport();
 
   const dur = project?.clip.duration ?? 0;
   const hasProject = project !== null;
@@ -152,16 +154,29 @@ export function Toolbar() {
           ⌘K
         </button>
 
-        {/* Primary CTA — black pill, blue hover */}
+        {/* Primary CTA — quick 720p export straight to a download. The panel
+            in the sidebar is where resolution and format are chosen. */}
         <button
-          className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium text-white transition-colors"
+          onClick={() => quickExport.run({ format: "mp4", resolution: "720p", burnCaptions: true }, { download: true })}
+          disabled={!project || quickExport.isExporting}
+          title={project ? "Export 720p MP4 — use the Export panel for other options" : "Load a clip first"}
+          className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium text-white transition-colors disabled:opacity-50"
           style={{ background: "#171717", height: 32 }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "#0070f3"; }}
+          onMouseEnter={(e) => { if (project && !quickExport.isExporting) e.currentTarget.style.background = "#0070f3"; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = "#171717"; }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-          <span className="hidden sm:inline">Export Video</span>
-          <span className="sm:hidden">Export</span>
+          {quickExport.isExporting ? (
+            <>
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              <span className="tabular-nums">{Math.round((quickExport.progress ?? 0) * 100)}%</span>
+            </>
+          ) : (
+            <>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+              <span className="hidden sm:inline">Export Video</span>
+              <span className="sm:hidden">Export</span>
+            </>
+          )}
         </button>
       </div>
     </header>
