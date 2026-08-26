@@ -65,6 +65,7 @@ export function PreviewCanvas() {
   // Selectors only — a full-store subscription would re-render this component
   // on every currentTime tick during playback.
   const project = useProjectStore((s) => s.project);
+  const stagePadding = useProjectStore((s) => s.stagePadding);
   const addZoomPoint = useProjectStore((s) => s.addZoomPoint);
   const updateZoomPoint = useProjectStore((s) => s.updateZoomPoint);
   const commitDrag = useProjectStore((s) => s.commitDrag);
@@ -453,7 +454,7 @@ export function PreviewCanvas() {
     >
       {/* Vercel mesh halo behind stage */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ background: "radial-gradient(700px 420px at 50% 38%, rgba(0,124,240,0.18) 0%, transparent 60%), radial-gradient(560px 360px at 82% 78%, rgba(255,0,128,0.12) 0%, transparent 62%)" }} />
-      <div className="relative flex items-center justify-center overflow-hidden rounded-xl border bg-white p-4 shadow-vercel-4" style={{ borderColor: "#ebebeb", ...stageStyle }}>
+      <div className="relative flex items-center justify-center overflow-hidden rounded-xl border bg-white shadow-vercel-4" style={{ borderColor: "#ebebeb", padding: stagePadding, ...stageStyle }}>
         <div className="overflow-hidden rounded-lg bg-black shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/15">
           <canvas
             ref={canvasRef}

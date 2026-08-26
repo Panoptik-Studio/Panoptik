@@ -12,10 +12,12 @@ import { Inspector } from "@/components/Inspector";
 import { PreviewCanvas } from "@/components/PreviewCanvas";
 import { ProjectBrowser } from "@/components/ProjectBrowser";
 import { RecordModal } from "@/components/RecordModal";
+import { StageControls } from "@/components/StageControls";
 import { StagingPanel } from "@/components/StagingPanel";
 import { Timeline } from "@/components/Timeline";
 import { ToolTrace } from "@/components/ToolTrace";
 import { Toolbar } from "@/components/Toolbar";
+import { ZoomPanel } from "@/components/ZoomPanel";
 
 export default function EditorPage() {
   return (
@@ -47,6 +49,8 @@ export default function EditorPage() {
         {/* Right — white cards on soft canvas */}
         <aside className="flex w-[320px] shrink-0 flex-col overflow-y-auto border-l bg-white" style={{ borderColor: "#ebebeb", scrollbarGutter: "stable" }}>
           <StagingPanel />
+          <ZoomPanel />
+          <StageControls />
           <ProjectBrowser />
           <CaptionsSlot />
           <Inspector />

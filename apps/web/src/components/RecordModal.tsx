@@ -482,7 +482,7 @@ export function RecordModal() {
                     <p className="font-mono text-[10px]" style={{ color: "#888" }}>Enable camera or check permissions</p>
                   </div>
                 )}
-                <div className={`absolute left-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium tracking-wide backdrop-blur ${pipHasVideo ? "bg-black/55 text-white" : "bg-white/90 text-[#171717] border"}`} style={pipHasVideo ? {} : { borderColor: "#ebebeb" }}>● {shape}</div>
+
               </div>
             )}
 

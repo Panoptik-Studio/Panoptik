@@ -13,6 +13,7 @@ import type {
   Caption,
   Background,
   ClickEvent,
+  AspectPreset,
 } from "@panoptik/schema";
 
 type HistoryEntry = {
@@ -53,6 +54,7 @@ interface ProjectStore {
   selectedZoomId: string | null;
   pendingBackgroundBadge: boolean;
   whisperProgress: number | null; // null = idle, -1 = transcribing, 0-100 = model loading
+  stagePadding: number; // p-4 = 16, p-2 = 8, p-8 = 32 etc — white space around black video container
 
   // Project lifecycle
   setProject: (project: Project) => void;
@@ -116,6 +118,10 @@ interface ProjectStore {
 
   // Whisper progress (for agent-triggered runs)
   setWhisperProgress: (p: number | null) => void;
+
+  // Stage UI
+  setStagePadding: (n: number) => void;
+  setAspectPreset: (preset: AspectPreset) => void;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -127,6 +133,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   selectedZoomId: null,
   pendingBackgroundBadge: false,
   whisperProgress: null,
+  stagePadding: 16,
 
   // ── Project lifecycle ──
 
@@ -552,4 +559,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   setWhisperProgress: (p) => set({ whisperProgress: p }),
+
+  setStagePadding: (n) => set({ stagePadding: Math.max(0, Math.min(48, n)) }),
+
+  setAspectPreset: (preset) => {
+    const s = get();
+    if (!s.project) return;
+    set({ project: { ...s.project, aspectPreset: preset } });
+  },
 }));
