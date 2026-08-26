@@ -31,6 +31,27 @@ export type StartRecordingOpts = {
   microphoneEnabled?: boolean;
 };
 
+/** Longest we wait for a recorder's final chunk before giving up on it. */
+const FLUSH_TIMEOUT_MS = 4000;
+
+/** Stop a recorder and resolve once its last chunk has been delivered. */
+function flushRecorder(rec: MediaRecorder | null): Promise<void> {
+  if (!rec || rec.state === "inactive") return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, FLUSH_TIMEOUT_MS);
+    rec.addEventListener("stop", done, { once: true });
+    try {
+      rec.stop();
+    } catch {
+      done();
+    }
+  });
+}
+
 export async function startRecording(opts: StartRecordingOpts = {}): Promise<RecordingHandles> {
   const {
     layout = "screenAndCamera",
@@ -173,22 +194,14 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     layout,
     shape,
     stop: async () => {
-      if (screenRecorder && screenRecorder.state !== "inactive") screenRecorder.stop();
-      if (facecamRecorder && facecamRecorder.state !== "inactive") facecamRecorder.stop();
+      // Wait for the "stop" event, which the spec fires only after the final
+      // dataavailable. Polling `state` instead would resolve immediately —
+      // `stop()` flips it to "inactive" synchronously — and drop the last chunk.
+      await Promise.all([flushRecorder(screenRecorder), flushRecorder(facecamRecorder)]);
 
+      // Only now release the devices; stopping tracks first can truncate the tail.
       screen.getTracks().forEach((t) => t.stop());
       facecam.getTracks().forEach((t) => t.stop());
-
-      // Wait for flush
-      await new Promise<void>((resolve) => {
-        const check = () => {
-          const sDone = !screenRecorder || screenRecorder.state === "inactive";
-          const fDone = !facecamRecorder || facecamRecorder.state === "inactive";
-          if (sDone && fDone) resolve();
-          else setTimeout(check, 50);
-        };
-        check();
-      });
 
       return {
         screenBlob: new Blob(screenChunks, { type: screenRecorder?.mimeType || "video/webm" }),

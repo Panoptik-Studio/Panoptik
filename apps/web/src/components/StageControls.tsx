@@ -15,6 +15,20 @@ const THEMES: { name: string; bg: { kind: "solid" | "gradient"; color?: string; 
   { name: "Paper", bg: { kind: "solid", color: "#ffffff" }, swatch: "#ffffff" },
 ];
 
+/** Webcam tracks are 16:9; the PiP keeps that aspect while `size` scales its width. */
+const CAMERA_ASPECT = 16 / 9;
+
+/**
+ * Facecam top-left (0-1) for each corner. `size` is a fraction of canvas width,
+ * so the height inset goes through both the canvas and camera aspects.
+ */
+const CAMERA_CORNERS = [
+  { id: "topLeft", label: "Top left", at: () => ({ x: 0.03, y: 0.03 }) },
+  { id: "topRight", label: "Top right", at: (s: number) => ({ x: 0.97 - s, y: 0.03 }) },
+  { id: "bottomLeft", label: "Bottom left", at: (s: number, h: number) => ({ x: 0.03, y: 0.97 - h }) },
+  { id: "bottomRight", label: "Bottom right", at: (s: number, h: number) => ({ x: 0.97 - s, y: 0.97 - h }) },
+] as const;
+
 export function StageControls() {
   const project = useProjectStore((s) => s.project);
   const stagePadding = useProjectStore((s) => s.stagePadding);
@@ -22,6 +36,10 @@ export function StageControls() {
   const stageBackground = useProjectStore((s) => s.stageBackground);
   const setBackground = useProjectStore((s) => s.setBackground);
   const setAspectPreset = useProjectStore((s) => s.setAspectPreset);
+  const setFacecam = useProjectStore((s) => s.setFacecam);
+
+  const camHeightFraction = (size: number) =>
+    project ? (size * (project.clip.width / project.clip.height)) / CAMERA_ASPECT : size;
 
   if (!project) {
     return (
@@ -73,6 +91,84 @@ export function StageControls() {
         </div>
       </div>
 
+      {/* Camera — only meaningful once a recording carried a facecam track */}
+      {project.facecam.src && (
+        <div className="mb-4">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-xs font-medium" style={{ color: "#4d4d4d" }}>Camera</span>
+            <span className="font-mono text-[11px]" style={{ color: "#888" }}>
+              {Math.round(project.facecam.size * 100)}%
+            </span>
+          </div>
+          <div className="mb-2 grid grid-cols-4 gap-1.5">
+            {CAMERA_CORNERS.map((c) => {
+              const size = project.facecam.size;
+              const target = c.at(size, camHeightFraction(size));
+              const active =
+                Math.abs(project.facecam.x - target.x) < 0.02 &&
+                Math.abs(project.facecam.y - target.y) < 0.02;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setFacecam(target)}
+                  title={c.label}
+                  aria-label={c.label}
+                  aria-pressed={active}
+                  className="rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors"
+                  style={{
+                    background: active ? "#171717" : "#ffffff",
+                    borderColor: active ? "#171717" : "#ebebeb",
+                    color: active ? "#ffffff" : "#4d4d4d",
+                  }}
+                >
+                  {c.label.split(" ")[0]![0]}
+                  {c.label.split(" ")[1]![0]}
+                </button>
+              );
+            })}
+          </div>
+          <input
+            type="range"
+            min={0.1}
+            max={0.4}
+            step={0.01}
+            value={project.facecam.size}
+            onChange={(e) => {
+              const size = Number(e.target.value);
+              // Keep the bubble pinned to whichever edge it is nearest as it grows.
+              const hFrac = camHeightFraction(size);
+              setFacecam({
+                size,
+                x: project.facecam.x > 0.5 ? 0.97 - size : project.facecam.x,
+                y: project.facecam.y > 0.5 ? 0.97 - hFrac : project.facecam.y,
+              });
+            }}
+            className="h-1 w-full appearance-none rounded-full accent-[#171717]"
+            style={{ background: "#ebebeb" }}
+            aria-label="Camera size"
+          />
+          <div className="mt-2 flex gap-1.5">
+            {(["circle", "square"] as const).map((s) => {
+              const active = (project.facecam.shape ?? "square") === s;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setFacecam({ shape: s })}
+                  className="flex-1 rounded-full border px-2 py-1 text-[11px] font-medium capitalize transition-colors"
+                  style={{
+                    background: active ? "#171717" : "#ffffff",
+                    borderColor: active ? "#171717" : "#ebebeb",
+                    color: active ? "#ffffff" : "#4d4d4d",
+                  }}
+                >
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Themes — beautiful presets for stage background (gradient/solid) */}
       <div>
         <p className="mb-1.5 text-xs font-medium" style={{ color: "#4d4d4d" }}>Theme</p>
@@ -80,7 +176,10 @@ export function StageControls() {
           {THEMES.map((t) => {
             const isActive =
               t.bg.kind === "gradient"
-                ? project.background.kind === "gradient" && (project.background as { stops: [string, string] }).stops[0] === t.bg.stops![0]
+                // Both stops must match: Vercel and Ocean share their first one.
+                ? project.background.kind === "gradient" &&
+                  (project.background as { stops: [string, string] }).stops[0] === t.bg.stops![0] &&
+                  (project.background as { stops: [string, string] }).stops[1] === t.bg.stops![1]
                 : project.background.kind === "solid" && (project.background as { color: string }).color === t.bg.color;
             return (
               <button

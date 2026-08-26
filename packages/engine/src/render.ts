@@ -13,18 +13,85 @@ export type Transform = { scale: number; x: number; y: number };
 export const IDENTITY: Transform = { scale: 1, x: 0.5, y: 0.5 };
 
 export function getCameraTransform(points: ZoomPoint[], t: number): Transform {
+  // Pure, timestamp-based, no allocations in hot path beyond filter/sort (points are small).
+  // Sequential fold: each keyframe eases from previous state → k.to over k.dur, then holds.
+  // This naturally glides between consecutive zooms without snapping to 1x.
   let state = IDENTITY;
-  for (const k of [...points].filter((p) => !p.staged).sort((a, b) => a.t - b.t)) {
+  // Filter staged and sort once — zoomPoints are typically <20, so sort is cheap.
+  // Avoid extra spread by filtering then sorting in place.
+  const active = points.filter((p) => !p.staged);
+  active.sort((a, b) => a.t - b.t);
+  for (const k of active) {
     if (k.t > t) break;
-    const p = Math.min(1, (t - k.t) / Math.max(k.dur, 0.001));
-    const e = (EASINGS[k.ease] ?? easeInOutCubic)(p);
+    const progress = Math.min(1, (t - k.t) / Math.max(k.dur, 0.001));
+    const eased = (EASINGS[k.ease] ?? easeInOutCubic)(progress);
     state = {
-      scale: lerp(state.scale, k.to.scale, e),
-      x: lerp(state.x, k.to.x, e),
-      y: lerp(state.y, k.to.y, e),
+      scale: lerp(state.scale, k.to.scale, eased),
+      x: lerp(state.x, k.to.x, eased),
+      y: lerp(state.y, k.to.y, eased),
     };
   }
   return state;
+}
+
+// Alias for spec naming — same deterministic function
+export const getCameraStateAtTime = getCameraTransform;
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+export type Viewport = {
+  /** Magnification actually applied, never below 1. */
+  scale: number;
+  /** Focal point in FRAME space, clamped so the view never leaves the frame. */
+  cx: number;
+  cy: number;
+};
+
+/**
+ * Resolve a camera transform against a frame rect: the focal point lands at the
+ * centre of the frame magnified by `scale`, pulled back just far enough that the
+ * visible window stays inside the frame (no empty edges).
+ */
+export function cameraViewport(
+  rect: { w: number; h: number },
+  cam: Transform,
+): Viewport {
+  const scale = Math.max(1, cam.scale);
+  const viewW = rect.w / scale;
+  const viewH = rect.h / scale;
+  return {
+    scale,
+    cx: clamp(cam.x * rect.w, viewW / 2, rect.w - viewW / 2),
+    cy: clamp(cam.y * rect.h, viewH / 2, rect.h - viewH / 2),
+  };
+}
+
+/** Frame-space point → canvas x, under the camera. Inverse of {@link canvasToFrame}. */
+export function frameToCanvas(
+  rect: { x: number; y: number; w: number; h: number },
+  view: Viewport,
+  fx: number,
+  fy: number,
+): { x: number; y: number } {
+  return {
+    x: rect.x + rect.w / 2 + (fx - view.cx) * view.scale,
+    y: rect.y + rect.h / 2 + (fy - view.cy) * view.scale,
+  };
+}
+
+/** Canvas point → frame-space, under the camera. Inverse of {@link frameToCanvas}. */
+export function canvasToFrame(
+  rect: { x: number; y: number; w: number; h: number },
+  view: Viewport,
+  px: number,
+  py: number,
+): { x: number; y: number } {
+  return {
+    x: view.cx + (px - rect.x - rect.w / 2) / view.scale,
+    y: view.cy + (py - rect.y - rect.h / 2) / view.scale,
+  };
 }
 
 // ── Decoded frame cache (set by decode.ts via setCurrentFrame) ──
@@ -53,16 +120,20 @@ export function renderFrame(
   // ── Layer 1: Background ──
   drawBackground(ctx, project, w, h);
 
-  // ── Layer 2: Letterboxed frame with camera zoom ──
+  // ── Layer 2: Letterboxed frame with camera zoom (virtual camera, clamped, aspect-aware) ──
   const rect = frameRect(w, h, project.clip.width, project.clip.height, project.aspectPreset);
   if (currentFrame) {
-    const tr = getCameraTransform(project.zoomPoints, t);
-    const fx = rect.x + tr.x * rect.w;
-    const fy = rect.y + tr.y * rect.h;
+    const view = cameraViewport(rect, getCameraTransform(project.zoomPoints, t));
     ctx.save();
-    ctx.translate(fx, fy);
-    ctx.scale(tr.scale, tr.scale);
-    ctx.translate(-fx, -fy);
+    // Clip first: at a non-native aspect preset the magnified frame would
+    // otherwise spill out of the letterbox and cover the background.
+    ctx.beginPath();
+    ctx.rect(rect.x, rect.y, rect.w, rect.h);
+    ctx.clip();
+    // Put the focal point at the centre of the frame, magnified by scale.
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(view.scale, view.scale);
+    ctx.translate(-(rect.x + view.cx), -(rect.y + view.cy));
     ctx.drawImage(currentFrame, rect.x, rect.y, rect.w, rect.h);
     ctx.restore();
   } else {
@@ -176,11 +247,12 @@ function drawFacecam(
   if (!video) return;
   // Need at least HAVE_CURRENT_DATA to show a frame
   if (video.readyState < 2) return;
-  // Seek to time within duration (loop)
+  // Follow the timeline. Past the camera track's end we hold its last frame —
+  // wrapping would replay the take's opening over its ending.
   try {
     const dur = video.duration;
     if (isFinite(dur) && dur > 0) {
-      const target = t % dur;
+      const target = Math.min(t, dur - 1e-3);
       // Only seek if far enough to avoid thrashing (16ms ~ 1 frame)
       if (Math.abs(video.currentTime - target) > 0.05) {
         video.currentTime = target;
@@ -196,8 +268,8 @@ function drawFacecam(
   const x = Math.round(canvasW * fc.x);
   const y = Math.round(canvasH * fc.y);
   // Clamp inside canvas
-  const clampedX = Math.min(x, canvasW - pipW);
-  const clampedY = Math.min(y, canvasH - pipH);
+  const clampedX = clamp(x, 0, Math.max(0, canvasW - pipW));
+  const clampedY = clamp(y, 0, Math.max(0, canvasH - pipH));
 
   const shape = (fc as { shape?: string }).shape === "circle" ? "circle" : "square";
   const radius = shape === "circle" ? Math.min(pipW, pipH) / 2 : 12;

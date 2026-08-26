@@ -48,7 +48,7 @@ describe("opfs serialize/deserialize", () => {
       width: 1920,
       height: 1080,
     },
-    facecam: { src: "" },
+    facecam: { src: "", x: 0.8, y: 0.8, size: 0.2 },
     zoomPoints: [],
     stagedZoomPoints: [],
     textOverlays: [],

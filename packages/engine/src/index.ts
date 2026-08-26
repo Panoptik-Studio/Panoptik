@@ -23,6 +23,18 @@ export interface MediaEngine {
 export type { Project, ExportOpts };
 export { createRealEngine } from "./real-engine";
 
+// Camera geometry — shared so the editor's focal handles land exactly where
+// renderFrame draws them.
+export { frameRect } from "./layout";
+export type { Rect } from "./layout";
+export {
+  cameraViewport,
+  canvasToFrame,
+  frameToCanvas,
+  getCameraTransform,
+} from "./render";
+export type { Transform, Viewport } from "./render";
+
 // ── #region B-modules (DEV B adds re-export lines here; DEV A do not edit) ──
 export { startRecording } from "./record";
 export { saveProject, loadProject, listProjects } from "./opfs";

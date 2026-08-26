@@ -11,10 +11,53 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
+import { PiPWindow } from "@/components/PiPWindow";
+import { isPipSupported, usePiPWindow } from "@/hooks/usePiPWindow";
 
 type RecordingLayout = "screenOnly" | "screenAndCamera" | "cameraOnly";
 type RecordingShape = "circle" | "square";
 type RecordingState = "idle" | "countingDown" | "recording" | "stopping";
+type CameraCorner = "bottomRight" | "bottomLeft" | "topRight" | "topLeft";
+
+/** Where the camera bubble sits in the exported frame, as facecam x/y (top-left, 0-1). */
+const CORNER_ANCHORS: Record<CameraCorner, { x: number; y: number }> = {
+  bottomRight: { x: 0.97, y: 0.97 },
+  bottomLeft: { x: 0.03, y: 0.97 },
+  topRight: { x: 0.97, y: 0.03 },
+  topLeft: { x: 0.03, y: 0.03 },
+};
+
+const CORNER_LABELS: Record<CameraCorner, string> = {
+  bottomRight: "Bottom right",
+  bottomLeft: "Bottom left",
+  topRight: "Top right",
+  topLeft: "Top left",
+};
+
+/** Webcam tracks are 16:9; the PiP keeps that aspect while `size` scales its width. */
+const CAMERA_ASPECT = 16 / 9;
+
+/**
+ * The PiP's height as a fraction of canvas height. `size` is a fraction of canvas
+ * *width*, so converting to a height fraction goes through both aspects.
+ */
+export function facecamHeightFraction(size: number, canvasAspect: number): number {
+  return (size * canvasAspect) / CAMERA_ASPECT;
+}
+
+/**
+ * Convert a corner + size into facecam x/y. `x`/`y` are the PiP's top-left, so a
+ * bottom or right anchor has to be pulled back by the PiP's own extent.
+ */
+function facecamPlacement(corner: CameraCorner, size: number, canvasAspect: number) {
+  const a = CORNER_ANCHORS[corner];
+  const hFrac = facecamHeightFraction(size, canvasAspect);
+  return {
+    x: a.x > 0.5 ? Math.max(0, a.x - size) : a.x,
+    y: a.y > 0.5 ? Math.max(0, a.y - hFrac) : a.y,
+    size,
+  };
+}
 
 type RecordingHandles = {
   screenStream: MediaStream;
@@ -62,8 +105,30 @@ export function RecordModal() {
     }
     return "circle";
   });
+  const [corner, setCorner] = useState<CameraCorner>(() => {
+    if (typeof window !== "undefined") {
+      const v = localStorage.getItem("panoptik:corner") as CameraCorner | null;
+      if (v && v in CORNER_ANCHORS) return v;
+    }
+    return "bottomRight";
+  });
+  const [camSize, setCamSize] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const v = Number(localStorage.getItem("panoptik:camSize"));
+      if (v >= 0.1 && v <= 0.4) return v;
+    }
+    return 0.2;
+  });
   useEffect(() => { localStorage.setItem("panoptik:layout", layout); }, [layout]);
   useEffect(() => { localStorage.setItem("panoptik:shape", shape); }, [shape]);
+  useEffect(() => { localStorage.setItem("panoptik:corner", corner); }, [corner]);
+  useEffect(() => { localStorage.setItem("panoptik:camSize", String(camSize)); }, [camSize]);
+
+  // Floating camera bubble — a Document PiP window so your face stays visible
+  // over the desktop and other tabs, not just inside this one.
+  const { pipWindow, requestPipWindow, closePipWindow } = usePiPWindow();
+  const [pipStream, setPipStream] = useState<MediaStream | null>(null);
+  const pipSupported = isPipSupported();
 
   // Device prefs
   const [cameraEnabled, setCameraEnabled] = useState(true);
@@ -130,6 +195,9 @@ export function RecordModal() {
     window.addEventListener("open-record-modal", handler);
     return () => window.removeEventListener("open-record-modal", handler);
   }, []);
+
+  // Never leave a floating bubble behind if the editor unmounts mid-take.
+  useEffect(() => closePipWindow, [closePipWindow]);
 
   // Keyboard shortcuts when open (reference: E=camera, D=mic)
   useEffect(() => {
@@ -294,6 +362,16 @@ export function RecordModal() {
   const handleStart = useCallback(async () => {
     try {
       setError(null);
+
+      // Open the floating bubble first, while the Record click's transient user
+      // activation is still valid — requestWindow() is rejected without it, and
+      // the countdown plus the screen-picker would use it up.
+      const wantsCamera = layout !== "screenOnly" && cameraEnabled;
+      if (wantsCamera && pipSupported) {
+        setPipStream(cameraPreviewStreamRef.current);
+        await requestPipWindow(Math.round(camSize * 1400));
+      }
+
       // Keep preview stream alive during countdown so PiP shows face (was showing "No camera")
       // Countdown 3-2-1
       setState("countingDown");
@@ -315,6 +393,12 @@ export function RecordModal() {
         microphoneEnabled: micEnabled,
       });
 
+      // Hand the bubble the live take before releasing the preview, so it never
+      // blanks between the two streams.
+      if (handlesRef.current.facecamStream.getVideoTracks().length) {
+        setPipStream(handlesRef.current.facecamStream);
+      }
+
       // Preview no longer needed — live facecam will take over PiP
       cameraPreviewStreamRef.current?.getTracks().forEach((t) => t.stop());
       cameraPreviewStreamRef.current = null;
@@ -330,13 +414,17 @@ export function RecordModal() {
       setError(err instanceof Error ? err.message : String(err));
       setState("idle");
       setCountdown(null);
+      closePipWindow();
+      setPipStream(null);
     }
-  }, [layout, shape, selectedCam, selectedMic, cameraEnabled, micEnabled]);
+  }, [layout, shape, selectedCam, selectedMic, cameraEnabled, micEnabled, camSize, pipSupported, requestPipWindow, closePipWindow]);
 
   const handleStop = useCallback(async () => {
     if (!handlesRef.current) return;
     setState("stopping");
     cancelAnimationFrame(rafRef.current);
+    closePipWindow();
+    setPipStream(null);
     try {
       const { screenBlob, facecamBlob } = await handlesRef.current.stop();
       console.log("[Record] blobs", { screen: `${screenBlob.type} ${screenBlob.size} bytes`, facecam: `${facecamBlob.type} ${facecamBlob.size} bytes` });
@@ -353,8 +441,13 @@ export function RecordModal() {
         layout === "screenAndCamera" && facecamBlob.size > 0 ? facecamBlob : null,
         null,
       );
-      // Persist shape so export shows same circle/rectangle as preview PiP
-      (project.facecam as { shape?: string }).shape = shape;
+      // Carry the chosen shape and corner through to the composed frame, so the
+      // exported video puts the camera where the recorder UI said it would.
+      project.facecam = {
+        ...project.facecam,
+        ...facecamPlacement(corner, camSize, project.clip.width / project.clip.height),
+        shape,
+      };
       setProject(project);
       setIsOpen(false);
     } catch (err) {
@@ -367,7 +460,7 @@ export function RecordModal() {
       setElapsed(0);
       handlesRef.current = null;
     }
-  }, [setProject, layout]);
+  }, [setProject, layout, shape, corner, camSize, closePipWindow]);
 
   const handleClose = useCallback(() => {
     if (state === "recording" || state === "countingDown") return;
@@ -391,6 +484,15 @@ export function RecordModal() {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
     >
+      {/* Floating camera bubble — stays on top of the desktop and other tabs */}
+      <PiPWindow
+        pipWindow={pipWindow}
+        stream={pipStream}
+        shape={shape}
+        elapsed={elapsed}
+        isRecording={state === "recording"}
+        onStop={handleStop}
+      />
       <div
         className="flex w-full max-w-[1120px] max-h-[94vh] flex-col overflow-hidden rounded-[18px] border shadow-[0_24px_80px_rgba(0,0,0,0.6),0_1px_0_rgba(255,255,255,0.06)_inset]"
         style={{ background: "#ffffff", borderColor: "#ebebeb", boxShadow: "0 0 0 1px rgba(0,0,0,0.08) inset, 0px 8px 32px rgba(0,0,0,0.12)" }}
@@ -460,10 +562,14 @@ export function RecordModal() {
               <div
                 className={`absolute overflow-hidden border-[2.5px] ${pipHasVideo ? "bg-black" : "bg-white"} shadow-[0_12px_32px_rgba(0,0,0,0.22)]`}
                 style={{
-                  right: 22,
-                  bottom: 22,
-                  width: 216,
-                  height: 216,
+                  // Mirrors the corner picker so the preview shows where the
+                  // camera will actually sit in the finished video.
+                  ...(corner === "bottomRight" ? { right: 22, bottom: 22 } : {}),
+                  ...(corner === "bottomLeft" ? { left: 22, bottom: 22 } : {}),
+                  ...(corner === "topRight" ? { right: 22, top: 22 } : {}),
+                  ...(corner === "topLeft" ? { left: 22, top: 22 } : {}),
+                  width: Math.round(camSize * 1080),
+                  height: Math.round(camSize * 1080),
                   borderRadius: shape === "circle" ? "50%" : 12,
                   borderColor: pipHasVideo ? "#ffffff" : "#ebebeb",
                   boxShadow: pipHasVideo ? "0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.9) inset" : "0 4px 16px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.06) inset",
@@ -681,6 +787,37 @@ export function RecordModal() {
                 </button>
               </div>
 
+              {/* Camera position — where the bubble lands in the finished video */}
+              {layout === "screenAndCamera" && cameraEnabled && (
+                <div className="hidden md:flex items-center gap-1 rounded-full border p-1" style={{ background: "#fafafa", borderColor: "#ebebeb" }}>
+                  <span className="px-2 text-[10px] font-semibold tracking-widest" style={{ color: "#888" }}>CAMERA</span>
+                  <div className="grid grid-cols-2 gap-[2px] rounded-md border p-[3px]" style={{ borderColor: "#ebebeb", background: "#ffffff" }}>
+                    {(["topLeft", "topRight", "bottomLeft", "bottomRight"] as const).map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setCorner(c)}
+                        title={CORNER_LABELS[c]}
+                        aria-label={CORNER_LABELS[c]}
+                        aria-pressed={corner === c}
+                        className="h-[9px] w-[13px] rounded-[2px] transition-colors"
+                        style={{ background: corner === c ? "#171717" : "#ebebeb" }}
+                      />
+                    ))}
+                  </div>
+                  <input
+                    type="range"
+                    min={0.12}
+                    max={0.36}
+                    step={0.02}
+                    value={camSize}
+                    onChange={(e) => setCamSize(Number(e.target.value))}
+                    className="w-16 accent-[#171717]"
+                    title="Camera size"
+                    aria-label="Camera size"
+                  />
+                </div>
+              )}
+
               {/* Teleprompter toggle */}
               <button
                 onClick={() => setTeleOpen((v) => !v)}
@@ -721,8 +858,15 @@ export function RecordModal() {
 
             {/* Right: hint */}
             <div className="hidden lg:flex items-center gap-2 text-[11px]" style={{ color: "#888" }}>
-              <span className="hidden xl:inline">Chrome recommended · </span>
-              <span>Local only</span>
+              {layout !== "screenOnly" && cameraEnabled ? (
+                pipSupported ? (
+                  <span>Camera floats above other apps while recording</span>
+                ) : (
+                  <span>Floating camera needs Chrome or Edge</span>
+                )
+              ) : (
+                <span>Local only</span>
+              )}
               <span className="h-1 w-1 rounded-full" style={{ background: "#888" }} />
               <span className="hidden sm:inline">No upload</span>
             </div>

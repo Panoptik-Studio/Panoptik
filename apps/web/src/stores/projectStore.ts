@@ -14,6 +14,7 @@ import type {
   Background,
   ClickEvent,
   AspectPreset,
+  Facecam,
 } from "@panoptik/schema";
 
 type HistoryEntry = {
@@ -122,6 +123,9 @@ interface ProjectStore {
   // Stage UI
   setStagePadding: (n: number) => void;
   setAspectPreset: (preset: AspectPreset) => void;
+
+  // Facecam PiP placement (position / size / shape in the composed frame)
+  setFacecam: (updates: Partial<Facecam>) => void;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -181,6 +185,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       project,
       history,
       historyIndex: history.length - 1,
+      // Select it so the inspector opens on what was just created.
+      selectedZoomId: newZP.id,
     });
   },
 
@@ -566,5 +572,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const s = get();
     if (!s.project) return;
     set({ project: { ...s.project, aspectPreset: preset } });
+  },
+
+  setFacecam: (updates) => {
+    const s = get();
+    if (!s.project) return;
+    set({ project: { ...s.project, facecam: { ...s.project.facecam, ...updates } } });
   },
 }));

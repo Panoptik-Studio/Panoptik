@@ -14,46 +14,127 @@ import {
 import { useProjectStore } from "@/stores/projectStore";
 import { engine } from "@/lib/engineProvider";
 import {
-  hitTestFocal,
-  normalizeClick,
-} from "@/lib/zoomGeometry";
-
-const ASPECT_RATIOS: Record<string, number> = {
-  "16:9": 16 / 9,
-  "9:16": 9 / 16,
-  "1:1": 1,
-  "4:3": 4 / 3,
-};
+  cameraViewport,
+  canvasToFrame,
+  frameRect,
+  frameToCanvas,
+  getCameraTransform,
+} from "@panoptik/engine";
+import type { Project, ZoomPoint } from "@panoptik/schema";
 
 /** Preview compositing cap — matches the decode cap in the engine. */
 const MAX_CANVAS_WIDTH = 1920;
+/** Seconds either side of the playhead where a zoom's focal handle is editable. */
+const MARKER_WINDOW = 2;
+/** Depth a click-to-add zoom starts at. */
+const DEFAULT_ZOOM_SCALE = 2.2;
 
-type FrameRect = {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-};
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
 
-function computeFrameRect(
-  canvasW: number,
-  canvasH: number,
-  clipW: number,
-  clipH: number,
-  preset: string,
-): FrameRect {
-  const target = ASPECT_RATIOS[preset] ?? canvasW / canvasH;
-  const boxW = Math.min(canvasW, canvasH * target);
-  const boxH = boxW / target;
-  const s = Math.min(boxW / clipW, boxH / clipH);
-  const w = clipW * s;
-  const h = clipH * s;
+/**
+ * Everything needed to place a focal handle: the letterboxed frame, the camera
+ * resolved at `t`, and the marker radius. All in canvas backing pixels, which is
+ * the space renderFrame draws in.
+ */
+function canvasGeometry(
+  canvas: HTMLCanvasElement,
+  project: Project,
+  t: number,
+) {
+  const rect = frameRect(
+    canvas.width,
+    canvas.height,
+    project.clip.width,
+    project.clip.height,
+    project.aspectPreset,
+  );
+  const view = cameraViewport(rect, getCameraTransform(project.zoomPoints, t));
+  return { rect, view, radius: Math.max(10, rect.w * 0.014) };
+}
+
+/** Pointer position in canvas backing pixels. */
+function pointerToCanvas(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
+  const box = canvas.getBoundingClientRect();
   return {
-    x: (canvasW - w) / 2,
-    y: (canvasH - h) / 2,
-    w,
-    h,
+    x: ((clientX - box.left) / box.width) * canvas.width,
+    y: ((clientY - box.top) / box.height) * canvas.height,
   };
+}
+
+/** Zooms whose handle is on screen: near the playhead, plus the selected one. */
+function editableZooms(project: Project, t: number, selectedId: string | null): ZoomPoint[] {
+  return [...project.zoomPoints, ...project.stagedZoomPoints].filter(
+    (z) => z.id === selectedId || Math.abs(z.t - t) <= MARKER_WINDOW,
+  );
+}
+
+/** The zoom handle under a canvas-space point, topmost (latest) first. */
+function hitTestHandle(
+  canvas: HTMLCanvasElement,
+  project: Project,
+  t: number,
+  selectedId: string | null,
+  px: number,
+  py: number,
+): ZoomPoint | null {
+  const { rect, view, radius } = canvasGeometry(canvas, project, t);
+  const grab = radius * 1.8;
+  const candidates = editableZooms(project, t, selectedId);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const z = candidates[i]!;
+    const p = frameToCanvas(rect, view, z.to.x * rect.w, z.to.y * rect.h);
+    if (Math.hypot(px - p.x, py - p.y) <= grab) return z;
+  }
+  return null;
+}
+
+/**
+ * Focal handles, drawn on top of the composed frame. Editor-only chrome — it
+ * lives here rather than in the engine so exports stay clean.
+ */
+function drawHandles(
+  ctx: CanvasRenderingContext2D,
+  project: Project,
+  t: number,
+  selectedId: string | null,
+  draggingId: string | null,
+): void {
+  const { rect, view, radius } = canvasGeometry(ctx.canvas, project, t);
+  ctx.save();
+  for (const z of editableZooms(project, t, selectedId)) {
+    const p = frameToCanvas(rect, view, z.to.x * rect.w, z.to.y * rect.h);
+    const active = z.id === selectedId || z.id === draggingId;
+    const color = z.staged ? "#f5a623" : "#0070f3";
+    const r = active ? radius * 1.2 : radius;
+    // Fade handles whose keyframe is further from the playhead.
+    ctx.globalAlpha = active ? 1 : Math.max(0.35, 1 - Math.abs(z.t - t) / MARKER_WINDOW);
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(0,0,0,0.45)";
+    ctx.lineWidth = Math.max(4, r * 0.34);
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(2, r * 0.2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, Math.max(1.5, r * 0.16), 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+
+    if (active) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 1.75, 0, Math.PI * 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1, r * 0.1);
+      ctx.globalAlpha = 0.5;
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 }
 
 export function PreviewCanvas() {
@@ -68,36 +149,24 @@ export function PreviewCanvas() {
   const stagePadding = useProjectStore((s) => s.stagePadding);
   const addZoomPoint = useProjectStore((s) => s.addZoomPoint);
   const updateZoomPoint = useProjectStore((s) => s.updateZoomPoint);
+  const setSelectedZoom = useProjectStore((s) => s.setSelectedZoom);
   const commitDrag = useProjectStore((s) => s.commitDrag);
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);
 
-  // Dragging state
+  // Dragging state — `moved` separates a click-to-select from a real drag.
   const [dragging, setDragging] = useState<{
     id: string;
-    startX: number;
-    startY: number;
+    moved: boolean;
   } | null>(null);
+  const suppressClickRef = useRef(false);
+  // The rAF loop is built once per clip, so it reads the drag through a ref.
+  const draggingIdRef = useRef<string | null>(null);
+  draggingIdRef.current = dragging?.id ?? null;
 
   // Toast state (moment mark feedback)
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
-
-  // ── Frame rect computation ──
-  // In CSS pixels, matching the space that clientX/clientY arrive in — the
-  // canvas backing store is a different size than its on-screen box.
-  const getFrameRect = useCallback((): FrameRect | null => {
-    const canvas = canvasRef.current;
-    if (!canvas || !project) return null;
-    const box = canvas.getBoundingClientRect();
-    return computeFrameRect(
-      box.width,
-      box.height,
-      project.clip.width,
-      project.clip.height,
-      project.aspectPreset,
-    );
-  }, [project]);
 
   // ── Render loop ──
   // Keyed on whether a clip exists, not on project identity: the loop reads
@@ -166,6 +235,11 @@ export function PreviewCanvas() {
         }
       }
       engine.renderFrame(ctx, state.project, t);
+      // Editor chrome on top of the composed frame — hidden during playback so
+      // the preview shows exactly what an export would.
+      if (!state.isPlaying) {
+        drawHandles(ctx, state.project, t, state.selectedZoomId, draggingIdRef.current);
+      }
     };
 
     lastTimeRef.current = 0;
@@ -220,54 +294,46 @@ export function PreviewCanvas() {
     return () => window.removeEventListener("keydown", handler);
   }, [undo, redo]);
 
-  // ── Click → zoom interaction ──
+  // ── Click → add a zoom at the playhead (or select the handle under the cursor) ──
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
+      // A click always follows the pointerup that ended a drag — without this the
+      // drag would also spawn a zoom point.
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
       const state = useProjectStore.getState();
       if (!state.project || state.isPlaying) return;
 
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const frame = getFrameRect();
-      if (!frame) return;
+      const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
+      const t = state.currentTime;
 
-      const { x, y } = normalizeClick(
-        e.clientX,
-        e.clientY,
-        rect,
-        frame,
-      );
-
-      // Check if clicking near an existing zoom focal point
-      const nearby = state.project.zoomPoints.find(
-        (zp) =>
-          Math.abs(zp.t - state.currentTime) < 0.5 &&
-          hitTestFocal(x, y, zp, frame.w),
-      );
-
-      if (nearby) {
-        // Zoom out — add identity keyframe
-        addZoomPoint({
-          t: state.currentTime,
-          to: { scale: 1, x: 0.5, y: 0.5 },
-          dur: 0.6,
-          ease: "easeInOutCubic",
-        });
-      } else {
-        // Zoom in to clicked point
-        addZoomPoint({
-          t: state.currentTime,
-          to: { scale: 2.2, x, y },
-          dur: 0.7,
-          ease: "easeInOutCubic",
-        });
+      const hit = hitTestHandle(canvas, state.project, t, state.selectedZoomId, px, py);
+      if (hit) {
+        setSelectedZoom(hit.id);
+        return;
       }
+
+      const { rect, view } = canvasGeometry(canvas, state.project, t);
+      const f = canvasToFrame(rect, view, px, py);
+      addZoomPoint({
+        t,
+        to: {
+          scale: DEFAULT_ZOOM_SCALE,
+          x: clamp01(f.x / rect.w),
+          y: clamp01(f.y / rect.h),
+        },
+        dur: 0.7,
+        ease: "easeInOutCubic",
+      });
     },
-    [addZoomPoint, getFrameRect],
+    [addZoomPoint, setSelectedZoom],
   );
 
-  // ── Focal dot dragging ──
+  // ── Focal handle dragging ──
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const state = useProjectStore.getState();
@@ -275,62 +341,78 @@ export function PreviewCanvas() {
 
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const frame = getFrameRect();
-      if (!frame) return;
-
-      const { x, y } = normalizeClick(
-        e.clientX,
-        e.clientY,
-        rect,
-        frame,
+      const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
+      const hit = hitTestHandle(
+        canvas,
+        state.project,
+        state.currentTime,
+        state.selectedZoomId,
+        px,
+        py,
       );
+      if (!hit) return;
 
-      // Find nearest committed zoom focal within grab radius
-      const nearest = state.project.zoomPoints.find((zp) =>
-        hitTestFocal(x, y, zp, frame.w),
-      );
-
-      if (nearest) {
-        e.preventDefault();
-        canvas.setPointerCapture(e.pointerId);
-        setDragging({
-          id: nearest.id,
-          startX: e.clientX,
-          startY: e.clientY,
-        });
-      }
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      setSelectedZoom(hit.id);
+      setDragging({ id: hit.id, moved: false });
     },
-    [getFrameRect],
+    [setSelectedZoom],
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!dragging) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const frame = getFrameRect();
-      if (!frame) return;
+      const state = useProjectStore.getState();
+      if (!state.project) return;
 
-      const { x, y } = normalizeClick(
-        e.clientX,
-        e.clientY,
-        rect,
-        frame,
-      );
+      if (!dragging) {
+        // Hover affordance: the crosshair means "add", the grab hand means "move".
+        if (!state.isPlaying) {
+          const { x: hx, y: hy } = pointerToCanvas(canvas, e.clientX, e.clientY);
+          const over = hitTestHandle(
+            canvas,
+            state.project,
+            state.currentTime,
+            state.selectedZoomId,
+            hx,
+            hy,
+          );
+          canvas.style.cursor = over ? "grab" : "crosshair";
+        }
+        return;
+      }
+
+      const zoom =
+        state.project.zoomPoints.find((z) => z.id === dragging.id) ??
+        state.project.stagedZoomPoints.find((z) => z.id === dragging.id);
+      if (!zoom) return;
+
+      const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
+      const { rect, view } = canvasGeometry(canvas, state.project, state.currentTime);
+      const f = canvasToFrame(rect, view, px, py);
+      // Keep the zoom's own depth — only the focal point moves.
       updateZoomPoint(dragging.id, {
-        to: { scale: 2.2, x, y },
+        to: {
+          scale: zoom.to.scale,
+          x: clamp01(f.x / rect.w),
+          y: clamp01(f.y / rect.h),
+        },
       });
+      if (!dragging.moved) setDragging({ ...dragging, moved: true });
     },
-    [dragging, updateZoomPoint, getFrameRect],
+    [dragging, updateZoomPoint],
   );
 
   const handlePointerUp = useCallback(() => {
     if (dragging) {
-      commitDrag();
+      if (dragging.moved) {
+        commitDrag();
+        suppressClickRef.current = true;
+      }
+      setDragging(null);
     }
-    setDragging(null);
   }, [dragging, commitDrag]);
 
   // ── Canvas sizing ──

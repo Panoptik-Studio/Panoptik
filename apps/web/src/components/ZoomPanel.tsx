@@ -14,6 +14,7 @@ export function ZoomPanel() {
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
   const setSelectedZoom = useProjectStore((s) => s.setSelectedZoom);
   const selectedZoomId = useProjectStore((s) => s.selectedZoomId);
+  const seek = useProjectStore((s) => s.seek);
 
   if (!project) {
     return (
@@ -53,7 +54,13 @@ export function ZoomPanel() {
             return (
               <div
                 key={zp.id}
-                onClick={() => setSelectedZoom(zp.id)}
+                onClick={() => {
+                  setSelectedZoom(zp.id);
+                  // Land where the move has settled, otherwise the preview shows
+                  // the camera mid-transition (or not moved at all) and edits
+                  // look like they do nothing.
+                  seek(zp.t + zp.dur);
+                }}
                 className={`flex cursor-pointer items-center justify-between rounded-lg border px-2.5 py-2 transition-colors ${isSelected ? "bg-[#171717] text-white" : "bg-[#fafafa] hover:border-[#0070f3]"}`}
                 style={{ borderColor: isSelected ? "#171717" : "#ebebeb" }}
               >

@@ -6,37 +6,36 @@
 
 import { useCallback, useRef, useState } from "react";
 
+/** Must match PiPWindow's control bar and the padding around the bubble. */
+const CONTROL_BAR_HEIGHT = 52;
+const CHROME_PADDING = 16;
+
+/** Document Picture-in-Picture is Chromium-only and needs a secure context. */
+export function isPipSupported(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    "documentPictureInPicture" in window
+  );
+}
+
 export function usePiPWindow() {
   const [pipWindow, setPipWindow] = useState<Window | null>(null);
   const pipWindowRef = useRef<Window | null>(null);
 
-  const requestPipWindow = useCallback(async (): Promise<Window | null> => {
+  /** `size` is the camera bubble's edge in px; the window adds room for the control bar. */
+  const requestPipWindow = useCallback(async (size = 300): Promise<Window | null> => {
     const w = window as unknown as { documentPictureInPicture?: { requestWindow: (opts: { width: number; height: number }) => Promise<Window> } };
     if (!w.documentPictureInPicture) return null;
+    // Reuse an open bubble rather than stacking a second one.
+    if (pipWindowRef.current && !pipWindowRef.current.closed) return pipWindowRef.current;
     try {
-      const pw = await w.documentPictureInPicture.requestWindow({ width: 340, height: 340 });
-      // Copy styles for Tailwind + globals
-      try {
-        const allCSS = [...document.styleSheets]
-          .map((ss) => {
-            try {
-              return [...ss.cssRules].map((r) => r.cssText).join("");
-            } catch {
-              // cross-origin sheet
-              const el = ss.ownerNode as HTMLLinkElement | null;
-              if (el?.outerHTML) return el.outerHTML;
-              return "";
-            }
-          })
-          .join("\n");
-        const style = pw.document.createElement("style");
-        style.textContent = allCSS;
-        pw.document.head.appendChild(style);
-        // Also copy <style> and <link> tags directly for Tailwind
-        document.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => {
-          try { pw.document.head.appendChild(node.cloneNode(true)); } catch {}
-        });
-      } catch {}
+      const edge = Math.round(Math.max(180, Math.min(480, size)));
+      const pw = await w.documentPictureInPicture.requestWindow({
+        width: edge + CHROME_PADDING,
+        height: edge + CHROME_PADDING + CONTROL_BAR_HEIGHT,
+      });
+      // No stylesheet copying: the bubble is entirely inline-styled, so cloning
+      // the app's CSS would only add weight and let page rules fight it.
       // Close handler
       pw.addEventListener("pagehide", () => {
         setPipWindow(null);
