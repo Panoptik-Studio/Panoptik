@@ -50,7 +50,7 @@ beforeEach(() => {
 describe("decode", () => {
   it("loadClip returns a valid Project", async () => {
     const { loadClip } = await loadFresh();
-    const file = new File(["dummy"], "test.mp4", { type: "video/mp4" });
+    const file = new File([new Uint8Array(2048)], "test.mp4", { type: "video/mp4" });
     const project = await loadClip(file);
     expect(project.clip.duration).toBe(10);
     expect(project.clip.width).toBe(1920);
@@ -61,7 +61,7 @@ describe("decode", () => {
 
   it("prepareFrame caches sample at given time", async () => {
     const { loadClip, prepareFrame, currentFrame } = await loadFresh();
-    const file = new File(["dummy"], "test.mp4", { type: "video/mp4" });
+    const file = new File([new Uint8Array(2048)], "test.mp4", { type: "video/mp4" });
     await loadClip(file);
     await prepareFrame(2.5);
     expect(currentFrame()).not.toBeNull();
@@ -69,7 +69,7 @@ describe("decode", () => {
 
   it("prepareFrame does not re-fetch if time unchanged", async () => {
     const { loadClip, prepareFrame, currentFrame } = await loadFresh();
-    const file = new File(["dummy"], "test.mp4", { type: "video/mp4" });
+    const file = new File([new Uint8Array(2048)], "test.mp4", { type: "video/mp4" });
     await loadClip(file);
     await prepareFrame(2.5);
     const first = currentFrame();
@@ -84,7 +84,7 @@ describe("decode", () => {
 
   it("playback steps one iterator instead of seeking per frame", async () => {
     const { loadClip, prepareFrame } = await loadFresh();
-    await loadClip(new File(["dummy"], "test.mp4", { type: "video/mp4" }));
+    await loadClip(new File([new Uint8Array(2048)], "test.mp4", { type: "video/mp4" }));
     stats.seeks = 0;
     stats.framesDecoded = 0;
 
@@ -99,7 +99,7 @@ describe("decode", () => {
 
   it("overlapping prepareFrame calls coalesce onto one decode", async () => {
     const { loadClip, prepareFrame } = await loadFresh();
-    await loadClip(new File(["dummy"], "test.mp4", { type: "video/mp4" }));
+    await loadClip(new File([new Uint8Array(2048)], "test.mp4", { type: "video/mp4" }));
     stats.seeks = 0;
     stats.framesDecoded = 0;
 
@@ -114,7 +114,7 @@ describe("decode", () => {
 
   it("seeking backwards restarts the iterator", async () => {
     const { loadClip, prepareFrame } = await loadFresh();
-    await loadClip(new File(["dummy"], "test.mp4", { type: "video/mp4" }));
+    await loadClip(new File([new Uint8Array(2048)], "test.mp4", { type: "video/mp4" }));
     await prepareFrame(5);
     stats.seeks = 0;
 
@@ -124,7 +124,7 @@ describe("decode", () => {
 
   it("a far forward jump seeks rather than decoding the gap", async () => {
     const { loadClip, prepareFrame } = await loadFresh();
-    await loadClip(new File(["dummy"], "test.mp4", { type: "video/mp4" }));
+    await loadClip(new File([new Uint8Array(2048)], "test.mp4", { type: "video/mp4" }));
     await prepareFrame(0);
     stats.seeks = 0;
     stats.framesDecoded = 0;

@@ -199,11 +199,14 @@ function drawFacecam(
   const clampedX = Math.min(x, canvasW - pipW);
   const clampedY = Math.min(y, canvasH - pipH);
 
-  const radius = 12;
+  const shape = (fc as { shape?: string }).shape === "circle" ? "circle" : "square";
+  const radius = shape === "circle" ? Math.min(pipW, pipH) / 2 : 12;
   ctx.save();
-  // Rounded rect clip
+  // Rounded rect / circle clip — matches preview PiP (circle 50% vs square 12px)
   ctx.beginPath();
-  if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
+  if (shape === "circle") {
+    ctx.arc(clampedX + pipW / 2, clampedY + pipH / 2, Math.min(pipW, pipH) / 2, 0, Math.PI * 2);
+  } else if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
     (ctx as unknown as { roundRect: (x:number,y:number,w:number,h:number,r:number)=>void }).roundRect(clampedX, clampedY, pipW, pipH, radius);
   } else {
     const r = Math.min(radius, pipW / 2, pipH / 2);
@@ -219,12 +222,14 @@ function drawFacecam(
     ctx.drawImage(video, clampedX, clampedY, pipW, pipH);
   } catch { /* video frame not ready */ }
   ctx.restore();
-  // Subtle border
+  // Subtle border — matches clip shape
   ctx.save();
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
+  if (shape === "circle") {
+    ctx.arc(clampedX + pipW / 2, clampedY + pipH / 2, Math.min(pipW, pipH) / 2, 0, Math.PI * 2);
+  } else if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
     (ctx as unknown as { roundRect: (x:number,y:number,w:number,h:number,r:number)=>void }).roundRect(clampedX, clampedY, pipW, pipH, radius);
   } else {
     const r = Math.min(radius, pipW / 2, pipH / 2);
