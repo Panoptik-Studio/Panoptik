@@ -23,6 +23,6 @@ export interface MediaEngine {
 export type { Project, ExportOpts };
 
 // ── #region B-modules (DEV B adds re-export lines here; DEV A do not edit) ──
-// export { startRecording } from "./record";
-// export { saveProject, loadProject, listProjects } from "./opfs";
+export { startRecording } from "./record";
+export { saveProject, loadProject, listProjects } from "./opfs";
 // ── #endregion ──

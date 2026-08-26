@@ -5,6 +5,7 @@
  */
 "use client";
 
+import { CaptionsPanel } from "@/components/CaptionsPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ExportPanel } from "@/components/ExportPanel";
 import { Inspector } from "@/components/Inspector";
@@ -61,7 +62,7 @@ export default function EditorPage() {
 }
 
 function CaptionsSlot() {
-  return null; // DEV B: mount CaptionsPanel here when implemented
+  return <CaptionsPanel />; // DEV B: CaptionsPanel implemented
 }
 
 /* ── Left sidebar icon buttons ── */

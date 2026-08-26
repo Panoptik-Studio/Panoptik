@@ -1,134 +1,330 @@
 /**
- * OWNER: DEV A — basic preview canvas with drop zone + playback loop.
- * Self-contained internal playback state (no store coupling).
- * Dev B: take over this file and move playback state to shared store when
- * your Timeline component needs to read/write the same currentTime/playing.
+ * OWNER: DEV B — ROADMAP-B.md Task 2.2 + 2.4.
+ * Interactive canvas: zoom click interaction, focal dot dragging, rAF playback loop.
+ * Keyboard undo/redo (Cmd+Z / Cmd+Shift+Z).
  */
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { useProjectStore } from "@/stores/projectStore";
 import { engine } from "@/lib/engineProvider";
-import type { Project } from "@panoptik/schema";
+import {
+  hitTestFocal,
+  normalizeClick,
+} from "@/lib/zoomGeometry";
+
+const ASPECT_RATIOS: Record<string, number> = {
+  "16:9": 16 / 9,
+  "9:16": 9 / 16,
+  "1:1": 1,
+  "4:3": 4 / 3,
+};
+
+type FrameRect = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+function computeFrameRect(
+  canvasW: number,
+  canvasH: number,
+  clipW: number,
+  clipH: number,
+  preset: string,
+): FrameRect {
+  const target = ASPECT_RATIOS[preset] ?? canvasW / canvasH;
+  const boxW = Math.min(canvasW, canvasH * target);
+  const boxH = boxW / target;
+  const s = Math.min(boxW / clipW, boxH / clipH);
+  const w = clipW * s;
+  const h = clipH * s;
+  return {
+    x: (canvasW - w) / 2,
+    y: (canvasH - h) / 2,
+    w,
+    h,
+  };
+}
 
 export function PreviewCanvas() {
-  const [project, setProject] = useState<Project | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [playing, setPlaying] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
-  const lastRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(0);
 
-  // ── Playback loop ──
-  useEffect(() => {
-    if (!playing || !project) return;
-    lastRef.current = performance.now();
+  const {
+    project,
+    isPlaying,
+    currentTime,
+    setCurrentTime,
+    play,
+    pause,
+    addZoomPoint,
+    updateZoomPoint,
+    undo,
+    redo,
+  } = useProjectStore();
 
-    const tick = async (now: number) => {
-      const dt = (now - lastRef.current) / 1000;
-      lastRef.current = now;
-      setCurrentTime((prev) => {
-        const next = prev + dt;
-        return next >= project.clip.duration ? project.clip.duration : next;
-      });
-      rafRef.current = requestAnimationFrame(tick);
-    };
+  // Dragging state
+  const [dragging, setDragging] = useState<{
+    id: string;
+    startX: number;
+    startY: number;
+  } | null>(null);
 
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, project]);
-
-  // ── Render loop (decouple from state updates via ref) ──
-  const projectRef = useRef(project);
-  const timeRef = useRef(currentTime);
-  projectRef.current = project;
-  timeRef.current = currentTime;
-
-  useEffect(() => {
+  // ── Frame rect computation ──
+  const getFrameRect = useCallback((): FrameRect | null => {
     const canvas = canvasRef.current;
-    if (!canvas || !project) return;
-    const ctx = canvas.getContext("2d");
+    if (!canvas || !project) return null;
+    return computeFrameRect(
+      canvas.width,
+      canvas.height,
+      project.clip.width,
+      project.clip.height,
+      project.aspectPreset,
+    );
+  }, [project]);
+
+  // ── Render loop ──
+  useEffect(() => {
+    if (!project || !canvasRef.current) return;
+    const ctx = canvasRef.current.getContext("2d");
     if (!ctx) return;
 
-    let running = true;
-    const draw = async () => {
-      if (!running || !projectRef.current) return;
-      await engine.prepareFrame(timeRef.current);
-      engine.renderFrame(ctx, projectRef.current, timeRef.current);
-      requestAnimationFrame(draw);
+    const loop = (now: number) => {
+      const dt = lastTimeRef.current
+        ? (now - lastTimeRef.current) / 1000
+        : 0;
+      lastTimeRef.current = now;
+
+      const state = useProjectStore.getState();
+      if (state.isPlaying) {
+        const newTime = state.currentTime + dt;
+        if (newTime >= state.project!.clip.duration) {
+          state.pause();
+          state.setCurrentTime(state.project!.clip.duration);
+        } else {
+          state.setCurrentTime(newTime);
+        }
+      }
+
+      // Delegate all drawing to engine
+      engine.renderFrame(ctx, state.project!, state.currentTime);
+      rafRef.current = requestAnimationFrame(loop);
     };
-    draw();
-    return () => { running = false; };
+
+    lastTimeRef.current = 0;
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [project]);
+
+  // ── Keyboard undo/redo (Phase 2.4) ──
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if (mod && e.key === "z" && e.shiftKey) {
+        e.preventDefault();
+        redo();
+      }
+      if (mod && e.key === "y") {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo, redo]);
+
+  // ── Click → zoom interaction ──
+  const handleCanvasClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const state = useProjectStore.getState();
+      if (!state.project || state.isPlaying) return;
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const frame = getFrameRect();
+      if (!frame) return;
+
+      const { x, y } = normalizeClick(
+        e.clientX,
+        e.clientY,
+        rect,
+        frame,
+      );
+
+      // Check if clicking near an existing zoom focal point
+      const nearby = state.project.zoomPoints.find(
+        (zp) =>
+          Math.abs(zp.t - state.currentTime) < 0.5 &&
+          hitTestFocal(x, y, zp, frame.w),
+      );
+
+      if (nearby) {
+        // Zoom out — add identity keyframe
+        addZoomPoint({
+          t: state.currentTime,
+          to: { scale: 1, x: 0.5, y: 0.5 },
+          dur: 0.6,
+          ease: "easeInOutCubic",
+        });
+      } else {
+        // Zoom in to clicked point
+        addZoomPoint({
+          t: state.currentTime,
+          to: { scale: 2.2, x, y },
+          dur: 0.7,
+          ease: "easeInOutCubic",
+        });
+      }
+    },
+    [addZoomPoint, getFrameRect],
+  );
+
+  // ── Focal dot dragging ──
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const state = useProjectStore.getState();
+      if (!state.project || state.isPlaying) return;
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const frame = getFrameRect();
+      if (!frame) return;
+
+      const { x, y } = normalizeClick(
+        e.clientX,
+        e.clientY,
+        rect,
+        frame,
+      );
+
+      // Find nearest committed zoom focal within grab radius
+      const nearest = state.project.zoomPoints.find((zp) =>
+        hitTestFocal(x, y, zp, frame.w),
+      );
+
+      if (nearest) {
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+        setDragging({
+          id: nearest.id,
+          startX: e.clientX,
+          startY: e.clientY,
+        });
+      }
+    },
+    [getFrameRect],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!dragging) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const frame = getFrameRect();
+      if (!frame) return;
+
+      const { x, y } = normalizeClick(
+        e.clientX,
+        e.clientY,
+        rect,
+        frame,
+      );
+      updateZoomPoint(dragging.id, {
+        to: { scale: 2.2, x, y },
+      });
+    },
+    [dragging, updateZoomPoint, getFrameRect],
+  );
+
+  const handlePointerUp = useCallback(() => {
+    setDragging(null);
+  }, []);
+
+  // ── Canvas sizing ──
+  const [canvasSize, setCanvasSize] = useState({
+    w: 1920,
+    h: 1080,
+  });
+
+  useEffect(() => {
+    if (project) {
+      setCanvasSize({
+        w: project.clip.width,
+        h: project.clip.height,
+      });
+    }
   }, [project]);
 
   // ── Drop handler ──
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith("video/")) {
+        const proj = await engine.loadClip(file);
+        useProjectStore.getState().setProject(proj);
+      }
+    },
+    [],
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    const proj = await engine.loadClip(file);
-    setProject(proj);
-    setCurrentTime(0);
-    setPlaying(false);
   }, []);
 
-  const handleFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const proj = await engine.loadClip(file);
-    setProject(proj);
-    setCurrentTime(0);
-    setPlaying(false);
-  }, []);
-
-  // ── No project: show drop zone ──
   if (!project) {
     return (
       <div
+        ref={containerRef}
+        className="flex h-full w-full items-center justify-center"
         onDrop={handleDrop}
-        onDragOver={(e) => e.preventDefault()}
-        className="flex h-full w-full flex-col items-center justify-center gap-4 rounded-lg border-2 border-dashed border-gray-600 bg-gray-900/50"
+        onDragOver={handleDragOver}
       >
-        <p className="text-sm text-gray-400">Drag a clip here</p>
-        <label className="cursor-pointer rounded bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500">
-          Choose file
-          <input type="file" accept="video/*" className="hidden" onChange={handleFile} />
-        </label>
+        <div className="rounded-2xl border-2 border-dashed border-gray-600 p-16 text-center">
+          <p className="text-lg text-gray-400">
+            Drop a video file here
+          </p>
+          <p className="mt-2 text-sm text-gray-600">
+            or use the Import button in the toolbar
+          </p>
+        </div>
       </div>
     );
   }
 
-  // ── Loaded: canvas + controls ──
-  const duration = project.clip.duration;
   return (
-    <div className="flex h-full w-full flex-col">
-      <div className="flex flex-1 items-center justify-center bg-black">
-        <canvas
-          ref={canvasRef}
-          width={project.clip.width}
-          height={project.clip.height}
-          className="max-h-full max-w-full object-contain"
-        />
-      </div>
-      <div className="flex items-center gap-3 border-t border-gray-800 px-3 py-2">
-        <button
-          onClick={() => setPlaying((p) => !p)}
-          className="rounded bg-gray-700 px-2 py-1 text-xs text-white hover:bg-gray-600"
-        >
-          {playing ? "Pause" : "Play"}
-        </button>
-        <input
-          type="range"
-          min={0}
-          max={duration}
-          step={0.01}
-          value={currentTime}
-          onChange={(e) => setCurrentTime(Number(e.target.value))}
-          className="flex-1"
-        />
-        <span className="w-16 text-right text-xs text-gray-400">
-          {currentTime.toFixed(1)}s / {duration.toFixed(1)}s
-        </span>
-      </div>
+    <div
+      ref={containerRef}
+      className="flex h-full w-full items-center justify-center bg-black"
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+    >
+      <canvas
+        ref={canvasRef}
+        width={canvasSize.w}
+        height={canvasSize.h}
+        className="max-h-full max-w-full cursor-crosshair"
+        onClick={handleCanvasClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      />
     </div>
   );
 }

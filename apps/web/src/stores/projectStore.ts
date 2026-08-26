@@ -1,21 +1,526 @@
 /**
- * OWNER: DEV B — minimal compiling shell so the app runs on Day 1.
- * Expand to the FULL Spec.md §B1 shape (+ deltas listed in ROADMAP-B.md)
- * in Task 1.2 via TDD: staged* arrays, history/undo/redo, getStagedDiff,
- * commitAll, removeStaged*, markMoment, pendingBackgroundBadge,
- * selectedZoomId + setSelectedZoom(id | null)  ← consumed by DEV A's Inspector.
+ * OWNER: DEV B — full staged-diff state model per ROADMAP-B.md Task 1.2.
+ * Staged* arrays are first-class in Project — ghosts are data, not UI state.
+ * The only write path is commitAll(), gated by human confirmation.
  */
-"use client"; // not required by zustand itself; keeps future hook usage simple
+"use client";
 
 import { create } from "zustand";
-import type { Project } from "@panoptik/schema";
+import type {
+  Project,
+  ZoomPoint,
+  TextOverlay,
+  Caption,
+  Background,
+  ClickEvent,
+} from "@panoptik/schema";
+
+type HistoryEntry = {
+  zoomPoints: ZoomPoint[];
+  textOverlays: TextOverlay[];
+  captions: Caption[];
+  background: Background;
+};
+
+function snapshot(project: Project): HistoryEntry {
+  return {
+    zoomPoints: project.zoomPoints.map((z) => ({ ...z })),
+    textOverlays: project.textOverlays.map((t) => ({ ...t })),
+    captions: project.captions.map((c) => ({ ...c })),
+    background: structuredClone(project.background),
+  };
+}
+
+function restoreFromSnapshot(
+  project: Project,
+  snap: HistoryEntry,
+): Project {
+  return {
+    ...project,
+    zoomPoints: snap.zoomPoints,
+    textOverlays: snap.textOverlays,
+    captions: snap.captions,
+    background: snap.background,
+  };
+}
 
 interface ProjectStore {
   project: Project | null;
+  history: HistoryEntry[];
+  historyIndex: number;
+  isPlaying: boolean;
+  currentTime: number;
+  selectedZoomId: string | null;
+  pendingBackgroundBadge: boolean;
+
+  // Project lifecycle
   setProject: (project: Project) => void;
+
+  // Playback
+  play: () => void;
+  pause: () => void;
+  togglePlay: () => void;
+  seek: (t: number) => void;
+  setCurrentTime: (t: number) => void;
+
+  // Zoom — committed
+  addZoomPoint: (zp: Omit<ZoomPoint, "id" | "staged">) => void;
+  removeZoomPoint: (id: string) => void;
+  updateZoomPoint: (id: string, updates: Partial<ZoomPoint>) => void;
+  setSelectedZoom: (id: string | null) => void;
+
+  // Zoom — staging
+  stageZoomProposals: (proposals: ZoomPoint[]) => void;
+  removeStagedZoom: (id: string) => void;
+
+  // Text — committed
+  addTextOverlay: (overlay: Omit<TextOverlay, "id" | "staged">) => void;
+  removeTextOverlay: (id: string) => void;
+  updateTextOverlay: (
+    id: string,
+    updates: Partial<TextOverlay>,
+  ) => void;
+
+  // Text — staging
+  stageTextOverlay: (overlay: TextOverlay) => void;
+  removeStagedTextOverlay: (id: string) => void;
+
+  // Captions — committed
+  setCaptions: (captions: Caption[]) => void;
+
+  // Captions — staging
+  stageCaptions: (captions: Caption[]) => void;
+  clearStagedCaptions: () => void;
+
+  // Background
+  setBackground: (bg: Background) => void;
+  stageBackground: (bg: Background) => void;
+
+  // Staging diff
+  getStagedDiff: () => {
+    added: string[];
+    removed: string[];
+    totalCount: number;
+  };
+  commitAll: () => void;
+  clearStaged: () => void;
+
+  // Undo / redo
+  undo: () => void;
+  redo: () => void;
+
+  // Moment marks (M key during playback → click log)
+  markMoment: (t: number) => void;
 }
 
-export const useProjectStore = create<ProjectStore>((set) => ({
+export const useProjectStore = create<ProjectStore>((set, get) => ({
   project: null,
-  setProject: (project) => set({ project }),
+  history: [],
+  historyIndex: -1,
+  isPlaying: false,
+  currentTime: 0,
+  selectedZoomId: null,
+  pendingBackgroundBadge: false,
+
+  // ── Project lifecycle ──
+
+  setProject: (project) => {
+    const snap = snapshot(project);
+    set({
+      project,
+      history: [snap],
+      historyIndex: 0,
+      currentTime: 0,
+      isPlaying: false,
+      selectedZoomId: null,
+      pendingBackgroundBadge: false,
+    });
+  },
+
+  // ── Playback ──
+
+  play: () => set({ isPlaying: true }),
+  pause: () => set({ isPlaying: false }),
+  togglePlay: () => set((s) => ({ isPlaying: !s.isPlaying })),
+  seek: (t) => set({ currentTime: t, isPlaying: false }),
+  setCurrentTime: (t) => set({ currentTime: t }),
+
+  // ── Zoom — committed ──
+
+  addZoomPoint: (zp) => {
+    const state = get();
+    if (!state.project) return;
+    const newZP: ZoomPoint = {
+      ...zp,
+      id: crypto.randomUUID(),
+      staged: false,
+    };
+    const project = {
+      ...state.project,
+      zoomPoints: [...state.project.zoomPoints, newZP],
+    };
+    const snap = snapshot(project);
+    const history = [
+      ...state.history.slice(0, state.historyIndex + 1),
+      snap,
+    ];
+    set({
+      project,
+      history,
+      historyIndex: history.length - 1,
+    });
+  },
+
+  removeZoomPoint: (id) => {
+    const state = get();
+    if (!state.project) return;
+    const project = {
+      ...state.project,
+      zoomPoints: state.project.zoomPoints.filter((z) => z.id !== id),
+    };
+    const snap = snapshot(project);
+    const history = [
+      ...state.history.slice(0, state.historyIndex + 1),
+      snap,
+    ];
+    set({
+      project,
+      history,
+      historyIndex: history.length - 1,
+      selectedZoomId:
+        state.selectedZoomId === id ? null : state.selectedZoomId,
+    });
+  },
+
+  updateZoomPoint: (id, updates) => {
+    const state = get();
+    if (!state.project) return;
+    const project = {
+      ...state.project,
+      zoomPoints: state.project.zoomPoints.map((z) =>
+        z.id === id ? { ...z, ...updates } : z,
+      ),
+    };
+    set({ project });
+  },
+
+  setSelectedZoom: (id) => set({ selectedZoomId: id }),
+
+  // ── Zoom — staging ──
+
+  stageZoomProposals: (proposals) => {
+    const state = get();
+    if (!state.project) return;
+    set({
+      project: {
+        ...state.project,
+        stagedZoomPoints: [
+          ...state.project.stagedZoomPoints,
+          ...proposals,
+        ],
+      },
+    });
+  },
+
+  removeStagedZoom: (id) => {
+    const state = get();
+    if (!state.project) return;
+    set({
+      project: {
+        ...state.project,
+        stagedZoomPoints:
+          state.project.stagedZoomPoints.filter((z) => z.id !== id),
+      },
+    });
+  },
+
+  // ── Text — committed ──
+
+  addTextOverlay: (overlay) => {
+    const state = get();
+    if (!state.project) return;
+    const newOverlay: TextOverlay = {
+      ...overlay,
+      id: crypto.randomUUID(),
+      staged: false,
+    };
+    const project = {
+      ...state.project,
+      textOverlays: [...state.project.textOverlays, newOverlay],
+    };
+    const snap = snapshot(project);
+    const history = [
+      ...state.history.slice(0, state.historyIndex + 1),
+      snap,
+    ];
+    set({ project, history, historyIndex: history.length - 1 });
+  },
+
+  removeTextOverlay: (id) => {
+    const state = get();
+    if (!state.project) return;
+    const project = {
+      ...state.project,
+      textOverlays: state.project.textOverlays.filter(
+        (t) => t.id !== id,
+      ),
+    };
+    const snap = snapshot(project);
+    const history = [
+      ...state.history.slice(0, state.historyIndex + 1),
+      snap,
+    ];
+    set({ project, history, historyIndex: history.length - 1 });
+  },
+
+  updateTextOverlay: (id, updates) => {
+    const state = get();
+    if (!state.project) return;
+    const project = {
+      ...state.project,
+      textOverlays: state.project.textOverlays.map((t) =>
+        t.id === id ? { ...t, ...updates } : t,
+      ),
+    };
+    set({ project });
+  },
+
+  // ── Text — staging ──
+
+  stageTextOverlay: (overlay) => {
+    const state = get();
+    if (!state.project) return;
+    set({
+      project: {
+        ...state.project,
+        stagedTextOverlays: [
+          ...state.project.stagedTextOverlays,
+          overlay,
+        ],
+      },
+    });
+  },
+
+  removeStagedTextOverlay: (id) => {
+    const state = get();
+    if (!state.project) return;
+    set({
+      project: {
+        ...state.project,
+        stagedTextOverlays:
+          state.project.stagedTextOverlays.filter(
+            (t) => t.id !== id,
+          ),
+      },
+    });
+  },
+
+  // ── Captions — committed ──
+
+  setCaptions: (captions) => {
+    const state = get();
+    if (!state.project) return;
+    const project = { ...state.project, captions };
+    const snap = snapshot(project);
+    const history = [
+      ...state.history.slice(0, state.historyIndex + 1),
+      snap,
+    ];
+    set({ project, history, historyIndex: history.length - 1 });
+  },
+
+  // ── Captions — staging ──
+
+  stageCaptions: (captions) => {
+    const state = get();
+    if (!state.project) return;
+    set({
+      project: {
+        ...state.project,
+        stagedCaptions: captions,
+      },
+    });
+  },
+
+  clearStagedCaptions: () => {
+    const state = get();
+    if (!state.project) return;
+    set({
+      project: {
+        ...state.project,
+        stagedCaptions: [],
+      },
+    });
+  },
+
+  // ── Background ──
+
+  setBackground: (bg) => {
+    const state = get();
+    if (!state.project) return;
+    const project = { ...state.project, background: bg };
+    const snap = snapshot(project);
+    const history = [
+      ...state.history.slice(0, state.historyIndex + 1),
+      snap,
+    ];
+    set({
+      project,
+      history,
+      historyIndex: history.length - 1,
+      pendingBackgroundBadge: false,
+    });
+  },
+
+  stageBackground: (bg) => {
+    const state = get();
+    if (!state.project) return;
+    // Staged background applies immediately to visual + sets badge
+    set({
+      project: {
+        ...state.project,
+        background: bg,
+      },
+      pendingBackgroundBadge: true,
+    });
+  },
+
+  // ── Staging diff ──
+
+  getStagedDiff: () => {
+    const state = get();
+    if (!state.project)
+      return { added: [], removed: [], totalCount: 0 };
+    const p = state.project;
+    return {
+      added: [
+        ...p.stagedZoomPoints.map(
+          (zp) => `Zoom at ${zp.t.toFixed(1)}s`,
+        ),
+        ...p.stagedTextOverlays.map(
+          (t) => `"${t.text}" at ${t.timestamp.toFixed(1)}s`,
+        ),
+        ...(p.stagedCaptions.length
+          ? [`${p.stagedCaptions.length} captions`]
+          : []),
+        ...(state.pendingBackgroundBadge
+          ? ["Background change"]
+          : []),
+      ],
+      removed: [],
+      totalCount:
+        p.stagedZoomPoints.length +
+        p.stagedTextOverlays.length +
+        p.stagedCaptions.length +
+        (state.pendingBackgroundBadge ? 1 : 0),
+    };
+  },
+
+  commitAll: () => {
+    const state = get();
+    if (!state.project) return;
+    const p = state.project;
+    const project = {
+      ...p,
+      zoomPoints: [
+        ...p.zoomPoints,
+        ...p.stagedZoomPoints.map((z) => ({
+          ...z,
+          staged: false,
+        })),
+      ],
+      stagedZoomPoints: [],
+      textOverlays: [
+        ...p.textOverlays,
+        ...p.stagedTextOverlays.map((t) => ({
+          ...t,
+          staged: false,
+        })),
+      ],
+      stagedTextOverlays: [],
+      captions: [...p.captions, ...p.stagedCaptions],
+      stagedCaptions: [],
+    };
+    const snap = snapshot(project);
+    const history = [
+      ...state.history.slice(0, state.historyIndex + 1),
+      snap,
+    ];
+    set({
+      project,
+      history,
+      historyIndex: history.length - 1,
+      pendingBackgroundBadge: false,
+    });
+  },
+
+  clearStaged: () => {
+    const state = get();
+    if (!state.project) return;
+    // Revert background to last committed if pending
+    let revertedBg = state.project.background;
+    if (
+      state.pendingBackgroundBadge &&
+      state.historyIndex >= 0 &&
+      state.history[state.historyIndex]
+    ) {
+      revertedBg = state.history[state.historyIndex]!.background;
+    }
+    set({
+      project: {
+        ...state.project,
+        stagedZoomPoints: [],
+        stagedTextOverlays: [],
+        stagedCaptions: [],
+        background: revertedBg,
+      },
+      pendingBackgroundBadge: false,
+    });
+  },
+
+  // ── Undo / redo ──
+
+  undo: () => {
+    const state = get();
+    if (state.historyIndex <= 0 || !state.project) return;
+    const newIndex = state.historyIndex - 1;
+    const snap = state.history[newIndex]!;
+    set({
+      project: restoreFromSnapshot(state.project, snap),
+      historyIndex: newIndex,
+    });
+  },
+
+  redo: () => {
+    const state = get();
+    if (
+      state.historyIndex >= state.history.length - 1 ||
+      !state.project
+    )
+      return;
+    const newIndex = state.historyIndex + 1;
+    const snap = state.history[newIndex]!;
+    set({
+      project: restoreFromSnapshot(state.project, snap),
+      historyIndex: newIndex,
+    });
+  },
+
+  // ── Moment marks ──
+
+  markMoment: (t) => {
+    const state = get();
+    if (!state.project) return;
+    const event: ClickEvent = {
+      t,
+      x: 0.5,
+      y: 0.5,
+      type: "manual",
+    };
+    const project = {
+      ...state.project,
+      clickLog: [...state.project.clickLog, event],
+    };
+    set({ project });
+  },
 }));

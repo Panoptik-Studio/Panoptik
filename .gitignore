@@ -29,3 +29,4 @@ coverage/
 *.mp4
 *.webm
 !fixtures/demo-clip.mp4
+package-lock.json
