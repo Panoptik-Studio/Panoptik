@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm --filter @panoptik/web build",
+  "installCommand": "pnpm install",
+  "outputDirectory": "apps/web/out",
+  "framework": null
+}

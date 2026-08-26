@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# next.js
+.next/
+out/
+
+# build
+*.tsbuildinfo
+
+# testing
+coverage/
+
+# env
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.log
+.vercel
+
+# large media (regenerate, never commit big binaries) — except the known-good demo clip
+*.mp4
+*.webm
+!fixtures/demo-clip.mp4
