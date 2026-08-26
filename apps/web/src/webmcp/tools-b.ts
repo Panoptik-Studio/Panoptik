@@ -5,6 +5,23 @@
  * commit_staged_changes is gated by showConfirmDialog.
  */
 import { registerToolWithLifecycle } from "./lifecycle";
+
+/** Whisper can be slow on a long clip, but it should never hang forever. */
+const TRANSCRIBE_TIMEOUT_MS = 10 * 60 * 1000;
+
+// Tool arguments arrive from a model, so they are treated as untrusted input:
+// bounded, clamped and type-checked before they reach the store. The JSON
+// schema is a hint to the caller, not an enforced contract.
+const MAX_PROPOSALS = 200;
+const MAX_TEXT_LENGTH = 200;
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+const clampNumber = (v: unknown, min: number, max: number, fallback: number) =>
+  typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+
+/** A hex colour, or the fallback. Unvalidated strings reach CSS and canvas. */
+const safeColor = (v: unknown, fallback: string) =>
+  typeof v === "string" && HEX_COLOR.test(v.trim()) ? v.trim() : fallback;
 import { useProjectStore } from "../stores/projectStore";
 import { showConfirmDialog } from "./confirm";
 import { postProcessCaptions } from "../lib/captionChunker";
@@ -57,14 +74,22 @@ export function registerEditingTools(): void {
             "No project loaded. Ask the user to import a clip first.",
         };
 
-      const clamped = timestamps.filter(
-        (t: number) =>
-          t >= 0 && t <= store.project!.clip.duration,
-      );
+      const list = Array.isArray(timestamps) ? timestamps : [];
+      const clamped = list
+        .filter(
+          (t: number) =>
+            typeof t === "number" &&
+            Number.isFinite(t) &&
+            t >= 0 &&
+            t <= store.project!.clip.duration,
+        )
+        // Without a cap, one call could stage enough keyframes to lock the tab.
+        .slice(0, MAX_PROPOSALS);
+      const depth = clampNumber(scale, 1, 5, 2.2);
       const proposals = clamped.map((t: number) => ({
         id: generateId(),
         t,
-        to: { scale: scale ?? 2.2, x: 0.5, y: 0.5 },
+        to: { scale: depth, x: 0.5, y: 0.5 },
         dur: 0.7,
         ease: "easeInOutCubic",
         staged: true,
@@ -120,18 +145,24 @@ export function registerEditingTools(): void {
             "No project loaded. Ask the user to import a clip first.",
         };
 
+      const safeText = String(text ?? "").slice(0, MAX_TEXT_LENGTH);
+      if (!safeText.trim()) return { error: "Text must not be empty." };
+      const at = clampNumber(timestamp, 0, store.project.clip.duration, 0);
+      const where =
+        position === "top" || position === "center" || position === "bottom"
+          ? position
+          : "bottom";
+
       store.stageTextOverlay({
         id: generateId(),
-        text,
-        timestamp,
-        position:
-          (position as "top" | "bottom" | "center") ??
-          "bottom",
+        text: safeText,
+        timestamp: at,
+        position: where,
         staged: true,
       });
       return {
         staged: true,
-        message: `Text overlay "${text}" staged at ${timestamp}s. Call commit_staged_changes to apply.`,
+        message: `Text overlay "${safeText}" staged at ${at}s. Call commit_staged_changes to apply.`,
       };
     },
   });
@@ -181,13 +212,13 @@ export function registerEditingTools(): void {
 
       const bg =
         kind === "solid"
-          ? { kind: "solid" as const, color: color ?? "#000000" }
+          ? { kind: "solid" as const, color: safeColor(color, "#000000") }
           : {
               kind: "gradient" as const,
-              stops: (stops ?? ["#6366f1", "#a855f7"]) as [
-                string,
-                string,
-              ],
+              stops: [
+                safeColor(stops?.[0], "#6366f1"),
+                safeColor(stops?.[1], "#a855f7"),
+              ] as [string, string],
             };
 
       store.stageBackground(bg);
@@ -273,17 +304,36 @@ export function registerEditingTools(): void {
             };
           `;
           const blob = new Blob([workerCode], { type: "application/javascript" });
-          const worker = new Worker(URL.createObjectURL(blob));
+          const workerUrl = URL.createObjectURL(blob);
+          const worker = new Worker(workerUrl);
+          // The Worker copies the script on construction, so the URL is free
+          // to go — otherwise each run leaks one.
+          URL.revokeObjectURL(workerUrl);
+          // A transcription that never reports back would otherwise hold the
+          // model in memory and leave this promise pending forever.
+          const failsafe = setTimeout(() => {
+            useProjectStore.getState().setWhisperProgress(null);
+            worker.terminate();
+            reject(new Error("Transcription timed out."));
+          }, TRANSCRIBE_TIMEOUT_MS);
+          worker.onerror = (err) => {
+            clearTimeout(failsafe);
+            useProjectStore.getState().setWhisperProgress(null);
+            worker.terminate();
+            reject(new Error(`Transcription worker failed: ${err.message}`));
+          };
           worker.onmessage = (e) => {
             if (e.data.type === "progress") {
               useProjectStore.getState().setWhisperProgress(e.data.progress);
             }
             if (e.data.type === "result") {
+              clearTimeout(failsafe);
               useProjectStore.getState().setWhisperProgress(null);
               resolve(e.data.captions);
               worker.terminate();
             }
             if (e.data.type === "error") {
+              clearTimeout(failsafe);
               useProjectStore.getState().setWhisperProgress(null);
               reject(new Error(e.data.error));
               worker.terminate();

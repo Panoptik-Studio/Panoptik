@@ -66,10 +66,30 @@ export async function saveProject(
   }
 }
 
+/**
+ * Blob URLs minted for the last loaded project. They pin the whole recording in
+ * memory until revoked, so loading another project releases the previous one.
+ */
+let loadedUrls: string[] = [];
+
+function mintUrl(blob: Blob): string {
+  const url = URL.createObjectURL(blob);
+  loadedUrls.push(url);
+  return url;
+}
+
+/** Release the blob URLs held by the previously loaded project. */
+export function releaseLoadedProjectUrls(): void {
+  loadedUrls.forEach((u) => URL.revokeObjectURL(u));
+  loadedUrls = [];
+}
+
 export async function loadProject(
   id: string,
 ): Promise<Project | null> {
   if (!isSecureContext()) return null;
+
+  releaseLoadedProjectUrls();
 
   try {
     const root = await navigator.storage.getDirectory();
@@ -88,7 +108,7 @@ export async function loadProject(
         "clip.webm",
       );
       const clipBlob = await clipFile.getFile();
-      project.clip.src = URL.createObjectURL(clipBlob);
+      project.clip.src = mintUrl(clipBlob);
     } catch {
       // clip not saved — keep existing src
     }
@@ -99,8 +119,7 @@ export async function loadProject(
         "facecam.webm",
       );
       const facecamBlob = await facecamFile.getFile();
-      project.facecam.src =
-        URL.createObjectURL(facecamBlob);
+      project.facecam.src = mintUrl(facecamBlob);
     } catch {
       // no facecam
     }

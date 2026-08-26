@@ -11,6 +11,8 @@ type ConfirmRequest = {
   message: string;
   diff?: { added: string[]; removed: string[]; totalCount: number };
   resolve: (result: boolean) => void;
+  /** Set here so the caller can tell a dialog was mounted to answer it. */
+  claimed?: boolean;
 };
 
 export function ConfirmDialog() {
@@ -19,12 +21,26 @@ export function ConfirmDialog() {
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const handler = (e: Event) => setRequest((e as CustomEvent<ConfirmRequest>).detail);
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<ConfirmRequest>).detail;
+      detail.claimed = true;
+      setRequest(detail);
+    };
     window.addEventListener("webmcp-confirm", handler as EventListener);
     return () => window.removeEventListener("webmcp-confirm", handler as EventListener);
   }, []);
 
-  useEffect(() => { if (request) setTimeout(() => confirmBtnRef.current?.focus(), 50); }, [request]);
+  useEffect(() => {
+    if (!request) return;
+    const id = setTimeout(() => confirmBtnRef.current?.focus(), 50);
+    return () => clearTimeout(id);
+  }, [request]);
+
+  // Unmounting with a question still open denies it rather than stranding the
+  // caller on a promise that can no longer be answered.
+  const pendingRef = useRef<ConfirmRequest | null>(null);
+  pendingRef.current = request;
+  useEffect(() => () => pendingRef.current?.resolve(false), []);
 
   useEffect(() => {
     if (!request) return;

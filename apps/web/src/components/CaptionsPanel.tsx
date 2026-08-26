@@ -4,7 +4,7 @@
  */
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { extractMono16k } from "@/lib/audio16k";
 import { postProcessCaptions } from "@/lib/captionChunker";
@@ -17,6 +17,16 @@ export function CaptionsPanel() {
   const [localProgress, setLocalProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const workerRef = useRef<Worker | null>(null);
+
+  // Transcription runs a Whisper model; leaving it running after the panel is
+  // gone pins hundreds of megabytes and keeps burning CPU.
+  useEffect(
+    () => () => {
+      workerRef.current?.terminate();
+      workerRef.current = null;
+    },
+    [],
+  );
   const progress = localProgress ?? whisperProgress;
 
   const handleGenerate = useCallback(async () => {
@@ -32,8 +42,12 @@ export function CaptionsPanel() {
           const response = await fetch(project.clip.src);
           const arrayBuf = await response.arrayBuffer();
           const ctx = new AudioContext();
-          audioBuffer = await ctx.decodeAudioData(arrayBuf);
-          ctx.close();
+          try {
+            audioBuffer = await ctx.decodeAudioData(arrayBuf);
+          } finally {
+            // Every AudioContext holds an audio thread until closed.
+            void ctx.close();
+          }
         } catch { /* no audio */ }
       }
       if (!audioBuffer) { setError("No audio track found in clip."); setLocalProgress(null); return; }
@@ -54,7 +68,11 @@ export function CaptionsPanel() {
         };
       `;
       const blob = new Blob([workerCode], { type: "application/javascript" });
-      const worker = new Worker(URL.createObjectURL(blob));
+      const workerUrl = URL.createObjectURL(blob);
+      const worker = new Worker(workerUrl);
+      // The Worker keeps its own copy of the script once constructed, so the
+      // URL can go immediately rather than leaking one per run.
+      URL.revokeObjectURL(workerUrl);
       workerRef.current = worker;
       worker.onmessage = (e) => {
         const msg = e.data;

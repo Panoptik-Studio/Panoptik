@@ -294,6 +294,14 @@ export function PreviewCanvas() {
     return () => window.removeEventListener("keydown", handler);
   }, [undo, redo]);
 
+  // A pending toast timer would call setToast after unmount.
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    },
+    [],
+  );
+
   // ── Click → add a zoom at the playhead (or select the handle under the cursor) ──
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
