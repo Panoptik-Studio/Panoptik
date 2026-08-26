@@ -1,10 +1,15 @@
 /**
  * PiPWindow — renders camera (mirrored, circle/square) into Document PiP window.
  * Stays visible over desktop when sharing screen, like the reference recorder.
+ *
+ * The <video> carries a class and a ref and nothing else: inline styles are new
+ * objects on every render, so React re-applies transform/border-radius to the
+ * element each time the timer ticks, and that shows up as flicker in the bubble.
+ * All styling lives in a stylesheet injected into the PiP document once.
  */
 "use client";
 
-import { memo, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 type Props = {
@@ -22,25 +27,77 @@ function fmt(s: number): string {
   return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-// Memoised: the recorder re-renders on every device pick, corner change and
-// timer tick, and re-rendering the portal churns the <video> in the bubble.
-export const PiPWindow = memo(function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onStop }: Props) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+/**
+ * Full-bleed camera with the controls floating over it, so the video's box
+ * never changes size — a relayout of a playing video is a visible hitch.
+ */
+const PIP_CSS = `
+  html, body { height: 100%; margin: 0; background: #0B0C0E; overflow: hidden; }
+  .pip-root { position: fixed; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr); background: #0B0C0E; font-family: Inter, system-ui, sans-serif; }
+  .pip-camera { grid-area: 1/1; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); background: #17181B; }
+  .pip-camera.is-circle { border-radius: 50%; }
+  .pip-empty { grid-area: 1/1; display: flex; align-items: center; justify-content: center; color: #888; font-size: 12px; background: #fafafa; }
+  .pip-controls { grid-area: 1/1; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding: 14px 16px; background-image: linear-gradient(to top, rgb(0 0 0 / 62%), rgb(0 0 0 / 0%) 96px); }
+  .pip-time { display: flex; align-items: center; gap: 7px; font-family: 'Geist Mono', 'SF Mono', monospace; font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.92); }
+  .pip-dot { width: 8px; height: 8px; border-radius: 50%; background: #E11D48; box-shadow: 0 0 8px rgba(225,29,72,0.9); }
+  .pip-stop { border: none; border-radius: 9999px; padding: 7px 14px; font-size: 12px; font-weight: 600; color: #fff; cursor: pointer; background: #E11D48; }
+  .pip-stop.is-idle { background: #171717; }
+`;
 
+/**
+ * Timer text only. Kept separate so a tick re-renders this span rather than the
+ * subtree holding the <video>.
+ */
+const Readout = memo(function Readout({
+  elapsed,
+  isRecording,
+}: {
+  elapsed: number;
+  isRecording: boolean;
+}) {
+  return (
+    <span className="pip-time">
+      {isRecording && <span className="pip-dot" />}
+      {isRecording ? fmt(elapsed) : "Preview"}
+    </span>
+  );
+});
+
+export const PiPWindow = memo(function PiPWindow({
+  pipWindow,
+  stream,
+  shape,
+  elapsed,
+  isRecording,
+  onStop,
+}: Props) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Attach through the ref callback rather than an effect: it fires exactly when
+  // the element mounts or the stream changes, never on an unrelated re-render.
+  const attachStream = useCallback(
+    (el: HTMLVideoElement | null) => {
+      if (el) {
+        if (el.srcObject !== stream) el.srcObject = stream;
+        el.play().catch(() => { /* autoplay policy; muted should allow it */ });
+      } else if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      videoRef.current = el;
+    },
+    [stream],
+  );
+
+  // One stylesheet per PiP document.
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v || !stream) return;
-    // Compare the track, not the MediaStream: handing over from preview to
-    // recording wraps the *same* camera track in a new MediaStream, and
-    // re-assigning srcObject restarts the element — a visible flicker.
-    const attached = (v.srcObject as MediaStream | null)?.getVideoTracks()[0];
-    if (attached === stream.getVideoTracks()[0]) return;
-    v.srcObject = stream;
-    v.play().catch(() => {});
-  }, [stream]);
+    if (!pipWindow) return;
+    const style = pipWindow.document.createElement("style");
+    style.textContent = PIP_CSS;
+    pipWindow.document.head.appendChild(style);
+    return () => style.remove();
+  }, [pipWindow]);
 
-  // Recover only from an actual stall — play() on a playing element makes the
-  // picture hitch, which reads as flicker in a small bubble.
+  // Recover only from an actual stall — play() on a playing element hitches.
   useEffect(() => {
     if (!pipWindow || !isRecording) return;
     const id = window.setInterval(() => {
@@ -48,80 +105,29 @@ export const PiPWindow = memo(function PiPWindow({ pipWindow, stream, shape, ela
       if (v && v.paused && v.srcObject) v.play().catch(() => {});
     }, 1000);
     return () => clearInterval(id);
-  }, [pipWindow, isRecording, stream]);
-
-  // Give the PiP document a full-height root. Without an explicit height on
-  // <html>/<body>, the layout's `height: 100%` resolves against auto and
-  // collapses to the video's intrinsic size, leaving dead space below.
-  useEffect(() => {
-    if (!pipWindow) return;
-    const { documentElement: root, body } = pipWindow.document;
-    for (const el of [root, body]) {
-      el.style.height = "100%";
-      el.style.margin = "0";
-      el.style.background = "#000";
-    }
-    body.style.overflow = "hidden";
-  }, [pipWindow]);
+  }, [pipWindow, isRecording]);
 
   if (!pipWindow) return null;
 
   return createPortal(
-    <div style={{ width: "100%", height: "100%", background: "#0B0C0E", display: "flex", flexDirection: "column", fontFamily: "Inter, system-ui, sans-serif" }}>
-      <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 10, background: "#0B0C0E" }}>
-        {/* Largest square that fits, whatever shape the user resizes the window
-            to — a 50% radius on a non-square box renders as an ellipse. */}
-        <div
-          style={{
-            position: "relative",
-            aspectRatio: "1 / 1",
-            height: "100%",
-            maxHeight: "100%",
-            maxWidth: "100%",
-            background: "#17181B",
-            borderRadius: shape === "circle" ? "50%" : 16,
-            boxShadow:
-              "0 0 0 2px rgba(255,255,255,0.9), 0 8px 24px rgba(0,0,0,0.55)",
-          }}
-        >
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              // Round the video itself rather than clipping it through the
-              // parent: an overflow clip over a transformed video forces the
-              // compositor to re-rasterise every frame.
-              borderRadius: "inherit",
-              // Keep it on its own compositor layer so the mirror transform is
-              // not re-applied on the main thread each frame.
-              transform: "scaleX(-1) translateZ(0)",
-              backfaceVisibility: "hidden",
-              willChange: "transform",
-              display: "block",
-            }}
-          />
-          {!stream && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa", borderRadius: "inherit" }}>
-              <span style={{ fontSize: 12, color: "#888" }}>No camera</span>
-            </div>
-          )}
-        </div>
-      </div>
-      <div style={{ height: 46, flexShrink: 0, background: "#0B0C0E", borderTop: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 12px", color: "white" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "Geist Mono, JetBrains Mono, monospace", fontSize: 12, color: "rgba(255,255,255,0.72)" }}>
-          {isRecording && (
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#E11D48", boxShadow: "0 0 8px rgba(225,29,72,0.9)" }} />
-          )}
-          {isRecording ? fmt(elapsed) : "Preview"}
-        </span>
+    <div className="pip-root">
+      {stream ? (
+        <video
+          ref={attachStream}
+          className={shape === "circle" ? "pip-camera is-circle" : "pip-camera"}
+          autoPlay
+          playsInline
+          muted
+          controls={false}
+        />
+      ) : (
+        <div className="pip-empty">No camera</div>
+      )}
+      <div className="pip-controls">
+        <Readout elapsed={elapsed} isRecording={isRecording} />
         <button
+          className={isRecording ? "pip-stop" : "pip-stop is-idle"}
           onClick={onStop}
-          style={{ background: isRecording ? "#E11D48" : "#171717", color: "white", border: "none", borderRadius: 9999, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
         >
           {isRecording ? "Stop" : "Close"}
         </button>

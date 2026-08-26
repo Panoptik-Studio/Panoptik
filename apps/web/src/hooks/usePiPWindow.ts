@@ -6,9 +6,9 @@
 
 import { useCallback, useRef, useState } from "react";
 
-/** Must match PiPWindow's control bar and the padding around the bubble. */
-const CONTROL_BAR_HEIGHT = 46;
-const CHROME_PADDING = 20;
+/** The camera fills the window and the controls float over it, so it stays square. */
+const MIN_EDGE = 200;
+const MAX_EDGE = 460;
 
 /** Document Picture-in-Picture is Chromium-only and needs a secure context. */
 export function isPipSupported(): boolean {
@@ -29,10 +29,10 @@ export function usePiPWindow() {
     // Reuse an open bubble rather than stacking a second one.
     if (pipWindowRef.current && !pipWindowRef.current.closed) return pipWindowRef.current;
     try {
-      const edge = Math.round(Math.max(180, Math.min(480, size)));
+      const edge = Math.round(Math.max(MIN_EDGE, Math.min(MAX_EDGE, size)));
       const pw = await w.documentPictureInPicture.requestWindow({
-        width: edge + CHROME_PADDING,
-        height: edge + CHROME_PADDING + CONTROL_BAR_HEIGHT,
+        width: edge,
+        height: edge,
       });
       // No stylesheet copying: the bubble is entirely inline-styled, so cloning
       // the app's CSS would only add weight and let page rules fight it.
