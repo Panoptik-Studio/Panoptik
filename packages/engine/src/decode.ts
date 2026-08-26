@@ -12,6 +12,7 @@
 import { ALL_FORMATS, BlobSource, CanvasSink, Input, type WrappedCanvas } from "mediabunny";
 import type { Project } from "@panoptik/schema";
 import { getCurrentFrame, setCurrentFrame } from "./render";
+import { setAudioSink } from "./audio";
 
 /** Preview decode cap: a 4K source decodes into 1920-wide canvases. */
 const MAX_DECODE_WIDTH = 1920;
@@ -62,6 +63,18 @@ export async function loadClip(file: File): Promise<Project> {
   });
   duration = await track.computeDuration();
   createSurface(decodeW, decodeH);
+
+  // ── Unified audio: same Input also yields audio track (single-pass demux) ──
+  try {
+    const audioTrack = await input.getPrimaryAudioTrack();
+    if (audioTrack && (await audioTrack.canDecode())) {
+      setAudioSink(audioTrack);
+    } else {
+      setAudioSink(null);
+    }
+  } catch {
+    setAudioSink(null);
+  }
 
   objectUrl = URL.createObjectURL(file);
   return {
@@ -189,6 +202,7 @@ async function teardown(): Promise<void> {
   surface = null;
   surfaceCtx = null;
   setCurrentFrame(null);
+  setAudioSink(null);
   if (objectUrl) {
     URL.revokeObjectURL(objectUrl);
     objectUrl = null;

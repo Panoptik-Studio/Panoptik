@@ -71,7 +71,8 @@ export function renderFrame(
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   }
 
-  // ── Layer 3: Facecam PiP (deferred to Task 2.2) ──
+  // ── Layer 3: Facecam PiP (screen space, never zoomed) ──
+  drawFacecam(ctx, project, t, w, h);
 
   // ── Layer 4: Text overlays ──
   drawTextOverlays(ctx, project, t, w, h);
@@ -138,4 +139,102 @@ function drawCaptions(
       ctx.fillText(c.text, w / 2, h - 40);
     }
   }
+}
+
+// ── Facecam PiP ──────────────────────────────────────────────────────────────
+// Private Map<url, HTMLVideoElement>; lazy <video muted playsinline>; seek
+// currentTime = t % duration pre-draw; rounded-corner PiP at facecam.x/y/size
+// in screen space (never zoomed). Spec.md: x/y = top-left 0-1, size = 0-1 of canvas width.
+const facecamCache = new Map<string, HTMLVideoElement>();
+
+function getFacecamVideo(src: string): HTMLVideoElement | null {
+  if (typeof document === "undefined") return null;
+  const cached = facecamCache.get(src);
+  if (cached) return cached;
+  const v = document.createElement("video");
+  v.src = src;
+  v.muted = true;
+  (v as unknown as { playsInline: boolean }).playsInline = true;
+  v.preload = "auto";
+  v.crossOrigin = "anonymous";
+  // Do not autoplay; we manually seek. Keep element off-DOM — still decodable.
+  try { v.load(); } catch { /* ignore */ }
+  facecamCache.set(src, v);
+  return v;
+}
+
+function drawFacecam(
+  ctx: CanvasRenderingContext2D,
+  project: Project,
+  t: number,
+  canvasW: number,
+  canvasH: number,
+): void {
+  const fc = project.facecam;
+  if (!fc.src) return;
+  const video = getFacecamVideo(fc.src);
+  if (!video) return;
+  // Need at least HAVE_CURRENT_DATA to show a frame
+  if (video.readyState < 2) return;
+  // Seek to time within duration (loop)
+  try {
+    const dur = video.duration;
+    if (isFinite(dur) && dur > 0) {
+      const target = t % dur;
+      // Only seek if far enough to avoid thrashing (16ms ~ 1 frame)
+      if (Math.abs(video.currentTime - target) > 0.05) {
+        video.currentTime = target;
+      }
+    }
+  } catch { /* ignore seek errors */ }
+  if (video.readyState < 2) return;
+
+  const pipW = Math.round(canvasW * fc.size);
+  // Preserve ~16:9; fallback to square if no video dimensions yet
+  const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+  const pipH = Math.round(pipW / aspect);
+  const x = Math.round(canvasW * fc.x);
+  const y = Math.round(canvasH * fc.y);
+  // Clamp inside canvas
+  const clampedX = Math.min(x, canvasW - pipW);
+  const clampedY = Math.min(y, canvasH - pipH);
+
+  const radius = 12;
+  ctx.save();
+  // Rounded rect clip
+  ctx.beginPath();
+  if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
+    (ctx as unknown as { roundRect: (x:number,y:number,w:number,h:number,r:number)=>void }).roundRect(clampedX, clampedY, pipW, pipH, radius);
+  } else {
+    const r = Math.min(radius, pipW / 2, pipH / 2);
+    ctx.moveTo(clampedX + r, clampedY);
+    ctx.arcTo(clampedX + pipW, clampedY, clampedX + pipW, clampedY + pipH, r);
+    ctx.arcTo(clampedX + pipW, clampedY + pipH, clampedX, clampedY + pipH, r);
+    ctx.arcTo(clampedX, clampedY + pipH, clampedX, clampedY, r);
+    ctx.arcTo(clampedX, clampedY, clampedX + pipW, clampedY, r);
+    ctx.closePath();
+  }
+  ctx.clip();
+  try {
+    ctx.drawImage(video, clampedX, clampedY, pipW, pipH);
+  } catch { /* video frame not ready */ }
+  ctx.restore();
+  // Subtle border
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
+    (ctx as unknown as { roundRect: (x:number,y:number,w:number,h:number,r:number)=>void }).roundRect(clampedX, clampedY, pipW, pipH, radius);
+  } else {
+    const r = Math.min(radius, pipW / 2, pipH / 2);
+    ctx.moveTo(clampedX + r, clampedY);
+    ctx.arcTo(clampedX + pipW, clampedY, clampedX + pipW, clampedY + pipH, r);
+    ctx.arcTo(clampedX + pipW, clampedY + pipH, clampedX, clampedY + pipH, r);
+    ctx.arcTo(clampedX, clampedY + pipH, clampedX, clampedY, r);
+    ctx.arcTo(clampedX, clampedY, clampedX + pipW, clampedY, r);
+    ctx.closePath();
+  }
+  ctx.stroke();
+  ctx.restore();
 }

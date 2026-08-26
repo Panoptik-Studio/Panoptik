@@ -3,44 +3,96 @@
  * the same mediabunny Input opened by loadClip also yields AudioBufferSink
  * (single-pass demux — no duplicate container parsing or inter-module races).
  * Signature: getAudioBuffer(project): Promise<AudioBuffer | null>
- * Concatenates buffer chunks at running offsets into one mono AudioBuffer.
+ * Concatenates buffer chunks at running offsets into one AudioBuffer.
  */
-import { InputAudioTrack, AudioBufferSink } from "mediabunny";
+import type { Project } from "@panoptik/schema";
+import { AudioBufferSink, type InputAudioTrack } from "mediabunny";
 
 let audioSink: AudioBufferSink | null = null;
 
 export function setAudioSink(track: InputAudioTrack | null) {
-  audioSink = track ? new AudioBufferSink(track) : null;
+  if (!track) {
+    audioSink = null;
+    return;
+  }
+  try {
+    audioSink = new AudioBufferSink(track);
+  } catch {
+    audioSink = null;
+  }
 }
 
 export async function getAudioBuffer(_project: Project): Promise<AudioBuffer | null> {
   if (!audioSink) return null;
 
   const chunks: AudioBuffer[] = [];
-  for await (const wrapped of audioSink.buffers()) {
-    chunks.push(wrapped.buffer);
+  try {
+    for await (const wrapped of audioSink.buffers()) {
+      chunks.push(wrapped.buffer);
+    }
+  } catch {
+    return null;
   }
   if (!chunks.length) return null;
 
-  // Compute total length (mono — mix down to channel 0)
+  const sampleRate = chunks[0]!.sampleRate;
+  const numberOfChannels = Math.max(...chunks.map((c) => c.numberOfChannels));
   let totalFrames = 0;
-  for (const buf of chunks) totalFrames += buf.length;
+  for (const c of chunks) totalFrames += c.length;
 
-  const ctx = new OfflineAudioContext(1, totalFrames, chunks[0]!.sampleRate);
-  const dest = ctx.createBuffer(1, totalFrames, chunks[0]!.sampleRate);
-  const data = dest.getChannelData(0);
+  // Try native AudioBuffer constructor (modern browsers), fallback to OfflineAudioContext.
+  let dest: AudioBuffer | null = null;
+  try {
+    // @ts-ignore — AudioBuffer options constructor may not be in older lib.dom
+    dest = new AudioBuffer({ length: totalFrames, numberOfChannels, sampleRate });
+  } catch {
+    dest = null;
+  }
+  if (!dest) {
+    try {
+      if (typeof OfflineAudioContext !== "undefined") {
+        const ctx = new OfflineAudioContext(numberOfChannels, totalFrames, sampleRate);
+        dest = ctx.createBuffer(numberOfChannels, totalFrames, sampleRate);
+      }
+    } catch {
+      dest = null;
+    }
+  }
+  // Last resort for test env (vitest node): mock buffer shape
+  if (!dest) {
+    // Minimal AudioBuffer-like shim for tests — callers use getChannelData
+    const channels: Float32Array[] = Array.from({ length: numberOfChannels }, () => new Float32Array(totalFrames));
+    const mock = {
+      length: totalFrames,
+      sampleRate,
+      numberOfChannels,
+      duration: totalFrames / sampleRate,
+      getChannelData: (ch: number) => channels[ch]!,
+      copyToChannel: (src: Float32Array, ch: number, start = 0) => channels[ch]!.set(src, start),
+      copyFromChannel: (dst: Float32Array, ch: number, start = 0) => dst.set(channels[ch]!.subarray(start, start + dst.length)),
+    } as unknown as AudioBuffer;
+    let offset = 0;
+    for (const buf of chunks) {
+      for (let ch = 0; ch < numberOfChannels; ch++) {
+        const src = ch < buf.numberOfChannels ? buf.getChannelData(ch) : null;
+        if (src) mock.getChannelData(ch).set(src, offset);
+      }
+      offset += buf.length;
+    }
+    return mock;
+  }
 
+  // Copy channel data at running offsets
   let offset = 0;
   for (const buf of chunks) {
-    // Mix down to mono if stereo
-    const ch0 = buf.getChannelData(0);
-    for (let i = 0; i < buf.length; i++) {
-      data[offset + i] = ch0[i]!;
+    for (let ch = 0; ch < numberOfChannels; ch++) {
+      if (ch < buf.numberOfChannels) {
+        dest.getChannelData(ch).set(buf.getChannelData(ch), offset);
+      }
     }
+    // Handle source having more channels than dest (unlikely) — ignore extras
     offset += buf.length;
   }
 
   return dest;
 }
-
-import type { Project } from "@panoptik/schema";
