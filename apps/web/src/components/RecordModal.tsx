@@ -294,10 +294,7 @@ export function RecordModal() {
   const handleStart = useCallback(async () => {
     try {
       setError(null);
-      // Stop preview stream before countdown
-      cameraPreviewStreamRef.current?.getTracks().forEach((t) => t.stop());
-      cameraPreviewStreamRef.current = null;
-
+      // Keep preview stream alive during countdown so PiP shows face (was showing "No camera")
       // Countdown 3-2-1
       setState("countingDown");
       for (let n = 3; n >= 1; n--) {
@@ -317,6 +314,11 @@ export function RecordModal() {
         cameraEnabled: layout !== "screenOnly" && cameraEnabled,
         microphoneEnabled: micEnabled,
       });
+
+      // Preview no longer needed — live facecam will take over PiP
+      cameraPreviewStreamRef.current?.getTracks().forEach((t) => t.stop());
+      cameraPreviewStreamRef.current = null;
+      setHasPreviewVideo(false);
 
       requestAnimationFrame(() => {
         if (screenLiveRef.current && handlesRef.current?.screenStream.getTracks().length)

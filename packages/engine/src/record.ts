@@ -44,10 +44,16 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   let screenStream: MediaStream | null = null;
   let facecamStream: MediaStream | null = null;
 
-  // ── Screen capture (skip for cameraOnly) ──
+  // ── Screen capture (skip for cameraOnly) — high quality, minimal padding (native res, no extra bars)
   if (layout !== "cameraOnly") {
     screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 60 }, cursor: "always" } as any,
+      video: {
+        frameRate: { ideal: 60, max: 60 },
+        cursor: "always",
+        width: { ideal: 1920, max: 1920 },
+        height: { ideal: 1080, max: 1080 },
+        displaySurface: "monitor",
+      } as unknown as MediaTrackConstraints,
       audio: false,
     });
     // If user cancelled screen share, getDisplayMedia will have thrown already.
@@ -59,13 +65,13 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     screenStream = new MediaStream();
   }
 
-  // ── Camera + mic (skip for screenOnly or when disabled) ──
+  // ── Camera + mic (skip for screenOnly or when disabled) — high quality 1080p
   if (layout !== "screenOnly" && cameraEnabled) {
     try {
       facecamStream = await navigator.mediaDevices.getUserMedia({
         video: cameraDeviceId
-          ? { deviceId: { exact: cameraDeviceId }, width: 1280, height: 720, facingMode: "user" }
-          : { width: 1280, height: 720, facingMode: "user" },
+          ? { deviceId: { exact: cameraDeviceId }, width: 1920, height: 1080, frameRate: { ideal: 30 }, facingMode: "user" }
+          : { width: 1920, height: 1080, frameRate: { ideal: 30 }, facingMode: "user" },
         audio: microphoneEnabled
           ? microphoneDeviceId
             ? { deviceId: { exact: microphoneDeviceId }, echoCancellation: true, noiseSuppression: true }
@@ -73,10 +79,10 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
           : false,
       });
     } catch {
-      // Fallback: try without exact deviceId (permission or over-constrained)
+      // Fallback: try without exact deviceId (permission or over-constrained) — still high quality
       try {
         facecamStream = await navigator.mediaDevices.getUserMedia({
-          video: cameraEnabled ? { width: 640, height: 360 } : false,
+          video: cameraEnabled ? { width: 1280, height: 720, frameRate: { ideal: 30 } } : false,
           audio: microphoneEnabled ? true : false,
         } as MediaStreamConstraints);
       } catch {
@@ -102,14 +108,14 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   const screen = screenStream!;
   const facecam = facecamStream!;
 
-  // ── MediaRecorders — pick best supported mime ──
+  // ── MediaRecorders — high quality: vp9 preferred, 8 Mbps screen, 2.5 Mbps cam
   const screenMime =
-    ["video/webm;codecs=vp8", "video/webm;codecs=vp9", "video/webm"].find(
+    ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(
       (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
     ) || "video/webm";
 
   const facecamMime =
-    ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp9,opus", "video/webm"].find(
+    ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find(
       (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
     ) || "video/webm";
 
@@ -122,7 +128,9 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   if (screen.getTracks().length > 0) {
     screenRecorder = new MediaRecorder(
       screen,
-      MediaRecorder.isTypeSupported(screenMime) ? { mimeType: screenMime } : {},
+      MediaRecorder.isTypeSupported(screenMime)
+        ? { mimeType: screenMime, videoBitsPerSecond: 8_000_000 }
+        : { videoBitsPerSecond: 8_000_000 } as Record<string, unknown>,
     );
     screenRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) screenChunks.push(e.data);
@@ -133,7 +141,9 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   if (facecam.getTracks().length > 0) {
     facecamRecorder = new MediaRecorder(
       facecam,
-      MediaRecorder.isTypeSupported(facecamMime) ? { mimeType: facecamMime } : {},
+      MediaRecorder.isTypeSupported(facecamMime)
+        ? { mimeType: facecamMime, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 } as unknown as MediaRecorderOptions
+        : { videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 } as unknown as MediaRecorderOptions,
     );
     facecamRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) facecamChunks.push(e.data);

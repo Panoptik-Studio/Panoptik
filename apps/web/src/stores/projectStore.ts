@@ -133,7 +133,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   selectedZoomId: null,
   pendingBackgroundBadge: false,
   whisperProgress: null,
-  stagePadding: 16,
+  stagePadding: 8,
 
   // ── Project lifecycle ──
 
