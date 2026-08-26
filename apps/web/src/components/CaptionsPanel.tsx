@@ -1,7 +1,6 @@
 /**
  * OWNER: DEV B — CaptionsPanel.
- * Generate button → progress bar → staged captions list.
- * Connects to whisperWorker for transcription.
+ * Vercel card-soft style: white card, hairline, pill buttons (black→blue hover).
  */
 "use client";
 
@@ -11,57 +10,34 @@ import { extractMono16k } from "@/lib/audio16k";
 import { postProcessCaptions } from "@/lib/captionChunker";
 
 export function CaptionsPanel() {
-  // Selectors only — a full-store subscription re-renders this 60x/s in playback.
   const project = useProjectStore((s) => s.project);
   const stageCaptions = useProjectStore((s) => s.stageCaptions);
   const clearStagedCaptions = useProjectStore((s) => s.clearStagedCaptions);
   const whisperProgress = useProjectStore((s) => s.whisperProgress);
-  const [localProgress, setLocalProgress] = useState<number | null>(
-    null,
-  );
+  const [localProgress, setLocalProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const workerRef = useRef<Worker | null>(null);
-
-  // Use local progress when generating locally, store progress when agent-triggered
   const progress = localProgress ?? whisperProgress;
 
   const handleGenerate = useCallback(async () => {
     if (!project) return;
-    setLocalProgress(0);
-    setError(null);
-
+    setLocalProgress(0); setError(null);
     try {
-      // Get audio buffer — try engine first, fallback to AudioContext
       let audioBuffer: AudioBuffer | null = null;
-
       try {
-        const { engine } = await import(
-          "@/lib/engineProvider"
-        );
+        const { engine } = await import("@/lib/engineProvider");
         audioBuffer = await engine.getAudioBuffer(project);
       } catch {
-        // Fallback: decode from blob URL
         try {
           const response = await fetch(project.clip.src);
           const arrayBuf = await response.arrayBuffer();
           const ctx = new AudioContext();
           audioBuffer = await ctx.decodeAudioData(arrayBuf);
           ctx.close();
-        } catch {
-          // no audio
-        }
+        } catch { /* no audio */ }
       }
-
-      if (!audioBuffer) {
-        setError("No audio track found in clip.");
-        setLocalProgress(null);
-        return;
-      }
-
-      // Resample to 16kHz mono
+      if (!audioBuffer) { setError("No audio track found in clip."); setLocalProgress(null); return; }
       const pcm = await extractMono16k(audioBuffer);
-
-      // Spawn worker — use a simple wrapper that defers @xenova/transformers
       const workerCode = `
         let transcriber = null;
         self.onmessage = async (e) => {
@@ -69,61 +45,32 @@ export function CaptionsPanel() {
           try {
             if (!transcriber) {
               const { pipeline } = await import(/* webpackIgnore: true */ 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm');
-              transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
-                progress_callback: (p) => { if (p.status === 'progress') self.postMessage({ type: 'progress', progress: p.progress }); },
-              });
+              transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', { progress_callback: (p) => { if (p.status === 'progress') self.postMessage({ type: 'progress', progress: p.progress }); } });
             }
             self.postMessage({ type: 'progress', progress: -1 });
             const out = await transcriber(e.data.audio, { return_timestamps: 'word', chunk_length_s: 30, stride_length_s: 5 });
             self.postMessage({ type: 'result', captions: out.chunks.map((c) => ({ text: String(c.text).trim(), start: c.timestamp[0], end: c.timestamp[1] ?? c.timestamp[0] + 0.5 })) });
-          } catch (err) {
-            self.postMessage({ type: 'error', error: String(err) });
-          }
+          } catch (err) { self.postMessage({ type: 'error', error: String(err) }); }
         };
       `;
       const blob = new Blob([workerCode], { type: "application/javascript" });
       const worker = new Worker(URL.createObjectURL(blob));
       workerRef.current = worker;
-
       worker.onmessage = (e) => {
         const msg = e.data;
-        if (msg.type === "progress") {
-          setLocalProgress(msg.progress);
-        }
-        if (msg.type === "result") {
-          stageCaptions(postProcessCaptions(msg.captions));
-          setLocalProgress(null);
-          worker.terminate();
-          workerRef.current = null;
-        }
-        if (msg.type === "error") {
-          setError(msg.error);
-          setLocalProgress(null);
-          worker.terminate();
-          workerRef.current = null;
-        }
+        if (msg.type === "progress") setLocalProgress(msg.progress);
+        if (msg.type === "result") { stageCaptions(postProcessCaptions(msg.captions)); setLocalProgress(null); worker.terminate(); workerRef.current = null; }
+        if (msg.type === "error") { setError(msg.error); setLocalProgress(null); worker.terminate(); workerRef.current = null; }
       };
-
-      worker.postMessage({
-        type: "transcribe",
-        audio: pcm,
-      });
-    } catch (err) {
-      setError(String(err));
-      setLocalProgress(null);
-    }
+      worker.postMessage({ type: "transcribe", audio: pcm });
+    } catch (err) { setError(String(err)); setLocalProgress(null); }
   }, [project, stageCaptions]);
 
   if (!project)
     return (
-      <div className="border-b border-gray-800 p-4">
-        <h3 className="mb-2 text-sm font-semibold text-gray-300">
-          Captions
-        </h3>
-        <p className="text-xs text-gray-500">
-          Import a clip to generate captions from its
-          audio.
-        </p>
+      <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
+        <h3 className="mb-1 text-sm font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>Captions</h3>
+        <p className="text-xs" style={{ color: "#888" }}>Import a clip to generate captions from its audio.</p>
       </div>
     );
 
@@ -131,88 +78,52 @@ export function CaptionsPanel() {
   const committedCaptions = project.captions;
 
   return (
-    <div className="border-b border-gray-800 p-4">
-      <h3 className="mb-2 text-sm font-semibold text-gray-300">
-        Captions
-      </h3>
-
+    <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
+      <h3 className="mb-2 text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>Captions</h3>
       <div className="flex gap-2">
         <button
           onClick={handleGenerate}
           disabled={progress !== null}
-          className="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          className="rounded-full px-4 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-40"
+          style={{ background: "#171717" }}
+          onMouseEnter={(e) => { if (progress === null) e.currentTarget.style.background = "#0070f3"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "#171717"; }}
         >
-          {progress !== null
-            ? progress === -1
-              ? "Transcribing..."
-              : `Loading model... ${Math.round(progress)}%`
-            : "Generate Captions"}
+          {progress !== null ? (progress === -1 ? "Transcribing…" : `Loading ${Math.round(progress)}%`) : "Generate Captions"}
         </button>
         {stagedCaptions.length > 0 && (
-          <button
-            onClick={clearStagedCaptions}
-            className="rounded bg-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-600"
-          >
-            Clear Staged
+          <button onClick={clearStagedCaptions} className="rounded-full border bg-white px-3 py-1.5 text-xs font-medium transition-colors" style={{ borderColor: "#ebebeb", color: "#171717" }} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#0070f3"; e.currentTarget.style.color = "#0070f3"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#ebebeb"; e.currentTarget.style.color = "#171717"; }}>
+            Clear
           </button>
         )}
       </div>
 
-      {error && (
-        <p className="mt-2 text-xs text-red-400">
-          {error}
-        </p>
-      )}
+      {error && <p className="mt-2 rounded-md border bg-[#f7d4d6] px-2.5 py-1.5 text-xs" style={{ borderColor: "#ee0000", color: "#c50000" }}>{error}</p>}
 
       {progress !== null && progress > 0 && (
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-700">
-          <div
-            className="h-full rounded-full bg-indigo-500 transition-all"
-            style={{ width: `${Math.min(progress, 100)}%` }}
-          />
+        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full" style={{ background: "#ebebeb" }}>
+          <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%`, background: "#0070f3" }} />
         </div>
       )}
 
-      {/* Staged captions */}
       {stagedCaptions.length > 0 && (
-        <div className="mt-3 space-y-1">
-          <p className="text-[10px] text-amber-400">
-            {stagedCaptions.length} staged (pending commit)
-          </p>
+        <div className="mt-3 space-y-1.5">
+          <p className="font-mono text-[10px] tracking-widest" style={{ color: "#0070f3" }}>{stagedCaptions.length} STAGED · PENDING COMMIT</p>
           {stagedCaptions.slice(0, 5).map((c, i) => (
-            <div
-              key={`staged-${i}`}
-              className="rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-300"
-            >
-              <span className="font-mono text-[10px] text-amber-500">
-                {c.start.toFixed(1)}s
-              </span>{" "}
-              {c.text}
+            <div key={`staged-${i}`} className="rounded-md border bg-[#fafafa] px-2.5 py-1.5 text-xs" style={{ borderColor: "#ebebeb", color: "#171717" }}>
+              <span className="font-mono text-[10px]" style={{ color: "#0070f3" }}>{c.start.toFixed(1)}s</span> {c.text}
             </div>
           ))}
-          {stagedCaptions.length > 5 && (
-            <p className="text-[10px] text-gray-500">
-              +{stagedCaptions.length - 5} more
-            </p>
-          )}
+          {stagedCaptions.length > 5 && <p className="font-mono text-[10px]" style={{ color: "#888" }}>+{stagedCaptions.length - 5} more</p>}
         </div>
       )}
 
-      {/* Committed captions */}
       {committedCaptions.length > 0 && (
         <div className="mt-3 space-y-1">
-          <p className="text-[10px] text-gray-500">
-            {committedCaptions.length} committed
-          </p>
+          <p className="font-mono text-[10px] tracking-widest" style={{ color: "#888" }}>{committedCaptions.length} COMMITTED</p>
           {committedCaptions.slice(0, 3).map((c, i) => (
-            <div
-              key={`committed-${i}`}
-              className="rounded px-2 py-1 text-xs text-gray-400"
-            >
-              <span className="font-mono text-[10px] text-gray-600">
-                {c.start.toFixed(1)}s
-              </span>{" "}
-              {c.text}
+            <div key={`committed-${i}`} className="rounded-md border bg-white px-2.5 py-1.5 text-xs" style={{ borderColor: "#ebebeb", color: "#4d4d4d" }}>
+              <span className="font-mono text-[10px]" style={{ color: "#888" }}>{c.start.toFixed(1)}s</span> {c.text}
             </div>
           ))}
         </div>
