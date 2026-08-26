@@ -35,7 +35,7 @@ export function ToolTrace() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-gray-900 p-4">
+    <div className="flex h-full flex-col overflow-hidden border-t bg-gray-900 p-4" style={{ borderColor: "var(--color-border-subtle)" }}>
       <h3 className="mb-3 text-sm font-semibold text-gray-300">
         Agent Tool Trace
       </h3>

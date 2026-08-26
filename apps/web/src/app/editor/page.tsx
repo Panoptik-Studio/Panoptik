@@ -53,12 +53,12 @@ export default function EditorPage() {
           <CaptionsSlot />
           <Inspector />
           <ExportPanel />
+          <ToolTrace />
         </aside>
       </div>
 
       <RecordModal />
       <ConfirmDialog />
-      <ToolTrace />
     </div>
   );
 }
