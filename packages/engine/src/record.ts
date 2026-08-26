@@ -73,10 +73,16 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
         cursor: "always",
         width: { ideal: 1920, max: 1920 },
         height: { ideal: 1080, max: 1080 },
-        displaySurface: "monitor",
+        // Prefer a window over the whole monitor. Capturing the monitor also
+        // captures the floating camera bubble, and the compositor renders that
+        // window's video as a solid black rectangle in the capture.
+        displaySurface: "window",
       } as unknown as MediaTrackConstraints,
       audio: false,
-    });
+      // Keep this tab out of the picker: capturing it would recurse the
+      // recorder UI into its own recording.
+      selfBrowserSurface: "exclude",
+    } as DisplayMediaStreamOptions);
     // If user cancelled screen share, getDisplayMedia will have thrown already.
     // Auto-stop if track ends (user clicks browser "Stop sharing").
     screenStream.getVideoTracks()[0]?.addEventListener("ended", () => {

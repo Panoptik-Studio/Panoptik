@@ -473,7 +473,13 @@ export function RecordModal() {
 
   if (!isOpen) return null;
 
-  const showPiP = layout === "screenAndCamera" && cameraEnabled;
+  // Exactly one live camera view at a time. Once the floating window owns the
+  // camera, the modal shows a placeholder instead of a second <video> — two
+  // copies is confusing, and the in-modal one renders as a black square while
+  // the bubble holds the stream.
+  const cameraIsFloating = pipWindow !== null;
+  const wantsCameraSlot = layout === "screenAndCamera" && cameraEnabled;
+  const showPiP = wantsCameraSlot && !cameraIsFloating;
   const pipHasVideo =
     state === "recording"
       ? !!handlesRef.current?.facecamStream?.getVideoTracks().some((t) => t.readyState === "live")
@@ -549,7 +555,14 @@ export function RecordModal() {
                           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21l8-10 4 4" /></svg>
                         </div>
                         <p className="text-xs font-medium" style={{ color: "#4d4d4d" }}>Your screen will appear here</p>
-                        <p className="mt-1 text-[11px]" style={{ color: "#888" }}>Pick a tab, window or entire screen</p>
+                        <p className="mt-1 text-[11px]" style={{ color: "#888" }}>Pick a window or tab</p>
+                        {wantsCameraSlot && pipSupported && (
+                          <p className="mx-auto mt-2 max-w-[34ch] text-[11px] leading-4" style={{ color: "#666" }}>
+                            Sharing the entire screen also captures the floating camera,
+                            which records as a black box. Your camera is composited
+                            separately, so share a single window or tab instead.
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -591,6 +604,32 @@ export function RecordModal() {
                   </div>
                 )}
 
+              </div>
+            )}
+
+            {/* Camera moved to the floating window — mark the spot it will
+                occupy in the finished video, without a second live view. */}
+            {wantsCameraSlot && cameraIsFloating && (
+              <div
+                className="pointer-events-none absolute flex flex-col items-center justify-center gap-1.5 border-2 border-dashed text-center"
+                style={{
+                  ...(corner === "bottomRight" ? { right: 22, bottom: 22 } : {}),
+                  ...(corner === "bottomLeft" ? { left: 22, bottom: 22 } : {}),
+                  ...(corner === "topRight" ? { right: 22, top: 22 } : {}),
+                  ...(corner === "topLeft" ? { left: 22, top: 22 } : {}),
+                  width: Math.round(camSize * 1080),
+                  height: Math.round(camSize * 1080),
+                  borderRadius: shape === "circle" ? "50%" : 12,
+                  borderColor: "rgba(255,255,255,0.32)",
+                  background: "rgba(255,255,255,0.06)",
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="1.7">
+                  <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" />
+                </svg>
+                <p className="px-3 text-[11px] font-medium leading-tight" style={{ color: "rgba(255,255,255,0.72)" }}>
+                  Camera is in the floating window
+                </p>
               </div>
             )}
 
@@ -860,7 +899,7 @@ export function RecordModal() {
             <div className="hidden lg:flex items-center gap-2 text-[11px]" style={{ color: "#888" }}>
               {layout !== "screenOnly" && cameraEnabled ? (
                 pipSupported ? (
-                  <span>Camera floats above other apps while recording</span>
+                  <span>Camera floats above other apps · share a window, not the whole screen</span>
                 ) : (
                   <span>Floating camera needs Chrome or Edge</span>
                 )
