@@ -110,9 +110,13 @@ export function Timeline() {
   if (!project) {
     return (
       <div
-        className="h-16 border-t border-gray-800 bg-gray-950"
+        className="flex h-16 items-center border-t border-gray-800 bg-gray-950 px-4"
         ref={containerRef}
-      />
+      >
+        <span className="text-xs text-gray-600">
+          Timeline — load a clip to begin
+        </span>
+      </div>
     );
   }
 

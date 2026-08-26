@@ -107,7 +107,18 @@ export function CaptionsPanel() {
     }
   }, [project, stageCaptions]);
 
-  if (!project) return null;
+  if (!project)
+    return (
+      <div className="border-b border-gray-800 p-4">
+        <h3 className="mb-2 text-sm font-semibold text-gray-300">
+          Captions
+        </h3>
+        <p className="text-xs text-gray-500">
+          Import a clip to generate captions from its
+          audio.
+        </p>
+      </div>
+    );
 
   const stagedCaptions = project.stagedCaptions;
   const committedCaptions = project.captions;

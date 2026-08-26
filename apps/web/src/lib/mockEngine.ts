@@ -26,10 +26,10 @@ export const mockEngine = {
     // Background fill
     ctx.fillStyle = "#111827";
     ctx.fillRect(0, 0, w, h);
-    if (project.background.kind === "gradient") {
+    if (project.background.kind === "gradient" && project.background.stops.length >= 2) {
       const g = ctx.createLinearGradient(0, 0, w, h);
-      g.addColorStop(0, project.background.stops[0]);
-      g.addColorStop(1, project.background.stops[1]);
+      g.addColorStop(0, project.background.stops[0]!);
+      g.addColorStop(1, project.background.stops[1]!);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
     } else if (project.background.kind === "solid") {
