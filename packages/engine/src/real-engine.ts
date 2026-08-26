@@ -12,6 +12,7 @@ import {
 } from "./decode";
 import { renderFrame } from "./render";
 import { getAudioBuffer as audioGetBuffer } from "./audio";
+import { exportProject as encodeProject } from "./encode";
 
 export function createRealEngine(): MediaEngine {
   return {
@@ -41,10 +42,7 @@ export function createRealEngine(): MediaEngine {
       return audioGetBuffer(project);
     },
     async exportProject(project: Project, opts: ExportOpts): Promise<Blob> {
-      // Day 3 backend — stub until encode.ts lands
-      void project;
-      void opts;
-      return new Blob(["not yet"], { type: "video/mp4" });
+      return encodeProject(project, opts);
     },
   };
 }
