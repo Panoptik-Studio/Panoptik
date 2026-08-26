@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ExportPanel } from "@/components/ExportPanel";
 import { Inspector } from "@/components/Inspector";
 import { PreviewCanvas } from "@/components/PreviewCanvas";
+import { ProjectBrowser } from "@/components/ProjectBrowser";
 import { RecordModal } from "@/components/RecordModal";
 import { StagingPanel } from "@/components/StagingPanel";
 import { Timeline } from "@/components/Timeline";
@@ -48,6 +49,7 @@ export default function EditorPage() {
         <aside className="flex w-[290px] shrink-0 flex-col overflow-y-auto border-l"
           style={{ background: "var(--color-bg-panel)", borderColor: "var(--color-border-subtle)" }}>
           <StagingPanel />
+          <ProjectBrowser />
           <CaptionsSlot />
           <Inspector />
           <ExportPanel />
