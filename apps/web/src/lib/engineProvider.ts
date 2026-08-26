@@ -1,12 +1,9 @@
 /**
  * OWNER: DEV A. The single engine import site for the whole app.
- * Day 3, 14:00 (joint): swap the mock for the real engine — one line here,
- * nowhere else. DEV B: consume `engine`, never edit this file.
- *
- * Swap target:
- *   import { engine as realEngine } from "@panoptik/engine"; // implements MediaEngine
+ * Day 3, 14:00 (joint): verify this still works after the real engine swap.
+ * DEV B: consume `engine`, never edit this file.
  */
+import { createRealEngine } from "@panoptik/engine";
 import type { MediaEngine } from "@panoptik/engine";
-import { mockEngine } from "./mockEngine";
 
-export const engine: MediaEngine = mockEngine;
+export const engine: MediaEngine = createRealEngine();

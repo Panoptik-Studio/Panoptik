@@ -66,6 +66,7 @@ export function PreviewCanvas() {
     setCurrentTime,
     play,
     pause,
+    togglePlay,
     addZoomPoint,
     updateZoomPoint,
     commitDrag,
@@ -146,6 +147,11 @@ export function PreviewCanvas() {
       if (mod && e.key === "y") {
         e.preventDefault();
         redo();
+      }
+      // Space → play/pause (when not typing in an input)
+      if (e.key === " " && !mod && !e.altKey && (e.target as HTMLElement).tagName !== "INPUT") {
+        e.preventDefault();
+        useProjectStore.getState().togglePlay();
       }
       // M key during playback → mark moment
       if (

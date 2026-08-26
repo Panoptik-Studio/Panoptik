@@ -5,10 +5,19 @@
  */
 "use client";
 
-import { useState } from "react";
+import { useProjectStore } from "@/stores/projectStore";
+
+function fmtTime(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${String(m).padStart(2, "0")}:${sec.toFixed(1).padStart(4, "0")}`;
+}
 
 export function Toolbar() {
-  const [playing, setPlaying] = useState(false);
+  const { isPlaying, togglePlay, currentTime, project, undo, redo } =
+    useProjectStore();
+
+  const dur = project?.clip.duration ?? 0;
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b px-4"
@@ -41,11 +50,11 @@ export function Toolbar() {
       {/* Center: play + time */}
       <div className="flex items-center gap-2 rounded-lg px-1.5 py-0.5"
         style={{ background: "var(--color-bg-surface)", border: "1px solid var(--color-border-subtle)" }}>
-        <button onClick={() => setPlaying((p) => !p)}
+        <button onClick={togglePlay}
           className="flex h-[30px] w-[30px] items-center justify-center rounded transition-colors hover:bg-[var(--color-bg-surface-hover)]"
           style={{ color: "var(--color-text-secondary)" }}
           title="Space">
-          {playing ? (
+          {isPlaying ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
             </svg>
@@ -56,19 +65,21 @@ export function Toolbar() {
           )}
         </button>
         <span className="w-28 text-center text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)" }}>
-          00:00.0 / 00:00.0
+          {fmtTime(currentTime)} / {fmtTime(dur)}
         </span>
       </div>
 
       {/* Right actions */}
       <div className="flex items-center gap-2">
-        <button className="flex h-[30px] w-[30px] items-center justify-center rounded transition-colors hover:bg-[var(--color-bg-surface)]"
+        <button onClick={undo}
+          className="flex h-[30px] w-[30px] items-center justify-center rounded transition-colors hover:bg-[var(--color-bg-surface)]"
           style={{ color: "var(--color-text-secondary)" }} title="Undo (⌘Z)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
           </svg>
         </button>
-        <button className="flex h-[30px] w-[30px] items-center justify-center rounded transition-colors hover:bg-[var(--color-bg-surface)]"
+        <button onClick={redo}
+          className="flex h-[30px] w-[30px] items-center justify-center rounded transition-colors hover:bg-[var(--color-bg-surface)]"
           style={{ color: "var(--color-text-secondary)" }} title="Redo (⇧⌘Z)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />

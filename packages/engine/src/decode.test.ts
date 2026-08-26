@@ -13,11 +13,15 @@ vi.mock("mediabunny", () => {
       }),
     })),
     VideoSampleSink: vi.fn().mockImplementation(() => ({
-      getSample: vi.fn().mockImplementation(async (t: number) => ({
-        t,
-        close: vi.fn(),
-        draw: vi.fn(),
-      })),
+      getSample: vi.fn().mockImplementation(async (t: number) => {
+        const frame = { _mock: true, close: vi.fn() };
+        return {
+          t,
+          close: vi.fn(),
+          draw: vi.fn(),
+          toVideoFrame: () => frame,
+        };
+      }),
     })),
   };
 });

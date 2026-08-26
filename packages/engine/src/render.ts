@@ -27,15 +27,15 @@ export function getCameraTransform(points: ZoomPoint[], t: number): Transform {
   return state;
 }
 
-// ── Decoded frame cache (set by decode.ts loadClip/prepareFrame) ──
-let frameBitmap: ImageBitmap | null = null;
+// ── Decoded frame cache (set by decode.ts via setCurrentFrame) ──
+let currentFrame: VideoFrame | null = null;
 
-export function setFrameBitmap(bmp: ImageBitmap | null) {
-  frameBitmap = bmp;
+export function setCurrentFrame(frame: VideoFrame | null) {
+  currentFrame = frame;
 }
 
-export function getFrameBitmap(): ImageBitmap | null {
-  return frameBitmap;
+export function getCurrentFrame(): VideoFrame | null {
+  return currentFrame;
 }
 
 /**
@@ -55,7 +55,7 @@ export function renderFrame(
 
   // ── Layer 2: Letterboxed frame with camera zoom ──
   const rect = frameRect(w, h, project.clip.width, project.clip.height, project.aspectPreset);
-  if (frameBitmap) {
+  if (currentFrame) {
     const tr = getCameraTransform(project.zoomPoints, t);
     const fx = rect.x + tr.x * rect.w;
     const fy = rect.y + tr.y * rect.h;
@@ -63,7 +63,7 @@ export function renderFrame(
     ctx.translate(fx, fy);
     ctx.scale(tr.scale, tr.scale);
     ctx.translate(-fx, -fy);
-    ctx.drawImage(frameBitmap, rect.x, rect.y, rect.w, rect.h);
+    ctx.drawImage(currentFrame, rect.x, rect.y, rect.w, rect.h);
     ctx.restore();
   } else {
     // No decoded frame yet — draw a dark placeholder inside the frame rect
