@@ -74,6 +74,7 @@ async function startRecording(opts: {
   microphoneDeviceId?: string;
   cameraEnabled: boolean;
   microphoneEnabled: boolean;
+  cameraStream?: MediaStream | null;
 }): Promise<RecordingHandles> {
   const { startRecording: startRec } = await import("@panoptik/engine");
   return startRec(opts);
@@ -129,6 +130,9 @@ export function RecordModal() {
   const { pipWindow, requestPipWindow, closePipWindow } = usePiPWindow();
   const [pipStream, setPipStream] = useState<MediaStream | null>(null);
   const pipSupported = isPipSupported();
+  // Set while the preview's camera is being transferred to the recorder, so the
+  // preview effect's cleanup does not stop the track the take is recording.
+  const handingCameraOffRef = useRef(false);
 
   // Device prefs
   const [cameraEnabled, setCameraEnabled] = useState(true);
@@ -285,8 +289,13 @@ export function RecordModal() {
       });
     return () => {
       cancelled = true;
-      stream?.getTracks().forEach((t) => t.stop());
-      if (cameraPreviewStreamRef.current === stream) cameraPreviewStreamRef.current = null;
+      // Leaving idle to start a take hands this camera to the recorder, which
+      // records the very same track. Tearing it down here would end the take
+      // before it began, and re-opening the device is what makes it stutter.
+      if (!handingCameraOffRef.current) {
+        stream?.getTracks().forEach((t) => t.stop());
+        if (cameraPreviewStreamRef.current === stream) cameraPreviewStreamRef.current = null;
+      }
       setHasPreviewVideo(false);
     };
   }, [isOpen, state, layout, cameraEnabled, selectedCam]);
@@ -318,10 +327,12 @@ export function RecordModal() {
   // Keep facecam/screen playing when tab loses focus or moves to desktop (fixes facecam removed)
   useEffect(() => {
     if (state !== "recording") return;
+    // Only nudge elements that actually stalled. Calling play() on a playing
+    // video every second is enough to make the picture hitch.
     const keepPlaying = () => {
-      screenLiveRef.current?.play().catch(() => {});
-      facecamLiveRef.current?.play().catch(() => {});
-      cameraPreviewRef.current?.play().catch(() => {});
+      for (const el of [screenLiveRef.current, facecamLiveRef.current, cameraPreviewRef.current]) {
+        if (el && el.paused && el.srcObject) el.play().catch(() => {});
+      }
     };
     const onVisibility = () => { if (document.visibilityState === "visible") keepPlaying(); };
     document.addEventListener("visibilitychange", onVisibility);
@@ -367,6 +378,8 @@ export function RecordModal() {
       // activation is still valid — requestWindow() is rejected without it, and
       // the countdown plus the screen-picker would use it up.
       const wantsCamera = layout !== "screenOnly" && cameraEnabled;
+      // Claim the preview camera before any state change unmounts the preview.
+      handingCameraOffRef.current = wantsCamera;
       if (wantsCamera && pipSupported) {
         setPipStream(cameraPreviewStreamRef.current);
         await requestPipWindow(Math.round(camSize * 1400));
@@ -391,18 +404,21 @@ export function RecordModal() {
         microphoneDeviceId: selectedMic || undefined,
         cameraEnabled: layout !== "screenOnly" && cameraEnabled,
         microphoneEnabled: micEnabled,
+        // Record the camera the preview already opened. A second stream to the
+        // same device makes it renegotiate and both pictures stutter.
+        cameraStream: cameraPreviewStreamRef.current,
       });
 
-      // Hand the bubble the live take before releasing the preview, so it never
-      // blanks between the two streams.
+      // The recorder now owns the preview's camera track, so it must outlive
+      // the preview — stopping it here would kill the take. Only drop our
+      // reference; stop() releases the device when recording ends.
+      cameraPreviewStreamRef.current = null;
+      handingCameraOffRef.current = false;
+
+      // Keep the bubble on whichever stream is carrying the camera.
       if (handlesRef.current.facecamStream.getVideoTracks().length) {
         setPipStream(handlesRef.current.facecamStream);
       }
-
-      // Preview no longer needed — live facecam will take over PiP
-      cameraPreviewStreamRef.current?.getTracks().forEach((t) => t.stop());
-      cameraPreviewStreamRef.current = null;
-      setHasPreviewVideo(false);
 
       requestAnimationFrame(() => {
         if (screenLiveRef.current && handlesRef.current?.screenStream.getTracks().length)
@@ -412,6 +428,10 @@ export function RecordModal() {
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      // The handoff never completed — release the camera we were holding.
+      handingCameraOffRef.current = false;
+      cameraPreviewStreamRef.current?.getTracks().forEach((t) => t.stop());
+      cameraPreviewStreamRef.current = null;
       setState("idle");
       setCountdown(null);
       closePipWindow();

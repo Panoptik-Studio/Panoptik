@@ -29,6 +29,13 @@ export type StartRecordingOpts = {
   microphoneDeviceId?: string;
   cameraEnabled?: boolean;
   microphoneEnabled?: boolean;
+  /**
+   * An already-open camera stream (the recorder's preview) to record from.
+   * Opening a second stream to the same physical camera makes the device
+   * renegotiate, which drops frames in both — reuse this one instead.
+   * Ownership transfers: the caller must not stop its tracks.
+   */
+  cameraStream?: MediaStream | null;
 };
 
 /** Longest we wait for a recorder's final chunk before giving up on it. */
@@ -93,7 +100,26 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   }
 
   // ── Camera + mic (skip for screenOnly or when disabled) — high quality 1080p
-  if (layout !== "screenOnly" && cameraEnabled) {
+  const reusableCamTrack =
+    layout !== "screenOnly" && cameraEnabled
+      ? opts.cameraStream?.getVideoTracks().find((t) => t.readyState === "live") ?? null
+      : null;
+
+  if (reusableCamTrack) {
+    // Record the preview's camera track as-is and pair it with the mic. Asking
+    // the OS for the same camera twice is what makes the picture stutter.
+    facecamStream = new MediaStream([reusableCamTrack]);
+    if (microphoneEnabled) {
+      try {
+        const mic = await navigator.mediaDevices.getUserMedia({
+          audio: microphoneDeviceId
+            ? { deviceId: { exact: microphoneDeviceId }, echoCancellation: true, noiseSuppression: true }
+            : { echoCancellation: true, noiseSuppression: true },
+        });
+        mic.getAudioTracks().forEach((t) => facecamStream!.addTrack(t));
+      } catch { /* record silent rather than not at all */ }
+    }
+  } else if (layout !== "screenOnly" && cameraEnabled) {
     try {
       facecamStream = await navigator.mediaDevices.getUserMedia({
         video: cameraDeviceId

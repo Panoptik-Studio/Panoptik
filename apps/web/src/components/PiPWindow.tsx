@@ -26,16 +26,24 @@ export function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onSt
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (!videoRef.current || !stream) return;
-    videoRef.current.srcObject = stream;
-    videoRef.current.play().catch(() => {});
+    const v = videoRef.current;
+    if (!v || !stream) return;
+    // Compare the track, not the MediaStream: handing over from preview to
+    // recording wraps the *same* camera track in a new MediaStream, and
+    // re-assigning srcObject restarts the element — a visible flicker.
+    const attached = (v.srcObject as MediaStream | null)?.getVideoTracks()[0];
+    if (attached === stream.getVideoTracks()[0]) return;
+    v.srcObject = stream;
+    v.play().catch(() => {});
   }, [stream]);
 
-  // Keep playing when visible
+  // Recover only from an actual stall — play() on a playing element makes the
+  // picture hitch, which reads as flicker in a small bubble.
   useEffect(() => {
     if (!pipWindow || !isRecording) return;
     const id = window.setInterval(() => {
-      videoRef.current?.play().catch(() => {});
+      const v = videoRef.current;
+      if (v && v.paused && v.srcObject) v.play().catch(() => {});
     }, 1000);
     return () => clearInterval(id);
   }, [pipWindow, isRecording, stream]);
@@ -57,8 +65,8 @@ export function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onSt
   if (!pipWindow) return null;
 
   return createPortal(
-    <div style={{ width: "100%", height: "100%", background: "#000", display: "flex", flexDirection: "column", fontFamily: "Inter, system-ui, sans-serif" }}>
-      <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 8, background: "#000" }}>
+    <div style={{ width: "100%", height: "100%", background: "#0B0C0E", display: "flex", flexDirection: "column", fontFamily: "Inter, system-ui, sans-serif" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 10, background: "#0B0C0E" }}>
         {/* Largest square that fits, whatever shape the user resizes the window
             to — a 50% radius on a non-square box renders as an ellipse. */}
         <div
@@ -69,9 +77,10 @@ export function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onSt
             maxHeight: "100%",
             maxWidth: "100%",
             overflow: "hidden",
-            background: "#000",
-            borderRadius: shape === "circle" ? "50%" : 14,
-            boxShadow: "0 0 0 1.5px rgba(255,255,255,0.16)",
+            background: "#17181B",
+            borderRadius: shape === "circle" ? "50%" : 16,
+            boxShadow:
+              "0 0 0 2px rgba(255,255,255,0.9), 0 8px 24px rgba(0,0,0,0.55)",
           }}
         >
           <video
@@ -94,7 +103,7 @@ export function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onSt
           )}
         </div>
       </div>
-      <div style={{ height: 52, flexShrink: 0, background: "#0F1012", borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 12px", color: "white" }}>
+      <div style={{ height: 46, flexShrink: 0, background: "#0B0C0E", borderTop: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 12px", color: "white" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "Geist Mono, JetBrains Mono, monospace", fontSize: 12, color: "rgba(255,255,255,0.72)" }}>
           {isRecording && (
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#E11D48", boxShadow: "0 0 8px rgba(225,29,72,0.9)" }} />

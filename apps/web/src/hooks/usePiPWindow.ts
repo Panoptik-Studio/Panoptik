@@ -7,8 +7,8 @@
 import { useCallback, useRef, useState } from "react";
 
 /** Must match PiPWindow's control bar and the padding around the bubble. */
-const CONTROL_BAR_HEIGHT = 52;
-const CHROME_PADDING = 16;
+const CONTROL_BAR_HEIGHT = 46;
+const CHROME_PADDING = 20;
 
 /** Document Picture-in-Picture is Chromium-only and needs a secure context. */
 export function isPipSupported(): boolean {
