@@ -1,39 +1,72 @@
 /**
  * OWNER: DEV A — ROADMAP-A.md Task 1.4.
- * mediabunny Input/VideoSampleSink decode path with a ring-buffer cache.
- * Time is quantized to 30fps steps so the buffer actually hits during 60fps rAF.
+ * mediabunny CanvasSink decode path driven by one sequential pipeline.
+ *
+ * `prepareFrame(t)` is pull-based but strictly serialized: concurrent callers
+ * coalesce onto a single in-flight pump that always chases the newest requested
+ * time. Frames come from `CanvasSink.canvases()` — the iterator that decodes each
+ * packet at most once — instead of per-frame `getSample()` seeks, and are blitted
+ * onto one presentation canvas so the sink's pooled canvases are never held
+ * across an await.
  */
-import { ALL_FORMATS, BlobSource, Input, VideoSampleSink, type VideoSample } from "mediabunny";
+import { ALL_FORMATS, BlobSource, CanvasSink, Input, type WrappedCanvas } from "mediabunny";
 import type { Project } from "@panoptik/schema";
-import { setCurrentFrame, getCurrentFrame } from "./render";
+import { getCurrentFrame, setCurrentFrame } from "./render";
+
+/** Preview decode cap: a 4K source decodes into 1920-wide canvases. */
+const MAX_DECODE_WIDTH = 1920;
+/** Pooled canvases the sink cycles through — keeps VRAM constant. */
+const POOL_SIZE = 4;
+/** Forward gap past which a fresh seek beats stepping frame by frame. */
+const SEEK_AHEAD_LIMIT = 1;
+/** Stand-in frame duration for containers that report none. */
+const NOMINAL_FRAME_DUR = 1 / 30;
 
 let input: Input | null = null;
-let sink: VideoSampleSink | null = null;
-
-const FPS = 30;
-const BUFFER_SIZE = 6;
-const frameBuffer: Map<number, { sample: VideoSample; frame: VideoFrame }> = new Map();
-let prefetchTarget = -1;
+let sink: CanvasSink | null = null;
 let duration = 0;
-let lastSample: VideoSample | null = null;
+let objectUrl: string | null = null;
 
-/** Snap time to nearest 1/FPS boundary so 60fps rAF ticks share cached frames. */
-function quantize(t: number): number {
-  return Math.round(t * FPS) / FPS;
-}
+let iterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
+let iteratorTime = -1;
+let presented: { start: number; end: number } | null = null;
+
+let surface: HTMLCanvasElement | OffscreenCanvas | null = null;
+let surfaceCtx:
+  | CanvasRenderingContext2D
+  | OffscreenCanvasRenderingContext2D
+  | null = null;
+
+let desiredTime = 0;
+let pump: Promise<void> | null = null;
 
 export async function loadClip(file: File): Promise<Project> {
-  teardown();
+  await teardown();
 
   input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) });
   const track = await input.getPrimaryVideoTrack();
   if (!track) throw new Error("No video track found in file");
   if (!(await track.canDecode())) throw new Error("This browser cannot decode the video codec");
-  sink = new VideoSampleSink(track);
+
+  const displayWidth = await track.getDisplayWidth();
+  const displayHeight = await track.getDisplayHeight();
+  const scale = Math.min(1, MAX_DECODE_WIDTH / displayWidth);
+  const decodeW = Math.max(2, Math.round(displayWidth * scale));
+  const decodeH = Math.max(2, Math.round(displayHeight * scale));
+
+  sink = new CanvasSink(track, {
+    width: decodeW,
+    height: decodeH,
+    fit: "fill",
+    poolSize: POOL_SIZE,
+  });
   duration = await track.computeDuration();
+  createSurface(decodeW, decodeH);
+
+  objectUrl = URL.createObjectURL(file);
   return {
     id: crypto.randomUUID(),
-    clip: { src: URL.createObjectURL(file), duration, width: track.displayWidth, height: track.displayHeight },
+    clip: { src: objectUrl, duration, width: displayWidth, height: displayHeight },
     zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
     captions: [], stagedCaptions: [],
     background: { kind: "solid", color: "#000000" },
@@ -42,76 +75,134 @@ export async function loadClip(file: File): Promise<Project> {
   };
 }
 
+/**
+ * Request the frame covering `t`. Safe to call every animation frame: repeat
+ * calls while a decode is in flight only move the target, they never stack up.
+ */
 export async function prepareFrame(t: number): Promise<void> {
   if (!sink) return;
-  const qt = quantize(t);
-
-  // Evict stale entries (keep current frame safe)
-  const curFrame = getCurrentFrame();
-  for (const [ts, entry] of frameBuffer) {
-    if (ts < qt - 1 || frameBuffer.size > BUFFER_SIZE + 2) {
-      if (entry.frame !== curFrame) {
-        entry.frame.close();
-        entry.sample.close();
-        frameBuffer.delete(ts);
-      }
-    }
+  desiredTime = Math.max(0, t);
+  if (!pump) {
+    pump = runPump().finally(() => {
+      pump = null;
+    });
   }
-
-  // Cache hit — just promote
-  const existing = frameBuffer.get(qt);
-  if (existing) {
-    setCurrentFrame(existing.frame);
-    lastSample = existing.sample;
-    prefetch(qt);
-    return;
-  }
-
-  // Cache miss — decode and store
-  const sample = await sink.getSample(Math.max(0, qt));
-  if (sample) {
-    const frame = typeof sample.toVideoFrame === "function" ? sample.toVideoFrame() : null;
-    if (frame) {
-      frameBuffer.set(qt, { sample, frame });
-      setCurrentFrame(frame);
-    }
-    lastSample = sample;
-  }
-  prefetch(qt);
+  return pump;
 }
 
-function prefetch(fromT: number) {
-  if (!sink || prefetchTarget === fromT) return;
-  prefetchTarget = fromT;
-  void runPrefetch(fromT);
-}
+async function runPump(): Promise<void> {
+  while (sink) {
+    const target = desiredTime;
+    if (presented && target >= presented.start && target < presented.end) return;
 
-async function runPrefetch(fromT: number) {
-  if (!sink) return;
-  for (let i = 1; i <= BUFFER_SIZE; i++) {
-    const t = quantize(fromT + i / FPS);
-    if (t >= duration) break;
-    if (frameBuffer.has(t)) continue;
-    const sample = await sink.getSample(t);
-    if (sample) {
-      const frame = typeof sample.toVideoFrame === "function" ? sample.toVideoFrame() : null;
-      if (frame) frameBuffer.set(t, { sample, frame });
+    const continuable =
+      iterator !== null &&
+      target >= iteratorTime &&
+      target - iteratorTime <= SEEK_AHEAD_LIMIT;
+
+    if (!continuable) {
+      await closeIterator();
+      if (!sink) return; // torn down while closing the previous iterator
+      iterator = sink.canvases(target);
+      iteratorTime = target;
     }
+
+    const active = iterator!;
+    const { value, done } = await active.next();
+    // Torn down (teardown / seek) while we were awaiting — restart the decision.
+    if (active !== iterator) continue;
+
+    if (done || !value) {
+      await closeIterator();
+      // Past the last frame: hold it open so we don't re-seek on every tick.
+      if (presented) presented = { start: presented.start, end: Infinity };
+      return;
+    }
+
+    iteratorTime = value.timestamp;
+    const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
+    // While catching up, skip the blit for frames already behind the target.
+    if (!presented || end > target) present(value, end);
   }
 }
 
-function teardown() {
-  for (const entry of frameBuffer.values()) {
-    entry.frame.close();
-    entry.sample.close();
+function present(wrapped: WrappedCanvas, end: number): void {
+  if (surface && surfaceCtx) {
+    surfaceCtx.drawImage(
+      wrapped.canvas as CanvasImageSource,
+      0,
+      0,
+      surface.width,
+      surface.height,
+    );
+    setCurrentFrame(surface);
+  } else {
+    setCurrentFrame(wrapped.canvas);
   }
-  frameBuffer.clear();
-  prefetchTarget = -1;
-  lastSample = null;
+  presented = { start: wrapped.timestamp, end };
+}
+
+function createSurface(w: number, h: number): void {
+  surface = null;
+  surfaceCtx = null;
+  if (typeof OffscreenCanvas !== "undefined") {
+    const c = new OffscreenCanvas(w, h);
+    surface = c;
+    surfaceCtx = c.getContext("2d");
+  } else if (typeof document !== "undefined") {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    surface = c;
+    surfaceCtx = c.getContext("2d");
+  }
+  if (!surfaceCtx) surface = null;
+}
+
+async function closeIterator(): Promise<void> {
+  const it = iterator;
+  iterator = null;
+  iteratorTime = -1;
+  if (it) {
+    try {
+      await it.return();
+    } catch {
+      /* generator already finished */
+    }
+  }
+}
+
+async function teardown(): Promise<void> {
+  sink = null;
+  const inflight = pump;
+  await closeIterator();
+  if (inflight) {
+    try {
+      await inflight;
+    } catch {
+      /* decode aborted by teardown */
+    }
+  }
+  presented = null;
+  desiredTime = 0;
+  duration = 0;
+  surface = null;
+  surfaceCtx = null;
   setCurrentFrame(null);
-  if (input) { try { input.dispose(); } catch {} }
+  if (objectUrl) {
+    URL.revokeObjectURL(objectUrl);
+    objectUrl = null;
+  }
+  if (input) {
+    try {
+      input.dispose();
+    } catch {
+      /* already disposed */
+    }
+    input = null;
+  }
 }
 
-export function currentFrame(): VideoSample | null {
-  return lastSample;
+export function currentFrame(): CanvasImageSource | null {
+  return getCurrentFrame();
 }

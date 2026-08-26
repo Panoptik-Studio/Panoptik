@@ -23,6 +23,19 @@ function formatTime(t: number): string {
   return m > 0 ? `${m}:${s.toString().padStart(2, "0")}` : `${s}s`;
 }
 
+/** Own subscription to currentTime so playback repaints one element, not the strip. */
+function Playhead({ duration }: { duration: number }) {
+  const currentTime = useProjectStore((s) => s.currentTime);
+  return (
+    <div
+      className="absolute top-0 z-20 h-full w-0.5 bg-white"
+      style={{ left: `${(currentTime / duration) * 100}%` }}
+    >
+      <div className="absolute -top-0.5 left-1/2 h-0 w-0 -translate-x-1/2 border-l-[5px] border-r-[5px] border-t-[6px] border-l-transparent border-r-transparent border-t-white" />
+    </div>
+  );
+}
+
 export function Timeline() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [draggingDiamond, setDraggingDiamond] = useState<{
@@ -31,16 +44,15 @@ export function Timeline() {
   } | null>(null);
   const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
 
-  const {
-    project,
-    currentTime,
-    seek,
-    selectedZoomId,
-    setSelectedZoom,
-    updateZoomPoint,
-    removeZoomPoint,
-    removeStagedZoom,
-  } = useProjectStore();
+  // Selectors only — currentTime lives in <Playhead> so its 60fps updates don't
+  // re-render the ruler and every diamond.
+  const project = useProjectStore((s) => s.project);
+  const seek = useProjectStore((s) => s.seek);
+  const selectedZoomId = useProjectStore((s) => s.selectedZoomId);
+  const setSelectedZoom = useProjectStore((s) => s.setSelectedZoom);
+  const updateZoomPoint = useProjectStore((s) => s.updateZoomPoint);
+  const removeZoomPoint = useProjectStore((s) => s.removeZoomPoint);
+  const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
 
   const duration = project?.clip.duration ?? 10;
 
@@ -158,15 +170,7 @@ export function Timeline() {
           </div>
         ))}
 
-        {/* Playhead */}
-        <div
-          className="absolute top-0 z-20 h-full w-0.5 bg-white"
-          style={{
-            left: `${timeToX(currentTime, 100)}%`,
-          }}
-        >
-          <div className="absolute -top-0.5 left-1/2 h-0 w-0 -translate-x-1/2 border-l-[5px] border-r-[5px] border-t-[6px] border-l-transparent border-r-transparent border-t-white" />
-        </div>
+        <Playhead duration={duration} />
       </div>
 
       {/* Diamond track */}

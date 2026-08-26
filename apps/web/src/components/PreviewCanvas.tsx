@@ -25,6 +25,9 @@ const ASPECT_RATIOS: Record<string, number> = {
   "4:3": 4 / 3,
 };
 
+/** Preview compositing cap — matches the decode cap in the engine. */
+const MAX_CANVAS_WIDTH = 1920;
+
 type FrameRect = {
   x: number;
   y: number;
@@ -59,21 +62,14 @@ export function PreviewCanvas() {
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
 
-  const {
-    project,
-    isPlaying,
-    currentTime,
-    setCurrentTime,
-    play,
-    pause,
-    togglePlay,
-    addZoomPoint,
-    updateZoomPoint,
-    commitDrag,
-    markMoment,
-    undo,
-    redo,
-  } = useProjectStore();
+  // Selectors only — a full-store subscription would re-render this component
+  // on every currentTime tick during playback.
+  const project = useProjectStore((s) => s.project);
+  const addZoomPoint = useProjectStore((s) => s.addZoomPoint);
+  const updateZoomPoint = useProjectStore((s) => s.updateZoomPoint);
+  const commitDrag = useProjectStore((s) => s.commitDrag);
+  const undo = useProjectStore((s) => s.undo);
+  const redo = useProjectStore((s) => s.redo);
 
   // Dragging state
   const [dragging, setDragging] = useState<{
@@ -87,12 +83,15 @@ export function PreviewCanvas() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
   // ── Frame rect computation ──
+  // In CSS pixels, matching the space that clientX/clientY arrive in — the
+  // canvas backing store is a different size than its on-screen box.
   const getFrameRect = useCallback((): FrameRect | null => {
     const canvas = canvasRef.current;
     if (!canvas || !project) return null;
+    const box = canvas.getBoundingClientRect();
     return computeFrameRect(
-      canvas.width,
-      canvas.height,
+      box.width,
+      box.height,
       project.clip.width,
       project.clip.height,
       project.aspectPreset,
@@ -100,37 +99,82 @@ export function PreviewCanvas() {
   }, [project]);
 
   // ── Render loop ──
+  // Keyed on whether a clip exists, not on project identity: the loop reads
+  // fresh state every tick, so rebuilding it on each edit only churns the rAF.
+  const hasProject = project !== null;
   useEffect(() => {
-    if (!project || !canvasRef.current) return;
+    if (!hasProject || !canvasRef.current) return;
     const ctx = canvasRef.current.getContext("2d");
     if (!ctx) return;
 
+    let disposed = false;
+    // Any store write (edit, seek, playhead tick) or a newly decoded frame
+    // means the composite is stale. Idle ticks skip drawing entirely.
+    let dirty = true;
+    let requestedTime = NaN;
+    let decodePending = false;
+    const markDirty = () => {
+      dirty = true;
+    };
+    const unsubscribe = useProjectStore.subscribe(markDirty);
+
     const loop = (now: number) => {
-      const dt = lastTimeRef.current
-        ? (now - lastTimeRef.current) / 1000
-        : 0;
+      rafRef.current = requestAnimationFrame(loop);
+
+      const dt = lastTimeRef.current ? (now - lastTimeRef.current) / 1000 : 0;
       lastTimeRef.current = now;
 
       const state = useProjectStore.getState();
+      if (!state.project) return;
+
       if (state.isPlaying) {
         const newTime = state.currentTime + dt;
-        if (newTime >= state.project!.clip.duration) {
+        if (newTime >= state.project.clip.duration) {
           state.pause();
-          state.setCurrentTime(state.project!.clip.duration);
+          state.setCurrentTime(state.project.clip.duration);
         } else {
           state.setCurrentTime(newTime);
         }
+      } else if (!dirty) {
+        return;
       }
 
-      // Delegate all drawing to engine
-      engine.renderFrame(ctx, state.project!, state.currentTime);
-      rafRef.current = requestAnimationFrame(loop);
+      dirty = false;
+      const t = useProjectStore.getState().currentTime;
+
+      // Only ask for a decode when the playhead actually moved, so an idle
+      // preview settles instead of re-arming itself every frame.
+      if (t !== requestedTime) {
+        requestedTime = t;
+        // Coalesced inside the engine — repeat calls only move the decode target.
+        const pending = engine.prepareFrame(t);
+        // One handler per in-flight decode; during playback the engine hands
+        // back the same promise every tick and these would otherwise pile up.
+        if (!decodePending) {
+          decodePending = true;
+          pending.then(
+            () => {
+              decodePending = false;
+              if (!disposed) markDirty();
+            },
+            (err) => {
+              decodePending = false;
+              console.error("decode failed", err);
+            },
+          );
+        }
+      }
+      engine.renderFrame(ctx, state.project, t);
     };
 
     lastTimeRef.current = 0;
     rafRef.current = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [project]);
+    return () => {
+      disposed = true;
+      unsubscribe();
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, [hasProject]);
 
   // ── Keyboard undo/redo + moment mark (Phase 2.4 + 3.3) ──
   useEffect(() => {
@@ -295,12 +339,12 @@ export function PreviewCanvas() {
   });
 
   useEffect(() => {
-    if (project) {
-      setCanvasSize({
-        w: project.clip.width,
-        h: project.clip.height,
-      });
-    }
+    if (!project) return;
+    const scale = Math.min(1, MAX_CANVAS_WIDTH / project.clip.width);
+    setCanvasSize({
+      w: Math.round(project.clip.width * scale),
+      h: Math.round(project.clip.height * scale),
+    });
   }, [project]);
 
   // ── Drop handler ──

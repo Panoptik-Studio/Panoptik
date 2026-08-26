@@ -23,7 +23,9 @@ async function doList() {
 }
 
 export function ProjectBrowser() {
-  const { project, setProject } = useProjectStore();
+  // Selectors only — a full-store subscription re-renders this 60x/s in playback.
+  const project = useProjectStore((s) => s.project);
+  const setProject = useProjectStore((s) => s.setProject);
   const [savedProjects, setSavedProjects] = useState<
     SavedProject[]
   >([]);

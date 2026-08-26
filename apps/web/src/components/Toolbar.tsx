@@ -13,9 +13,24 @@ function fmtTime(s: number): string {
   return `${String(m).padStart(2, "0")}:${sec.toFixed(1).padStart(4, "0")}`;
 }
 
+/** Own subscription to currentTime so playback repaints the readout, not the header. */
+function TimeReadout({ duration }: { duration: number }) {
+  const currentTime = useProjectStore((s) => s.currentTime);
+  return (
+    <span className="w-28 text-center text-[11px]"
+      style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)" }}>
+      {fmtTime(currentTime)} / {fmtTime(duration)}
+    </span>
+  );
+}
+
 export function Toolbar() {
-  const { isPlaying, togglePlay, currentTime, project, undo, redo } =
-    useProjectStore();
+  // Selectors only — a full-store subscription re-renders the header 60x/s.
+  const isPlaying = useProjectStore((s) => s.isPlaying);
+  const togglePlay = useProjectStore((s) => s.togglePlay);
+  const project = useProjectStore((s) => s.project);
+  const undo = useProjectStore((s) => s.undo);
+  const redo = useProjectStore((s) => s.redo);
 
   const dur = project?.clip.duration ?? 0;
 
@@ -64,9 +79,7 @@ export function Toolbar() {
             </svg>
           )}
         </button>
-        <span className="w-28 text-center text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)" }}>
-          {fmtTime(currentTime)} / {fmtTime(dur)}
-        </span>
+        <TimeReadout duration={dur} />
       </div>
 
       {/* Right actions */}

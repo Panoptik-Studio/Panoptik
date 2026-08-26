@@ -11,8 +11,11 @@ import { extractMono16k } from "@/lib/audio16k";
 import { postProcessCaptions } from "@/lib/captionChunker";
 
 export function CaptionsPanel() {
-  const { project, stageCaptions, clearStagedCaptions, whisperProgress } =
-    useProjectStore();
+  // Selectors only — a full-store subscription re-renders this 60x/s in playback.
+  const project = useProjectStore((s) => s.project);
+  const stageCaptions = useProjectStore((s) => s.stageCaptions);
+  const clearStagedCaptions = useProjectStore((s) => s.clearStagedCaptions);
+  const whisperProgress = useProjectStore((s) => s.whisperProgress);
   const [localProgress, setLocalProgress] = useState<number | null>(
     null,
   );

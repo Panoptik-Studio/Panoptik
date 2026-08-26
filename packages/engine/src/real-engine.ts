@@ -19,7 +19,6 @@ export function createRealEngine(): MediaEngine {
       return decodePrepareFrame(t);
     },
     renderFrame(ctx, project, t) {
-      decodePrepareFrame(t).catch(() => {});
       renderFrame(ctx, project, t);
     },
     async loadRecording(screen: Blob, facecam: Blob | null, audio: Blob | null): Promise<Project> {

@@ -28,13 +28,13 @@ export function getCameraTransform(points: ZoomPoint[], t: number): Transform {
 }
 
 // ── Decoded frame cache (set by decode.ts via setCurrentFrame) ──
-let currentFrame: VideoFrame | null = null;
+let currentFrame: CanvasImageSource | null = null;
 
-export function setCurrentFrame(frame: VideoFrame | null) {
+export function setCurrentFrame(frame: CanvasImageSource | null) {
   currentFrame = frame;
 }
 
-export function getCurrentFrame(): VideoFrame | null {
+export function getCurrentFrame(): CanvasImageSource | null {
   return currentFrame;
 }
 

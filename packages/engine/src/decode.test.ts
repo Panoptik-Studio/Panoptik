@@ -1,5 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+const FPS = 30;
+
+/** Counts of the calls the old ring-buffer path made per displayed frame. */
+const stats = { seeks: 0, framesDecoded: 0 };
+
 vi.mock("mediabunny", () => {
   return {
     ALL_FORMATS: "all",
@@ -8,20 +13,24 @@ vi.mock("mediabunny", () => {
       getPrimaryVideoTrack: vi.fn().mockResolvedValue({
         canDecode: vi.fn().mockResolvedValue(true),
         computeDuration: vi.fn().mockResolvedValue(10),
-        displayWidth: 1920,
-        displayHeight: 1080,
+        getDisplayWidth: vi.fn().mockResolvedValue(1920),
+        getDisplayHeight: vi.fn().mockResolvedValue(1080),
       }),
+      dispose: vi.fn(),
     })),
-    VideoSampleSink: vi.fn().mockImplementation(() => ({
-      getSample: vi.fn().mockImplementation(async (t: number) => {
-        const frame = { _mock: true, close: vi.fn() };
-        return {
-          t,
-          close: vi.fn(),
-          draw: vi.fn(),
-          toVideoFrame: () => frame,
-        };
-      }),
+    CanvasSink: vi.fn().mockImplementation(() => ({
+      // Yields frames on an FPS grid starting at the frame covering `start`.
+      canvases: (start = 0) => {
+        stats.seeks++;
+        let ts = Math.floor(start * FPS) / FPS;
+        return (async function* () {
+          while (ts < 10) {
+            stats.framesDecoded++;
+            yield { canvas: { _mock: true, ts }, timestamp: ts, duration: 1 / FPS };
+            ts += 1 / FPS;
+          }
+        })();
+      },
     })),
   };
 });
@@ -32,6 +41,11 @@ const loadFresh = async () => {
   const mod = await import("./decode");
   return mod;
 };
+
+beforeEach(() => {
+  stats.seeks = 0;
+  stats.framesDecoded = 0;
+});
 
 describe("decode", () => {
   it("loadClip returns a valid Project", async () => {
@@ -66,5 +80,57 @@ describe("decode", () => {
   it("currentFrame returns null before any prepareFrame", async () => {
     const { currentFrame } = await loadFresh();
     expect(currentFrame()).toBeNull();
+  });
+
+  it("playback steps one iterator instead of seeking per frame", async () => {
+    const { loadClip, prepareFrame } = await loadFresh();
+    await loadClip(new File(["dummy"], "test.mp4", { type: "video/mp4" }));
+    stats.seeks = 0;
+    stats.framesDecoded = 0;
+
+    // Two seconds of 60fps rAF ticks over a 30fps source.
+    for (let i = 0; i < 120; i++) {
+      await prepareFrame(i / 60);
+    }
+
+    expect(stats.seeks).toBe(1);
+    expect(stats.framesDecoded).toBeLessThanOrEqual(2 * FPS + 2);
+  });
+
+  it("overlapping prepareFrame calls coalesce onto one decode", async () => {
+    const { loadClip, prepareFrame } = await loadFresh();
+    await loadClip(new File(["dummy"], "test.mp4", { type: "video/mp4" }));
+    stats.seeks = 0;
+    stats.framesDecoded = 0;
+
+    // Fire without awaiting, the way a rAF loop does.
+    await Promise.all(
+      Array.from({ length: 60 }, (_, i) => prepareFrame(i / 60)),
+    );
+
+    expect(stats.seeks).toBe(1);
+    expect(stats.framesDecoded).toBeLessThanOrEqual(FPS + 2);
+  });
+
+  it("seeking backwards restarts the iterator", async () => {
+    const { loadClip, prepareFrame } = await loadFresh();
+    await loadClip(new File(["dummy"], "test.mp4", { type: "video/mp4" }));
+    await prepareFrame(5);
+    stats.seeks = 0;
+
+    await prepareFrame(1);
+    expect(stats.seeks).toBe(1);
+  });
+
+  it("a far forward jump seeks rather than decoding the gap", async () => {
+    const { loadClip, prepareFrame } = await loadFresh();
+    await loadClip(new File(["dummy"], "test.mp4", { type: "video/mp4" }));
+    await prepareFrame(0);
+    stats.seeks = 0;
+    stats.framesDecoded = 0;
+
+    await prepareFrame(8);
+    expect(stats.seeks).toBe(1);
+    expect(stats.framesDecoded).toBeLessThanOrEqual(2);
   });
 });
