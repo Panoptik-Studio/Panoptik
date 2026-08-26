@@ -178,7 +178,6 @@ export function RecordModal() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef(0);
-  const rafRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
 
   // Teleprompter
@@ -309,19 +308,18 @@ export function RecordModal() {
 
   // Timer RAF during recording
   useEffect(() => {
-    if (state !== "recording") {
-      cancelAnimationFrame(rafRef.current);
-      return;
-    }
+    if (state !== "recording") return;
     startTimeRef.current = performance.now() - elapsedRef.current * 1000;
+    // The readout is MM:SS, so it only needs to change once a second. Driving
+    // this from rAF re-rendered the modal — and the PiP portal's <video> with
+    // it — 60 times a second, which is what made the bubble flicker.
     const tick = () => {
       const sec = (performance.now() - startTimeRef.current) / 1000;
       elapsedRef.current = sec;
-      setElapsed(sec);
-      rafRef.current = requestAnimationFrame(tick);
+      setElapsed((prev) => (Math.floor(sec) === Math.floor(prev) ? prev : sec));
     };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
+    const id = window.setInterval(tick, 500);
+    return () => clearInterval(id);
   }, [state]);
 
   // Keep facecam/screen playing when tab loses focus or moves to desktop (fixes facecam removed)
@@ -442,7 +440,6 @@ export function RecordModal() {
   const handleStop = useCallback(async () => {
     if (!handlesRef.current) return;
     setState("stopping");
-    cancelAnimationFrame(rafRef.current);
     closePipWindow();
     setPipStream(null);
     try {

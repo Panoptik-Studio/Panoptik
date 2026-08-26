@@ -4,7 +4,7 @@
  */
 "use client";
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 type Props = {
@@ -22,7 +22,9 @@ function fmt(s: number): string {
   return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-export function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onStop }: Props) {
+// Memoised: the recorder re-renders on every device pick, corner change and
+// timer tick, and re-rendering the portal churns the <video> in the bubble.
+export const PiPWindow = memo(function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onStop }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -76,7 +78,6 @@ export function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onSt
             height: "100%",
             maxHeight: "100%",
             maxWidth: "100%",
-            overflow: "hidden",
             background: "#17181B",
             borderRadius: shape === "circle" ? "50%" : 16,
             boxShadow:
@@ -92,12 +93,20 @@ export function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onSt
               width: "100%",
               height: "100%",
               objectFit: "cover",
-              transform: "scaleX(-1)",
+              // Round the video itself rather than clipping it through the
+              // parent: an overflow clip over a transformed video forces the
+              // compositor to re-rasterise every frame.
+              borderRadius: "inherit",
+              // Keep it on its own compositor layer so the mirror transform is
+              // not re-applied on the main thread each frame.
+              transform: "scaleX(-1) translateZ(0)",
+              backfaceVisibility: "hidden",
+              willChange: "transform",
               display: "block",
             }}
           />
           {!stream && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}>
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa", borderRadius: "inherit" }}>
               <span style={{ fontSize: 12, color: "#888" }}>No camera</span>
             </div>
           )}
@@ -120,4 +129,4 @@ export function PiPWindow({ pipWindow, stream, shape, elapsed, isRecording, onSt
     </div>,
     pipWindow.document.body,
   );
-}
+});
