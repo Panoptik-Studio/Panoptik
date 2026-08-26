@@ -1,18 +1,17 @@
 /**
- * @panoptik/utils — shared pure helpers.
+ * @panoptik/utils — easing functions + registry.
  * OWNER: DEV A (see ROADMAP-A.md ownership matrix).
  */
 
-// Task: ROADMAP-A.md Task 1.2 — implement via TDD (easing.test.ts first).
-// Required exports after implementation:
-//   lerp(a,b,t), easeInOutCubic(t), easeOutCubic(t),
-//   EASINGS: Record<string,(t:number)=>number> with keys
-//   ["easeInOutCubic","easeOutCubic","linear"]
+export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
-export const lerp = (_a: number, _b: number, _t: number): number => {
-  throw new Error("TODO(DEV-A): implement in ROADMAP-A Task 1.2");
-};
+export const easeInOutCubic = (t: number): number =>
+  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-export const easeInOutCubic = (_t: number): number => {
-  throw new Error("TODO(DEV-A): implement in ROADMAP-A Task 1.2");
+export const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
+
+export const EASINGS: Record<string, (t: number) => number> = {
+  easeInOutCubic,
+  easeOutCubic,
+  linear: (t) => t,
 };
