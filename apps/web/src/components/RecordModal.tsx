@@ -573,7 +573,9 @@ export function RecordModal() {
             {/* PiP camera — mirrored, circle/square — light placeholder when no video (fixes black patch) */}
             {showPiP && (
               <div
-                className={`absolute overflow-hidden border-[2.5px] ${pipHasVideo ? "bg-black" : "bg-white"} shadow-[0_12px_32px_rgba(0,0,0,0.22)]`}
+                // Never bg-black: a video that has not painted its first frame
+                // would show through as a black disc.
+                className="absolute overflow-hidden border-[2.5px] bg-white shadow-[0_12px_32px_rgba(0,0,0,0.22)]"
                 style={{
                   // Mirrors the corner picker so the preview shows where the
                   // camera will actually sit in the finished video.
@@ -588,22 +590,26 @@ export function RecordModal() {
                   boxShadow: pipHasVideo ? "0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.9) inset" : "0 4px 16px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.06) inset",
                 }}
               >
-                {pipHasVideo ? (
-                  state === "recording" ? (
-                    <video ref={setFacecamLiveCb} autoPlay muted playsInline className="h-full w-full object-cover" style={{ transform: "scaleX(-1)" }} />
-                  ) : (
-                    <video ref={setCameraPreviewCb} autoPlay muted playsInline className="h-full w-full object-cover" style={{ transform: "scaleX(-1)" }} />
-                  )
-                ) : (
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[#fafafa] p-4 text-center">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full border bg-white" style={{ borderColor: "#ebebeb" }}>
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.7"><path d="M16 16l4 4M2 12a10 10 0 1 0 20 0 10 10 0 0 0-20 0z" /><path d="M10 10a2 2 0 1 1 4 0 2 2 0 0 1-4 0z" /></svg>
-                    </div>
-                    <p className="text-[11px] font-medium" style={{ color: "#4d4d4d" }}>No camera</p>
-                    <p className="font-mono text-[10px]" style={{ color: "#888" }}>Enable camera or check permissions</p>
+                {/* Backdrop, always mounted: whatever the video is doing, the
+                    slot reads as a camera rather than a black hole. */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#fafafa] p-4 text-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border bg-white" style={{ borderColor: "#ebebeb" }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.7"><path d="M16 16l4 4M2 12a10 10 0 1 0 20 0 10 10 0 0 0-20 0z" /><path d="M10 10a2 2 0 1 1 4 0 2 2 0 0 1-4 0z" /></svg>
                   </div>
+                  <p className="text-[11px] font-medium" style={{ color: "#4d4d4d" }}>
+                    {pipHasVideo ? "Starting camera…" : "No camera"}
+                  </p>
+                  {!pipHasVideo && (
+                    <p className="font-mono text-[10px]" style={{ color: "#888" }}>Enable camera or check permissions</p>
+                  )}
+                </div>
+                {pipHasVideo && (
+                  state === "recording" ? (
+                    <video key="live" ref={setFacecamLiveCb} autoPlay muted playsInline className="absolute inset-0 h-full w-full object-cover" style={{ transform: "scaleX(-1)" }} />
+                  ) : (
+                    <video key="preview" ref={setCameraPreviewCb} autoPlay muted playsInline className="absolute inset-0 h-full w-full object-cover" style={{ transform: "scaleX(-1)" }} />
+                  )
                 )}
-
               </div>
             )}
 

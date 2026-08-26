@@ -11,7 +11,7 @@
  */
 import { ALL_FORMATS, BlobSource, CanvasSink, Input, type WrappedCanvas } from "mediabunny";
 import type { Project } from "@panoptik/schema";
-import { getCurrentFrame, setCurrentFrame } from "./render";
+import { clearFacecamCache, getCurrentFrame, setCurrentFrame } from "./render";
 import { setAudioSink } from "./audio";
 
 /** Preview decode cap: a 4K source decodes into 1920-wide canvases. */
@@ -40,6 +40,21 @@ let surfaceCtx:
 
 let desiredTime = 0;
 let pump: Promise<void> | null = null;
+let facecamUrl: string | null = null;
+
+/**
+ * Mint the facecam's object URL here so teardown can revoke it alongside the
+ * clip's — otherwise every re-import pins another full recording in memory.
+ */
+export function setFacecamBlob(blob: Blob | null): string | null {
+  if (facecamUrl) {
+    URL.revokeObjectURL(facecamUrl);
+    facecamUrl = null;
+  }
+  clearFacecamCache();
+  if (blob && blob.size > 0) facecamUrl = URL.createObjectURL(blob);
+  return facecamUrl;
+}
 
 export async function loadClip(file: File): Promise<Project> {
   await teardown();
@@ -211,6 +226,7 @@ async function teardown(): Promise<void> {
   surfaceCtx = null;
   setCurrentFrame(null);
   setAudioSink(null);
+  setFacecamBlob(null);
   if (objectUrl) {
     URL.revokeObjectURL(objectUrl);
     objectUrl = null;

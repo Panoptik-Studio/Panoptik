@@ -5,7 +5,11 @@
  */
 import type { ExportOpts, Project } from "@panoptik/schema";
 import type { MediaEngine } from "./index";
-import { loadClip as decodeLoadClip, prepareFrame as decodePrepareFrame } from "./decode";
+import {
+  loadClip as decodeLoadClip,
+  prepareFrame as decodePrepareFrame,
+  setFacecamBlob,
+} from "./decode";
 import { renderFrame } from "./render";
 import { getAudioBuffer as audioGetBuffer } from "./audio";
 
@@ -26,9 +30,10 @@ export function createRealEngine(): MediaEngine {
       // Capture/ingest boundary: B's record.ts captures blobs, we demux screen blob as clip.
       const screenFile = new File([screen], "screen.webm", { type: screen.type || "video/webm" });
       const proj = await decodeLoadClip(screenFile);
-      if (facecam) {
-        proj.facecam.src = URL.createObjectURL(facecam);
-      }
+      // After loadClip: it tears down first, which revokes the previous take's
+      // facecam URL and drops its cached <video>.
+      const facecamSrc = setFacecamBlob(facecam);
+      if (facecamSrc) proj.facecam.src = facecamSrc;
       await decodePrepareFrame(0);
       return proj;
     },

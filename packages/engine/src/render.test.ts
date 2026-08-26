@@ -239,7 +239,17 @@ describe("facecam PiP placement", () => {
 
   beforeEach(() => {
     vi.stubGlobal("document", {
-      createElement: () => ({ ...fakeVideo, load: () => {}, style: {} }),
+      createElement: () => ({
+        ...fakeVideo,
+        style: { cssText: "" },
+        load: () => {},
+        pause: () => {},
+        remove: () => {},
+        setAttribute: () => {},
+        removeAttribute: () => {},
+        play: () => Promise.resolve(),
+      }),
+      body: { appendChild: () => {} },
     });
   });
 
@@ -267,6 +277,29 @@ describe("facecam PiP placement", () => {
   it("draws nothing when there is no camera track", () => {
     const draw = drawnPiP({ src: null, x: 0.8, y: 0.8, size: 0.2 });
     expect(draw).toBeUndefined();
+  });
+
+  it("follows the timeline even when duration is Infinity", () => {
+    // MediaRecorder WebM reports Infinity until seeked to the end; a
+    // finite-duration guard here froze the camera on its first frame.
+    const el = { ...fakeVideo, duration: Infinity, currentTime: 0, seeking: false,
+      style: { cssText: "" }, load(){}, pause(){}, remove(){}, setAttribute(){},
+      removeAttribute(){}, play: () => Promise.resolve() };
+    vi.stubGlobal("document", { createElement: () => el, body: { appendChild(){} } });
+    const { ctx } = makeCtx();
+    renderFrame(ctx, makeProject({ facecam: { src: "blob:live", x: 0.7, y: 0.7, size: 0.2 } }), 5);
+    expect(el.currentTime).toBeCloseTo(5);
+  });
+
+  it("holds the last frame instead of wrapping past the end", () => {
+    const el = { ...fakeVideo, duration: 4, currentTime: 0, seeking: false,
+      style: { cssText: "" }, load(){}, pause(){}, remove(){}, setAttribute(){},
+      removeAttribute(){}, play: () => Promise.resolve() };
+    vi.stubGlobal("document", { createElement: () => el, body: { appendChild(){} } });
+    const { ctx } = makeCtx();
+    renderFrame(ctx, makeProject({ facecam: { src: "blob:short", x: 0.7, y: 0.7, size: 0.2 } }), 9);
+    expect(el.currentTime).toBeLessThan(4);
+    expect(el.currentTime).toBeGreaterThan(3.9);
   });
 });
 

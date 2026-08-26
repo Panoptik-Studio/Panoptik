@@ -223,15 +223,39 @@ function getFacecamVideo(src: string): HTMLVideoElement | null {
   const cached = facecamCache.get(src);
   if (cached) return cached;
   const v = document.createElement("video");
-  v.src = src;
   v.muted = true;
   (v as unknown as { playsInline: boolean }).playsInline = true;
   v.preload = "auto";
-  v.crossOrigin = "anonymous";
-  // Do not autoplay; we manually seek. Keep element off-DOM — still decodable.
+  // No crossOrigin: the source is a same-origin blob: URL, and setting it puts
+  // the element into a CORS fetch that a blob URL does not answer.
+  v.src = src;
+  // Chrome will not reliably decode a detached element, and we only ever read
+  // it through drawImage — so park it in the document, invisible and inert.
+  v.style.cssText =
+    "position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
+  v.setAttribute("aria-hidden", "true");
+  try {
+    document.body.appendChild(v);
+  } catch { /* no body yet — the element still loads */ }
   try { v.load(); } catch { /* ignore */ }
+  // Muted autoplay is permitted and forces a decoded first frame; we pause
+  // immediately because the timeline, not the element, drives playback.
+  v.play().then(() => v.pause()).catch(() => { /* seeking still works */ });
   facecamCache.set(src, v);
   return v;
+}
+
+/** Drop cached facecam elements — call when the project's recording changes. */
+export function clearFacecamCache(): void {
+  for (const v of facecamCache.values()) {
+    try {
+      v.pause();
+      v.removeAttribute("src");
+      v.load();
+      v.remove();
+    } catch { /* already gone */ }
+  }
+  facecamCache.clear();
 }
 
 function drawFacecam(
@@ -245,18 +269,19 @@ function drawFacecam(
   if (!fc.src) return;
   const video = getFacecamVideo(fc.src);
   if (!video) return;
-  // Need at least HAVE_CURRENT_DATA to show a frame
-  if (video.readyState < 2) return;
+  // Seek even before the first frame lands — gating on readyState here would
+  // leave the element parked at t=0 for the whole clip. Only the draw needs data.
   // Follow the timeline. Past the camera track's end we hold its last frame —
   // wrapping would replay the take's opening over its ending.
+  // MediaRecorder WebM reports duration Infinity until it has been seeked to
+  // the end, so a finite-duration guard here would skip every seek and freeze
+  // the camera on its first frame. Seek regardless; the browser clamps.
   try {
     const dur = video.duration;
-    if (isFinite(dur) && dur > 0) {
-      const target = Math.min(t, dur - 1e-3);
-      // Only seek if far enough to avoid thrashing (16ms ~ 1 frame)
-      if (Math.abs(video.currentTime - target) > 0.05) {
-        video.currentTime = target;
-      }
+    const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
+    // Only seek if far enough to avoid thrashing (16ms ~ 1 frame)
+    if (!video.seeking && Math.abs(video.currentTime - target) > 0.05) {
+      video.currentTime = target;
     }
   } catch { /* ignore seek errors */ }
   if (video.readyState < 2) return;
