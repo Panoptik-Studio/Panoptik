@@ -128,11 +128,12 @@ export function RecordModal() {
   // Floating camera bubble — a Document PiP window so your face stays visible
   // over the desktop and other tabs, not just inside this one.
   const { pipWindow, requestPipWindow, closePipWindow } = usePiPWindow();
-  const [pipStream, setPipStream] = useState<MediaStream | null>(null);
   const pipSupported = isPipSupported();
-  // Set while the preview's camera is being transferred to the recorder, so the
-  // preview effect's cleanup does not stop the track the take is recording.
-  const handingCameraOffRef = useRef(false);
+  // The single camera stream, shared by the preview, the bubble and the take.
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  // While a take is running the recorder closes the camera track, so the
+  // effect that opened it must not also close it.
+  const recordingOwnsCameraRef = useRef(false);
 
   // Device prefs
   const [cameraEnabled, setCameraEnabled] = useState(true);
@@ -142,23 +143,26 @@ export function RecordModal() {
   const [selectedCam, setSelectedCam] = useState<string>("");
   const [selectedMic, setSelectedMic] = useState<string>("");
 
+  // Whether the camera is needed at all, and whether it also gets a corner slot
+  // in the composed frame. Declared before the effects that depend on them.
+  const wantsCameraSlot = layout !== "screenOnly" && cameraEnabled;
+  const hasCameraSlotInFrame = layout === "screenAndCamera" && cameraEnabled;
+
   // Preview + recording refs
   const handlesRef = useRef<RecordingHandles | null>(null);
   const cameraPreviewRef = useRef<HTMLVideoElement>(null);
   const screenPreviewRef = useRef<HTMLVideoElement>(null);
-  const cameraPreviewStreamRef = useRef<MediaStream | null>(null);
   const screenLiveRef = useRef<HTMLVideoElement>(null);
   const facecamLiveRef = useRef<HTMLVideoElement>(null);
-  const [hasPreviewVideo, setHasPreviewVideo] = useState(false);
 
   // Callback refs — ensure srcObject stays attached even when moving between desktop / tab
   const setCameraPreviewCb = useCallback((el: HTMLVideoElement | null) => {
     (cameraPreviewRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
-    if (el && cameraPreviewStreamRef.current) {
-      el.srcObject = cameraPreviewStreamRef.current;
+    if (el && cameraStream) {
+      el.srcObject = cameraStream;
       el.play().catch(() => {});
     }
-  }, []);
+  }, [cameraStream]);
   const setScreenLiveCb = useCallback((el: HTMLVideoElement | null) => {
     (screenLiveRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
     if (el && handlesRef.current?.screenStream?.getVideoTracks().length) {
@@ -210,8 +214,6 @@ export function RecordModal() {
       if (e.key.toLowerCase() === "e") { e.preventDefault(); setCameraEnabled((v) => !v); }
       if (e.key.toLowerCase() === "d") { e.preventDefault(); setMicEnabled((v) => !v); }
       if (e.key === "Escape") {
-        cameraPreviewStreamRef.current?.getTracks().forEach((t) => t.stop());
-        cameraPreviewStreamRef.current = null;
         setIsOpen(false);
         setError(null);
         setCountdown(null);
@@ -251,58 +253,43 @@ export function RecordModal() {
     };
   }, [isOpen, selectedCam, selectedMic]);
 
-  // Camera preview for idle (mirrored) — sets hasPreviewVideo for PiP placeholder logic
+  // ── The camera: opened once, shared by everything ──
+  // Deliberately not keyed on recording state. The preview, the floating bubble
+  // and the MediaRecorder all read this one stream; re-acquiring the device on
+  // the idle -> recording transition is what stuttered the picture, and made
+  // the take inherit the preview's low preview-grade resolution.
   useEffect(() => {
-    if (!isOpen || state !== "idle" || layout === "screenOnly" || !cameraEnabled) {
-      setHasPreviewVideo(false);
+    if (!isOpen || !wantsCameraSlot) {
+      setCameraStream(null);
       return;
     }
-    let stream: MediaStream | null = null;
     let cancelled = false;
-    const constraints: MediaStreamConstraints = {
-      video: selectedCam ? { deviceId: { exact: selectedCam }, width: 1280, height: 720 } : { width: 1280, height: 720, facingMode: "user" },
-      audio: false,
-    };
-    setHasPreviewVideo(false);
-    navigator.mediaDevices
-      .getUserMedia(constraints)
-      .then((s) => {
-        if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
-        stream = s;
-        cameraPreviewStreamRef.current = s;
-        if (cameraPreviewRef.current) cameraPreviewRef.current.srcObject = s;
-        setHasPreviewVideo(true);
+    let opened: MediaStreamTrack | null = null;
+    import("@panoptik/engine")
+      .then(({ openCameraTrack }) => openCameraTrack(selectedCam || undefined))
+      .then((track) => {
+        if (!track) return;
+        if (cancelled) {
+          track.stop();
+          return;
+        }
+        opened = track;
+        setCameraStream(new MediaStream([track]));
       })
-      .catch(() => {
-        if (cancelled) return;
-        navigator.mediaDevices
-          .getUserMedia({ video: { width: 640, height: 360 }, audio: false })
-          .then((s2) => {
-            if (cancelled) { s2.getTracks().forEach((t) => t.stop()); return; }
-            stream = s2;
-            cameraPreviewStreamRef.current = s2;
-            if (cameraPreviewRef.current) cameraPreviewRef.current.srcObject = s2;
-            setHasPreviewVideo(true);
-          })
-          .catch(() => { if (!cancelled) setHasPreviewVideo(false); });
-      });
+      .catch(() => { /* no camera: the slot shows its placeholder */ });
     return () => {
       cancelled = true;
-      // Leaving idle to start a take hands this camera to the recorder, which
-      // records the very same track. Tearing it down here would end the take
-      // before it began, and re-opening the device is what makes it stutter.
-      if (!handingCameraOffRef.current) {
-        stream?.getTracks().forEach((t) => t.stop());
-        if (cameraPreviewStreamRef.current === stream) cameraPreviewStreamRef.current = null;
-      }
-      setHasPreviewVideo(false);
+      setCameraStream(null);
+      // The recorder holds this same track while a take is running and closes
+      // it when the take ends, so releasing it here would cut the recording.
+      if (opened && !recordingOwnsCameraRef.current) opened.stop();
     };
-  }, [isOpen, state, layout, cameraEnabled, selectedCam]);
+  }, [isOpen, wantsCameraSlot, selectedCam]);
 
   // Keep preview video srcObject in sync when layout toggles
   useEffect(() => {
-    if (cameraPreviewRef.current && cameraPreviewStreamRef.current) {
-      cameraPreviewRef.current.srcObject = cameraPreviewStreamRef.current;
+    if (cameraPreviewRef.current && cameraStream) {
+      cameraPreviewRef.current.srcObject = cameraStream;
     }
   }, [layout]);
 
@@ -374,16 +361,13 @@ export function RecordModal() {
 
       // Open the floating bubble first, while the Record click's transient user
       // activation is still valid — requestWindow() is rejected without it, and
-      // the countdown plus the screen-picker would use it up.
-      const wantsCamera = layout !== "screenOnly" && cameraEnabled;
-      // Claim the preview camera before any state change unmounts the preview.
-      handingCameraOffRef.current = wantsCamera;
-      if (wantsCamera && pipSupported) {
-        setPipStream(cameraPreviewStreamRef.current);
+      // the countdown plus the screen-picker would use it up. The bubble reads
+      // `cameraStream` directly, so there is no stream to hand it here.
+      if (wantsCameraSlot && pipSupported) {
         await requestPipWindow(Math.round(camSize * 1400));
       }
+      recordingOwnsCameraRef.current = wantsCameraSlot;
 
-      // Keep preview stream alive during countdown so PiP shows face (was showing "No camera")
       // Countdown 3-2-1
       setState("countingDown");
       for (let n = 3; n >= 1; n--) {
@@ -400,23 +384,14 @@ export function RecordModal() {
         shape,
         cameraDeviceId: selectedCam || undefined,
         microphoneDeviceId: selectedMic || undefined,
-        cameraEnabled: layout !== "screenOnly" && cameraEnabled,
+        cameraEnabled: wantsCameraSlot,
         microphoneEnabled: micEnabled,
-        // Record the camera the preview already opened. A second stream to the
-        // same device makes it renegotiate and both pictures stutter.
-        cameraStream: cameraPreviewStreamRef.current,
+        // Record the camera that is already open and on screen. Asking the OS
+        // for the same device twice makes it renegotiate, which stutters every
+        // view of it — and a fresh preview-grade stream would also downgrade
+        // the take.
+        cameraStream,
       });
-
-      // The recorder now owns the preview's camera track, so it must outlive
-      // the preview — stopping it here would kill the take. Only drop our
-      // reference; stop() releases the device when recording ends.
-      cameraPreviewStreamRef.current = null;
-      handingCameraOffRef.current = false;
-
-      // Keep the bubble on whichever stream is carrying the camera.
-      if (handlesRef.current.facecamStream.getVideoTracks().length) {
-        setPipStream(handlesRef.current.facecamStream);
-      }
 
       requestAnimationFrame(() => {
         if (screenLiveRef.current && handlesRef.current?.screenStream.getTracks().length)
@@ -426,22 +401,18 @@ export function RecordModal() {
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      // The handoff never completed — release the camera we were holding.
-      handingCameraOffRef.current = false;
-      cameraPreviewStreamRef.current?.getTracks().forEach((t) => t.stop());
-      cameraPreviewStreamRef.current = null;
+      // No take is running, so the camera goes back to being the effect's.
+      recordingOwnsCameraRef.current = false;
       setState("idle");
       setCountdown(null);
       closePipWindow();
-      setPipStream(null);
     }
-  }, [layout, shape, selectedCam, selectedMic, cameraEnabled, micEnabled, camSize, pipSupported, requestPipWindow, closePipWindow]);
+  }, [layout, shape, selectedCam, selectedMic, wantsCameraSlot, micEnabled, camSize, pipSupported, cameraStream, requestPipWindow, closePipWindow]);
 
   const handleStop = useCallback(async () => {
     if (!handlesRef.current) return;
     setState("stopping");
     closePipWindow();
-    setPipStream(null);
     try {
       const { screenBlob, facecamBlob } = await handlesRef.current.stop();
       console.log("[Record] blobs", { screen: `${screenBlob.type} ${screenBlob.size} bytes`, facecam: `${facecamBlob.type} ${facecamBlob.size} bytes` });
@@ -476,13 +447,15 @@ export function RecordModal() {
       elapsedRef.current = 0;
       setElapsed(0);
       handlesRef.current = null;
+      // The take released the camera track; hand ownership back so reopening
+      // the recorder acquires a fresh one.
+      recordingOwnsCameraRef.current = false;
+      setCameraStream(null);
     }
   }, [setProject, layout, shape, corner, camSize, closePipWindow]);
 
   const handleClose = useCallback(() => {
     if (state === "recording" || state === "countingDown") return;
-    cameraPreviewStreamRef.current?.getTracks().forEach((t) => t.stop());
-    cameraPreviewStreamRef.current = null;
     setIsOpen(false);
     setError(null);
     setCountdown(null);
@@ -495,12 +468,9 @@ export function RecordModal() {
   // copies is confusing, and the in-modal one renders as a black square while
   // the bubble holds the stream.
   const cameraIsFloating = pipWindow !== null;
-  const wantsCameraSlot = layout === "screenAndCamera" && cameraEnabled;
-  const showPiP = wantsCameraSlot && !cameraIsFloating;
-  const pipHasVideo =
-    state === "recording"
-      ? !!handlesRef.current?.facecamStream?.getVideoTracks().some((t) => t.readyState === "live")
-      : hasPreviewVideo;
+  const showPiP = hasCameraSlotInFrame && !cameraIsFloating;
+  // One source of truth for "is there a picture": the shared camera stream.
+  const pipHasVideo = !!cameraStream?.getVideoTracks().some((t) => t.readyState === "live");
 
   return (
     <div
@@ -510,7 +480,7 @@ export function RecordModal() {
       {/* Floating camera bubble — stays on top of the desktop and other tabs */}
       <PiPWindow
         pipWindow={pipWindow}
-        stream={pipStream}
+        stream={cameraStream}
         shape={shape}
         elapsed={elapsed}
         isRecording={state === "recording"}

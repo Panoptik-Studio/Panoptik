@@ -36,6 +36,6 @@ export {
 export type { Transform, Viewport } from "./render";
 
 // ── #region B-modules (DEV B adds re-export lines here; DEV A do not edit) ──
-export { startRecording } from "./record";
+export { startRecording, openCameraTrack, openMicrophoneTrack } from "./record";
 export { saveProject, loadProject, listProjects } from "./opfs";
 // ── #endregion ──

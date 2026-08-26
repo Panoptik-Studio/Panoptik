@@ -34,9 +34,19 @@ function fmt(s: number): string {
 const PIP_CSS = `
   html, body { height: 100%; margin: 0; background: #0B0C0E; overflow: hidden; }
   .pip-root { position: fixed; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr); background: #0B0C0E; font-family: Inter, system-ui, sans-serif; }
-  .pip-camera { grid-area: 1/1; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); background: #17181B; }
-  .pip-camera.is-circle { border-radius: 50%; }
-  .pip-empty { grid-area: 1/1; display: flex; align-items: center; justify-content: center; color: #888; font-size: 12px; background: #fafafa; }
+  .pip-stage { grid-area: 1/1; display: grid; place-items: center; min-height: 0; }
+  .pip-camera { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); background: #17181B; }
+  /* A 50% radius on a non-square box is an ellipse, and the user can resize the
+     window to any shape — so the circle is constrained to a square that fits. */
+  .pip-camera.is-circle {
+    aspect-ratio: 1 / 1;
+    width: auto;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 50%;
+  }
+  .pip-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #888; font-size: 12px; background: #fafafa; }
   .pip-controls { grid-area: 1/1; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding: 14px 16px; background-image: linear-gradient(to top, rgb(0 0 0 / 62%), rgb(0 0 0 / 0%) 96px); }
   .pip-time { display: flex; align-items: center; gap: 7px; font-family: 'Geist Mono', 'SF Mono', monospace; font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.92); }
   .pip-dot { width: 8px; height: 8px; border-radius: 50%; background: #E11D48; box-shadow: 0 0 8px rgba(225,29,72,0.9); }
@@ -111,18 +121,20 @@ export const PiPWindow = memo(function PiPWindow({
 
   return createPortal(
     <div className="pip-root">
-      {stream ? (
-        <video
-          ref={attachStream}
-          className={shape === "circle" ? "pip-camera is-circle" : "pip-camera"}
-          autoPlay
-          playsInline
-          muted
-          controls={false}
-        />
-      ) : (
-        <div className="pip-empty">No camera</div>
-      )}
+      <div className="pip-stage">
+        {stream ? (
+          <video
+            ref={attachStream}
+            className={shape === "circle" ? "pip-camera is-circle" : "pip-camera"}
+            autoPlay
+            playsInline
+            muted
+            controls={false}
+          />
+        ) : (
+          <div className="pip-empty">No camera</div>
+        )}
+      </div>
       <div className="pip-controls">
         <Readout elapsed={elapsed} isRecording={isRecording} />
         <button

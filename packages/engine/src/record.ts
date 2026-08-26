@@ -30,16 +30,80 @@ export type StartRecordingOpts = {
   cameraEnabled?: boolean;
   microphoneEnabled?: boolean;
   /**
-   * An already-open camera stream (the recorder's preview) to record from.
-   * Opening a second stream to the same physical camera makes the device
-   * renegotiate, which drops frames in both — reuse this one instead.
-   * Ownership transfers: the caller must not stop its tracks.
+   * An already-open camera stream to record from. Opening a second stream to
+   * the same physical camera makes the device renegotiate, which drops frames
+   * in every view of it. The caller keeps ownership: stop() will not close it.
    */
   cameraStream?: MediaStream | null;
 };
 
 /** Longest we wait for a recorder's final chunk before giving up on it. */
 const FLUSH_TIMEOUT_MS = 4000;
+
+/**
+ * Ask for far more than any webcam provides and let the browser settle on the
+ * device's best mode — naming 1280x720 pins it there even on a 4K camera.
+ */
+export const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 3840 },
+  height: { ideal: 2160 },
+  aspectRatio: 16 / 9,
+  frameRate: { ideal: 30 },
+  facingMode: "user",
+};
+
+/** Open the camera, falling back to an unpinned device if the exact id fails. */
+export async function openCameraTrack(deviceId?: string): Promise<MediaStreamTrack | null> {
+  const attempts: MediaStreamConstraints[] = [
+    { video: deviceId ? { ...CAMERA_CONSTRAINTS, deviceId: { exact: deviceId } } : CAMERA_CONSTRAINTS, audio: false },
+    { video: CAMERA_CONSTRAINTS, audio: false },
+    { video: true, audio: false },
+  ];
+  for (const constraints of attempts) {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia(constraints);
+      const track = s.getVideoTracks()[0];
+      if (track) return track;
+      s.getTracks().forEach((t) => t.stop());
+    } catch { /* try the next, looser attempt */ }
+  }
+  return null;
+}
+
+/**
+ * Bits per second for a track, from its real frame size: bitsPerPixelPerFrame
+ * times pixels times fps, clamped. Falls back to `min` when the track has not
+ * reported settings yet.
+ */
+function bitrateFor(
+  track: MediaStreamTrack | undefined,
+  bitsPerPixelPerFrame: number,
+  min: number,
+  max: number,
+): number {
+  const s = track?.getSettings?.();
+  if (!s?.width || !s?.height) return min;
+  const fps = s.frameRate && s.frameRate > 0 ? s.frameRate : 30;
+  const estimate = s.width * s.height * fps * bitsPerPixelPerFrame;
+  return Math.round(Math.min(max, Math.max(min, estimate)));
+}
+
+export async function openMicrophoneTrack(deviceId?: string): Promise<MediaStreamTrack | null> {
+  const audio: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+  };
+  for (const constraints of [{ audio, video: false }, { audio: true, video: false }]) {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia(constraints as MediaStreamConstraints);
+      const track = s.getAudioTracks()[0];
+      if (track) return track;
+      s.getTracks().forEach((t) => t.stop());
+    } catch { /* try the next, looser attempt */ }
+  }
+  return null;
+}
 
 /** Stop a recorder and resolve once its last chunk has been delivered. */
 function flushRecorder(rec: MediaRecorder | null): Promise<void> {
@@ -72,14 +136,19 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   let screenStream: MediaStream | null = null;
   let facecamStream: MediaStream | null = null;
 
-  // ── Screen capture (skip for cameraOnly) — high quality, minimal padding (native res, no extra bars)
+  // Tracks this call opened, and is therefore responsible for closing. A camera
+  // handed in by the caller is shared with the preview and the bubble, so
+  // stopping it here would kill their picture.
+  const ownedTracks = new Set<MediaStreamTrack>();
+
+  // ── Screen capture (skip for cameraOnly) ──
   if (layout !== "cameraOnly") {
     screenStream = await navigator.mediaDevices.getDisplayMedia({
       video: {
         frameRate: { ideal: 60, max: 60 },
+        // No width/height cap: asking for 1920x1080 downscales a retina
+        // display. Take the surface at whatever it natively is.
         cursor: "always",
-        width: { ideal: 1920, max: 1920 },
-        height: { ideal: 1080, max: 1080 },
         // Prefer a window over the whole monitor. Capturing the monitor also
         // captures the floating camera bubble, and the compositor renders that
         // window's video as a solid black rectangle in the capture.
@@ -90,6 +159,7 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
       // recorder UI into its own recording.
       selfBrowserSurface: "exclude",
     } as DisplayMediaStreamOptions);
+    screenStream.getTracks().forEach((t) => ownedTracks.add(t));
     // If user cancelled screen share, getDisplayMedia will have thrown already.
     // Auto-stop if track ends (user clicks browser "Stop sharing").
     screenStream.getVideoTracks()[0]?.addEventListener("ended", () => {
@@ -99,69 +169,44 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     screenStream = new MediaStream();
   }
 
-  // ── Camera + mic (skip for screenOnly or when disabled) — high quality 1080p
-  const reusableCamTrack =
-    layout !== "screenOnly" && cameraEnabled
-      ? opts.cameraStream?.getVideoTracks().find((t) => t.readyState === "live") ?? null
-      : null;
+  // ── Camera + mic (skip for screenOnly or when disabled) ──
+  // The camera and mic are gathered as individual tracks and only then wrapped
+  // in a stream, so the caller's camera object is never mutated or re-opened.
+  facecamStream = new MediaStream();
+  const wantsCamera = layout !== "screenOnly" && cameraEnabled;
 
-  if (reusableCamTrack) {
-    // Record the preview's camera track as-is and pair it with the mic. Asking
-    // the OS for the same camera twice is what makes the picture stutter.
-    facecamStream = new MediaStream([reusableCamTrack]);
-    if (microphoneEnabled) {
-      try {
-        const mic = await navigator.mediaDevices.getUserMedia({
-          audio: microphoneDeviceId
-            ? { deviceId: { exact: microphoneDeviceId }, echoCancellation: true, noiseSuppression: true }
-            : { echoCancellation: true, noiseSuppression: true },
-        });
-        mic.getAudioTracks().forEach((t) => facecamStream!.addTrack(t));
-      } catch { /* record silent rather than not at all */ }
-    }
-  } else if (layout !== "screenOnly" && cameraEnabled) {
-    try {
-      facecamStream = await navigator.mediaDevices.getUserMedia({
-        video: cameraDeviceId
-          ? { deviceId: { exact: cameraDeviceId }, width: 1920, height: 1080, frameRate: { ideal: 30 }, facingMode: "user" }
-          : { width: 1920, height: 1080, frameRate: { ideal: 30 }, facingMode: "user" },
-        audio: microphoneEnabled
-          ? microphoneDeviceId
-            ? { deviceId: { exact: microphoneDeviceId }, echoCancellation: true, noiseSuppression: true }
-            : { echoCancellation: true, noiseSuppression: true }
-          : false,
-      });
-    } catch {
-      // Fallback: try without exact deviceId (permission or over-constrained) — still high quality
-      try {
-        facecamStream = await navigator.mediaDevices.getUserMedia({
-          video: cameraEnabled ? { width: 1280, height: 720, frameRate: { ideal: 30 } } : false,
-          audio: microphoneEnabled ? true : false,
-        } as MediaStreamConstraints);
-      } catch {
-        facecamStream = new MediaStream();
+  if (wantsCamera) {
+    const shared = opts.cameraStream?.getVideoTracks().find((t) => t.readyState === "live");
+    if (shared) {
+      // Reuse the caller's camera. Opening the same device twice makes it
+      // renegotiate, which stutters every view of it.
+      facecamStream.addTrack(shared);
+    } else {
+      const camTrack = await openCameraTrack(cameraDeviceId);
+      if (camTrack) {
+        facecamStream.addTrack(camTrack);
+        ownedTracks.add(camTrack);
       }
     }
-  } else if (layout !== "screenOnly" && !cameraEnabled && microphoneEnabled) {
-    // Camera off but mic on → audio-only facecam stream
-    try {
-      facecamStream = await navigator.mediaDevices.getUserMedia({
-        video: false,
-        audio: microphoneDeviceId
-          ? { deviceId: { exact: microphoneDeviceId } }
-          : true,
-      });
-    } catch {
-      facecamStream = new MediaStream();
+  }
+
+  if (layout !== "screenOnly" && microphoneEnabled) {
+    const micTrack = await openMicrophoneTrack(microphoneDeviceId);
+    if (micTrack) {
+      facecamStream.addTrack(micTrack);
+      ownedTracks.add(micTrack);
     }
-  } else {
-    facecamStream = new MediaStream();
   }
 
   const screen = screenStream!;
   const facecam = facecamStream!;
 
-  // ── MediaRecorders — high quality: vp9 preferred, 8 Mbps screen, 2.5 Mbps cam
+  // ── MediaRecorders ──
+  // Bitrate is scaled to the pixels actually being captured: a fixed 8 Mbps is
+  // generous for 720p and visibly lossy for a 4K screen full of text.
+  const screenBitrate = bitrateFor(screen.getVideoTracks()[0], 0.12, 8_000_000, 60_000_000);
+  const facecamBitrate = bitrateFor(facecam.getVideoTracks()[0], 0.1, 4_000_000, 24_000_000);
+
   const screenMime =
     ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(
       (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
@@ -182,8 +227,8 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     screenRecorder = new MediaRecorder(
       screen,
       MediaRecorder.isTypeSupported(screenMime)
-        ? { mimeType: screenMime, videoBitsPerSecond: 8_000_000 }
-        : { videoBitsPerSecond: 8_000_000 } as Record<string, unknown>,
+        ? { mimeType: screenMime, videoBitsPerSecond: screenBitrate }
+        : { videoBitsPerSecond: screenBitrate } as Record<string, unknown>,
     );
     screenRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) screenChunks.push(e.data);
@@ -195,8 +240,8 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     facecamRecorder = new MediaRecorder(
       facecam,
       MediaRecorder.isTypeSupported(facecamMime)
-        ? { mimeType: facecamMime, videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 } as unknown as MediaRecorderOptions
-        : { videoBitsPerSecond: 2_500_000, audioBitsPerSecond: 128_000 } as unknown as MediaRecorderOptions,
+        ? { mimeType: facecamMime, videoBitsPerSecond: facecamBitrate, audioBitsPerSecond: 192_000 } as unknown as MediaRecorderOptions
+        : { videoBitsPerSecond: facecamBitrate, audioBitsPerSecond: 192_000 } as unknown as MediaRecorderOptions,
     );
     facecamRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) facecamChunks.push(e.data);
@@ -213,8 +258,7 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
       layout,
       shape,
       stop: async () => {
-        screen.getTracks().forEach((t) => t.stop());
-        facecam.getTracks().forEach((t) => t.stop());
+        ownedTracks.forEach((t) => t.stop());
         return { screenBlob: new Blob([], { type: "video/webm" }), facecamBlob: new Blob([], { type: "video/webm" }) };
       },
     };
@@ -231,9 +275,9 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
       // `stop()` flips it to "inactive" synchronously — and drop the last chunk.
       await Promise.all([flushRecorder(screenRecorder), flushRecorder(facecamRecorder)]);
 
-      // Only now release the devices; stopping tracks first can truncate the tail.
-      screen.getTracks().forEach((t) => t.stop());
-      facecam.getTracks().forEach((t) => t.stop());
+      // Only now release the devices; stopping tracks first can truncate the
+      // tail. A camera passed in by the caller is not ours to close.
+      ownedTracks.forEach((t) => t.stop());
 
       return {
         screenBlob: new Blob(screenChunks, { type: screenRecorder?.mimeType || "video/webm" }),
