@@ -29,7 +29,7 @@ export function hitTestFocal(
 export function normalizeClick(
   clientX: number,
   clientY: number,
-  rect: DOMRect,
+  rect: { left: number; top: number; width: number; height: number },
   frame: { x: number; y: number; w: number; h: number },
 ): { x: number; y: number } {
   const rawX = (clientX - rect.left - frame.x) / frame.w;
