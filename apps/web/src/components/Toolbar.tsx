@@ -84,6 +84,16 @@ export function Toolbar() {
 
       {/* Right actions */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent("open-record-modal"))}
+          className="flex h-[30px] items-center gap-1.5 rounded px-3 text-xs font-medium transition-colors hover:bg-red-600"
+          style={{ background: "#dc2626", color: "white" }}
+          title="Record Screen"
+        >
+          <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+          Record
+        </button>
+        <div className="mx-1 h-4 w-px" style={{ background: "var(--color-border-subtle)" }} />
         <button onClick={undo}
           className="flex h-[30px] w-[30px] items-center justify-center rounded transition-colors hover:bg-[var(--color-bg-surface)]"
           style={{ color: "var(--color-text-secondary)" }} title="Undo (⌘Z)">

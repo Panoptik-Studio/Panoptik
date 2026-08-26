@@ -34,9 +34,12 @@ export async function startRecording(): Promise<RecordingHandles> {
     facecamStream = new MediaStream();
   }
 
-  // Screen recorder
+  // Screen recorder — pick supported mimeType
+  const screenMime = ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp8", "video/webm"].find(
+    (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
+  ) || "video/webm";
   const screenRecorder = new MediaRecorder(screenStream, {
-    mimeType: "video/webm;codecs=vp8,opus",
+    mimeType: screenMime,
     audioBitsPerSecond: 128000,
   });
   const screenChunks: Blob[] = [];
@@ -44,9 +47,12 @@ export async function startRecording(): Promise<RecordingHandles> {
     if (e.data.size > 0) screenChunks.push(e.data);
   };
 
-  // Facecam recorder
+  // Facecam recorder — pick supported mimeType
+  const facecamMime = ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp8", "video/webm"].find(
+    (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
+  ) || "video/webm";
   const facecamRecorder = new MediaRecorder(facecamStream, {
-    mimeType: "video/webm",
+    mimeType: facecamMime,
   });
   const facecamChunks: Blob[] = [];
   facecamRecorder.ondataavailable = (e) => {
