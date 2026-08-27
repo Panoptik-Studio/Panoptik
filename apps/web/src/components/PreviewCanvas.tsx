@@ -335,6 +335,7 @@ export function PreviewCanvas() {
           y: clamp01(f.y / rect.h),
         },
         dur: 0.7,
+        hold: 2.0,
         ease: "easeInOutCubic",
       });
     },

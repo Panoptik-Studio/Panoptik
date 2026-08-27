@@ -40,25 +40,33 @@ describe("getCameraTransform", () => {
     expect(getCameraTransform([z], 5)).toEqual(IDENTITY);
   });
 
-  it("sequential fold: two keyframes compose", () => {
-    const z1 = zp({ id: "z1", t: 0, to: { scale: 2, x: 0.5, y: 0.5 }, dur: 1, ease: "linear" });
-    const z2 = zp({ id: "z2", t: 1, to: { scale: 4, x: 0.5, y: 0.5 }, dur: 1, ease: "linear" });
+  it("non-compounding: later zoom wins, from 1x (no stacking)", () => {
+    const z1 = zp({ id: "z1", t: 0, to: { scale: 2, x: 0.5, y: 0.5 }, dur: 1, hold: 0.5, ease: "linear" });
+    const z2 = zp({ id: "z2", t: 5, to: { scale: 4, x: 0.5, y: 0.5 }, dur: 1, hold: 0.5, ease: "linear" });
     expect(getCameraTransform([z1, z2], 1)).toEqual({ scale: 2, x: 0.5, y: 0.5 });
-    expect(getCameraTransform([z1, z2], 2)).toEqual({ scale: 4, x: 0.5, y: 0.5 });
+    expect(getCameraTransform([z1, z2], 6)).toEqual({ scale: 4, x: 0.5, y: 0.5 });
   });
 
-  it("overlapping zooms glide without snapping to 1x", () => {
-    const a = zp({ id: "a", t: 4, to: { scale: 2, x: 0.2, y: 0.2 }, dur: 0.45, ease: "linear" });
-    const b = zp({ id: "b", t: 6.5, to: { scale: 1.8, x: 0.8, y: 0.8 }, dur: 0.45, ease: "linear" });
-    // At 6.6, we are 0.1s into B's transition from A's target, not from 1x
-    const at6_4 = getCameraTransform([a, b], 6.4); // still A
+  it("overlapping zooms: latest wins, no compounding from previous scale", () => {
+    const a = zp({ id: "a", t: 4, to: { scale: 2, x: 0.2, y: 0.2 }, dur: 0.45, hold: 2.5, ease: "linear" });
+    const b = zp({ id: "b", t: 6.5, to: { scale: 1.8, x: 0.8, y: 0.8 }, dur: 0.45, hold: 0.5, ease: "linear" });
+    const at6_4 = getCameraTransform([a, b], 6.4); // still A (holding)
     expect(at6_4.scale).toBeCloseTo(2);
     const at6_6 = getCameraTransform([a, b], 6.6);
-    // Should be between A and B, not near 1
-    expect(at6_6.scale).toBeGreaterThan(1.5);
-    expect(at6_6.scale).toBeLessThan(2);
-    expect(at6_6.x).toBeGreaterThan(0.2);
+    // B just started 0.1s in, from 1x → 1.8, so ~1.17, not between A and B
+    expect(at6_6.scale).toBeGreaterThan(1);
+    expect(at6_6.scale).toBeLessThan(1.5);
+    expect(at6_6.x).toBeGreaterThan(0.5);
     expect(at6_6.x).toBeLessThan(0.8);
+  });
+
+  it("hold keeps zoom for hold seconds, then eases back to 1x", () => {
+    const z = zp({ t: 1, to: { scale: 3, x: 0.5, y: 0.5 }, dur: 0.5, hold: 2, ease: "linear" });
+    expect(getCameraTransform([z], 1.25).scale).toBeGreaterThan(1); // easing in
+    expect(getCameraTransform([z], 2).scale).toBeCloseTo(3); // holding
+    expect(getCameraTransform([z], 3.4).scale).toBeCloseTo(3); // still holding (1+0.5+2=3.5)
+    expect(getCameraTransform([z], 3.75).scale).toBeGreaterThan(1); // easing out
+    expect(getCameraTransform([z], 4.1).scale).toBeCloseTo(1); // after out
   });
 
   it("eased progress is not linear (easeInOutCubic mid < linear mid when accelerating)", () => {

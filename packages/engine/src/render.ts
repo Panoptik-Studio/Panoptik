@@ -13,25 +13,48 @@ export type Transform = { scale: number; x: number; y: number };
 export const IDENTITY: Transform = { scale: 1, x: 0.5, y: 0.5 };
 
 export function getCameraTransform(points: ZoomPoint[], t: number): Transform {
-  // Pure, timestamp-based, no allocations in hot path beyond filter/sort (points are small).
-  // Sequential fold: each keyframe eases from previous state → k.to over k.dur, then holds.
-  // This naturally glides between consecutive zooms without snapping to 1x.
-  let state = IDENTITY;
-  // Filter staged and sort once — zoomPoints are typically <20, so sort is cheap.
-  // Avoid extra spread by filtering then sorting in place.
+  // Non-compounding, windowed: each zoom is independent from 1×.
+  // For k at k.t with k.dur (zoom-in/out time) and k.hold (stay zoomed):
+  //   [k.t, k.t+k.dur)              → ease 1× → k.to
+  //   [k.t+k.dur, k.t+k.dur+k.hold)  → hold at k.to
+  //   [k.t+k.dur+k.hold, k.t+2*k.dur+k.hold) → ease k.to → 1×
+  // If windows overlap, the latest k wins — no stacking on previous scale.
   const active = points.filter((p) => !p.staged);
-  active.sort((a, b) => a.t - b.t);
+  // Find the latest starting zoom whose window contains t
+  let chosen: ZoomPoint | null = null;
   for (const k of active) {
-    if (k.t > t) break;
-    const progress = Math.min(1, (t - k.t) / Math.max(k.dur, 0.001));
-    const eased = (EASINGS[k.ease] ?? easeInOutCubic)(progress);
-    state = {
-      scale: lerp(state.scale, k.to.scale, eased),
-      x: lerp(state.x, k.to.x, eased),
-      y: lerp(state.y, k.to.y, eased),
+    const dur = Math.max(k.dur, 0.001);
+    const hold = k.hold ?? 2.0;
+    const outEnd = k.t + dur * 2 + hold;
+    if (t >= k.t && t < outEnd) {
+      if (!chosen || k.t > chosen.t) chosen = k;
+    }
+  }
+  if (!chosen) return IDENTITY;
+  const dur = Math.max(chosen.dur, 0.001);
+  const hold = chosen.hold ?? 2.0;
+  const inEnd = chosen.t + dur;
+  const holdEnd = inEnd + hold;
+  const outEnd = holdEnd + dur;
+  const ease = EASINGS[chosen.ease] ?? easeInOutCubic;
+  if (t < inEnd) {
+    const p = (t - chosen.t) / dur;
+    const e = ease(Math.min(1, p));
+    return {
+      scale: lerp(IDENTITY.scale, chosen.to.scale, e),
+      x: lerp(IDENTITY.x, chosen.to.x, e),
+      y: lerp(IDENTITY.y, chosen.to.y, e),
     };
   }
-  return state;
+  if (t < holdEnd) return chosen.to;
+  // ease out
+  const p = (t - holdEnd) / dur;
+  const e = ease(Math.min(1, p));
+  return {
+    scale: lerp(chosen.to.scale, IDENTITY.scale, e),
+    x: lerp(chosen.to.x, IDENTITY.x, e),
+    y: lerp(chosen.to.y, IDENTITY.y, e),
+  };
 }
 
 // Alias for spec naming — same deterministic function
@@ -169,9 +192,29 @@ function drawBackground(
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   } else {
-    // blur — solid dark for now (real blur needs decoded frame)
-    ctx.fillStyle = "#111827";
-    ctx.fillRect(0, 0, w, h);
+    // blur: stretched + blurred current frame fills the letterbox padding
+    if (currentFrame) {
+      ctx.save();
+      // @ts-ignore — filter is supported in Canvas2D
+      ctx.filter = "blur(24px) brightness(0.85)";
+      // Cover: scale to fill canvas, centered
+      const texW = (currentFrame as { width?: number }).width ?? w;
+      const texH = (currentFrame as { height?: number }).height ?? h;
+      // Fallback when CanvasImageSource is an OffscreenCanvas without width/height props read differently
+      const cw = (currentFrame as HTMLCanvasElement).width || w;
+      const ch = (currentFrame as HTMLCanvasElement).height || h;
+      const scale = Math.max(w / cw, h / ch);
+      const dw = cw * scale;
+      const dh = ch * scale;
+      ctx.drawImage(currentFrame, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      ctx.restore();
+      // Darken a bit so zooms remain readable
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      ctx.fillRect(0, 0, w, h);
+    } else {
+      ctx.fillStyle = "#111827";
+      ctx.fillRect(0, 0, w, h);
+    }
   }
 }
 

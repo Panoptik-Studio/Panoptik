@@ -96,7 +96,7 @@ export function Inspector() {
         />
       </Row>
 
-      <Row label="Duration" value={`${zoom.dur.toFixed(2)}s`}>
+      <Row label="Zoom in" value={`${zoom.dur.toFixed(2)}s`}>
         <input
           type="range"
           min={0.1}
@@ -104,6 +104,20 @@ export function Inspector() {
           step={0.05}
           value={zoom.dur}
           onChange={(e) => patch({ dur: Number(e.target.value) })}
+          onPointerUp={commitDrag}
+          onKeyUp={commitDrag}
+          className="w-full accent-[#0070f3]"
+        />
+      </Row>
+
+      <Row label="Hold" value={`${(zoom.hold ?? 2).toFixed(2)}s`}>
+        <input
+          type="range"
+          min={0.2}
+          max={5}
+          step={0.1}
+          value={zoom.hold ?? 2}
+          onChange={(e) => patch({ hold: Number(e.target.value) })}
           onPointerUp={commitDrag}
           onKeyUp={commitDrag}
           className="w-full accent-[#0070f3]"

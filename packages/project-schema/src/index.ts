@@ -10,7 +10,8 @@ export type ZoomPoint = {
   id: string;
   t: number; // seconds
   to: { scale: number; x: number; y: number }; // focal point, normalized 0-1 relative to FRAME rect
-  dur: number; // easing duration, seconds
+  dur: number; // zoom-in (and zoom-out) easing duration, seconds
+  hold?: number; // how long to stay zoomed at max, seconds (default 2.0)
   ease: string; // key of EASINGS, default "easeInOutCubic"
   staged: boolean; // true = ghost proposal (agent-staged), never affects rendering
 };
