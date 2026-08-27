@@ -207,15 +207,29 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   const screenBitrate = bitrateFor(screen.getVideoTracks()[0], 0.12, 8_000_000, 60_000_000);
   const facecamBitrate = bitrateFor(facecam.getVideoTracks()[0], 0.1, 4_000_000, 24_000_000);
 
+  // Prefer HW-encode (H264/HEVC/AVC) — VP8 is SW-only on Mesa renoir (about:support VP8 HW Unsupported)
+  // so 1920p60 vp8 → 13fps SW, while avc1 → 60fps HW. Keep webm fallback for browsers without mp4.
   const screenMime =
-    ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(
-      (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
-    ) || "video/webm";
+    [
+      "video/mp4;codecs=avc1",
+      "video/mp4",
+      "video/webm;codecs=h264",
+      "video/webm;codecs=avc1",
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+    ].find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) || "video/webm";
 
   const facecamMime =
-    ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find(
-      (t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t),
-    ) || "video/webm";
+    [
+      "video/mp4;codecs=avc1,opus",
+      "video/mp4",
+      "video/webm;codecs=h264,opus",
+      "video/webm;codecs=avc1,opus",
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+    ].find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) || "video/webm";
 
   // Only create recorders for non-empty streams
   let screenRecorder: MediaRecorder | null = null;
