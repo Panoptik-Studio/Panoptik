@@ -354,6 +354,11 @@ export function PreviewCanvas() {
     [addZoomPoint, setSelectedZoom],
   );
 
+  // ── Facecam PiP dragging ──
+  const [draggingFacecam, setDraggingFacecam] = useState(false);
+  const facecamDragOffset = useRef<{ dx: number; dy: number } | null>(null);
+  const setFacecam = useProjectStore((s) => s.setFacecam);
+
   // ── Focal handle dragging ──
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -363,6 +368,25 @@ export function PreviewCanvas() {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
+
+      // Facecam hit test first — PiP is in screen space (full canvas), never zoomed
+      const fc = state.project.facecam;
+      if (fc.src) {
+        const cw = canvas.width;
+        const ch = canvas.height;
+        const pipW = cw * fc.size;
+        const pipH = pipW / (16 / 9);
+        const fx = cw * fc.x;
+        const fy = ch * fc.y;
+        if (px >= fx && px <= fx + pipW && py >= fy && py <= fy + pipH) {
+          e.preventDefault();
+          canvas.setPointerCapture(e.pointerId);
+          facecamDragOffset.current = { dx: px - fx, dy: py - fy };
+          setDraggingFacecam(true);
+          return;
+        }
+      }
+
       const hit = hitTestHandle(
         canvas,
         state.project,
@@ -388,10 +412,41 @@ export function PreviewCanvas() {
       const state = useProjectStore.getState();
       if (!state.project) return;
 
+      // Facecam drag — screen space, clamped to canvas edges
+      if (draggingFacecam) {
+        const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
+        const cw = canvas.width;
+        const ch = canvas.height;
+        const fc = state.project.facecam;
+        const pipW = cw * fc.size;
+        const pipH = pipW / (16 / 9);
+        const off = facecamDragOffset.current;
+        if (!off) return;
+        const fx = px - off.dx;
+        const fy = py - off.dy;
+        const clampedX = Math.max(0, Math.min(cw - pipW, fx));
+        const clampedY = Math.max(0, Math.min(ch - pipH, fy));
+        setFacecam({ x: clampedX / cw, y: clampedY / ch });
+        return;
+      }
+
       if (!dragging) {
-        // Hover affordance: the crosshair means "add", the grab hand means "move".
+        // Hover affordance: facecam grab beats zoom grab beats crosshair
         if (!state.isPlaying) {
           const { x: hx, y: hy } = pointerToCanvas(canvas, e.clientX, e.clientY);
+          const fc = state.project.facecam;
+          if (fc.src) {
+            const cw = canvas.width;
+            const ch = canvas.height;
+            const pipW = cw * fc.size;
+            const pipH = pipW / (16 / 9);
+            const fx = cw * fc.x;
+            const fy = ch * fc.y;
+            if (hx >= fx && hx <= fx + pipW && hy >= fy && hy <= fy + pipH) {
+              canvas.style.cursor = "grab";
+              return;
+            }
+          }
           const over = hitTestHandle(
             canvas,
             state.project,
@@ -423,10 +478,16 @@ export function PreviewCanvas() {
       });
       if (!dragging.moved) setDragging({ ...dragging, moved: true });
     },
-    [dragging, updateZoomPoint],
+    [dragging, draggingFacecam, updateZoomPoint, setFacecam],
   );
 
   const handlePointerUp = useCallback(() => {
+    if (draggingFacecam) {
+      setDraggingFacecam(false);
+      facecamDragOffset.current = null;
+      commitDrag();
+      suppressClickRef.current = true;
+    }
     if (dragging) {
       if (dragging.moved) {
         commitDrag();
@@ -434,7 +495,7 @@ export function PreviewCanvas() {
       }
       setDragging(null);
     }
-  }, [dragging, commitDrag]);
+  }, [dragging, draggingFacecam, commitDrag]);
 
   // ── Canvas sizing ──
   const [canvasSize, setCanvasSize] = useState({
