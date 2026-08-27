@@ -618,13 +618,15 @@ export function PreviewCanvas() {
     >
       {/* Vercel mesh halo behind stage */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ background: "radial-gradient(700px 420px at 50% 38%, rgba(0,124,240,0.18) 0%, transparent 60%), radial-gradient(560px 360px at 82% 78%, rgba(255,0,128,0.12) 0%, transparent 62%)" }} />
-      <div className="relative flex items-center justify-center overflow-hidden rounded-xl border bg-white shadow-vercel-4" style={{ borderColor: "#ebebeb", padding: stagePadding, ...stageStyle }}>
-        <div className="overflow-hidden rounded-lg bg-transparent shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/10">
+      {/* Stage frame stays constant — padding shrinks the video inside, not the frame (original canvas size) */}
+      <div className="relative flex h-full max-h-[56vh] w-full max-w-[64vw] items-center justify-center overflow-hidden rounded-xl border bg-white shadow-vercel-4 lg:max-h-[62vh]" style={{ borderColor: "#ebebeb", padding: stagePadding, ...stageStyle }}>
+        <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-transparent shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/10">
           <canvas
             ref={canvasRef}
             width={canvasSize.w}
             height={canvasSize.h}
-            className="block max-h-[56vh] max-w-[64vw] cursor-crosshair lg:max-h-[62vh]"
+            className="block max-h-full max-w-full cursor-crosshair"
+            style={{ width: "auto", height: "auto", maxWidth: "100%", maxHeight: "100%" }}
             onClick={handleCanvasClick}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
