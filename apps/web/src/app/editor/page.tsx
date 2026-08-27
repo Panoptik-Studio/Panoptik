@@ -47,7 +47,7 @@ export default function EditorPage() {
         </main>
 
         {/* Right — white cards on soft canvas */}
-        <aside className="flex w-[320px] shrink-0 flex-col overflow-y-auto border-l bg-white" style={{ borderColor: "#ebebeb", scrollbarGutter: "stable" }}>
+        <aside className="flex w-[340px] shrink-0 flex-col overflow-y-auto border-l bg-white" style={{ borderColor: "#ebebeb", scrollbarGutter: "stable" }}>
           <StagingPanel />
           <ZoomPanel />
           <StageControls />
