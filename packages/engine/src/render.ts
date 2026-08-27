@@ -124,11 +124,6 @@ export function setCurrentFrame(frame: CanvasImageSource | null) {
   currentFrame = frame;
 }
 
-// Screen debug — enable via localStorage.setItem("panoptik:debugScreen","1")
-let screenRenderFrames = 0;
-let screenRenderLastLog = 0;
-let screenRenderNoFrame = 0;
-
 export function getCurrentFrame(): CanvasImageSource | null {
   return currentFrame;
 }
@@ -144,15 +139,6 @@ export function renderFrame(
 ): void {
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
-  screenRenderFrames++;
-  if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - screenRenderLastLog > 1000) {
-    const isOffscreen = typeof OffscreenCanvas !== "undefined" && ctx.canvas instanceof OffscreenCanvas;
-    console.log(`[Screen] renderFrame ${isOffscreen ? "export" : "canvas"}`, { t: t.toFixed(3), hasFrame: !!currentFrame, canvas: `${w}x${h}`, draws: screenRenderFrames, noFrame: screenRenderNoFrame });
-    screenRenderLastLog = performance.now();
-    screenRenderFrames = 0;
-    screenRenderNoFrame = 0;
-  }
-  if (!currentFrame) screenRenderNoFrame++;
 
   // ── Layer 1: Background ──
   drawBackground(ctx, project, w, h);

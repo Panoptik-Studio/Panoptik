@@ -190,20 +190,9 @@ export function PreviewCanvas() {
       dirty = true;
     };
     const unsubscribe = useProjectStore.subscribe(markDirty);
-    // Screen debug for 0.5 fps — enable via localStorage.setItem("panoptik:debugScreen","1")
-    let loopFrames = 0;
-    let loopDraws = 0;
-    let loopLastLog = performance.now();
 
     const loop = (now: number) => {
       rafRef.current = requestAnimationFrame(loop);
-      loopFrames++;
-      if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - loopLastLog > 1000) {
-        console.log("[Screen] canvas loop", { fps: loopFrames, draws: loopDraws, dirty, decodePending, t: useProjectStore.getState().currentTime.toFixed(3), isPlaying: useProjectStore.getState().isPlaying });
-        loopLastLog = performance.now();
-        loopFrames = 0;
-        loopDraws = 0;
-      }
 
       const dt = lastTimeRef.current ? (now - lastTimeRef.current) / 1000 : 0;
       lastTimeRef.current = now;
@@ -254,7 +243,6 @@ export function PreviewCanvas() {
       if (!state.isPlaying) {
         drawHandles(ctx, state.project, t, state.selectedZoomId, draggingIdRef.current);
       }
-      loopDraws++;
     };
 
     lastTimeRef.current = 0;
