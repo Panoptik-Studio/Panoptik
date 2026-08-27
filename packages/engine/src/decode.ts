@@ -14,12 +14,12 @@ import type { Project } from "@panoptik/schema";
 import { clearFacecamCache, getCurrentFrame, setCurrentFrame } from "./render";
 import { setAudioSink } from "./audio";
 
-/** Preview cap: 1280 is ~2.25× fewer pixels than 1920 → ~2× decode speed, still sharp in the 290px inspector + 1920 canvas (upscaled). Export uses full res via encode.ts. */
-const MAX_DECODE_WIDTH = 1280;
+/** Keep 1920 everywhere on canvas per request — export and preview share res. */
+const MAX_DECODE_WIDTH = 1920;
 /** Larger pool reduces backpressure when the rAF loop is 60fps and decode is ~30fps. */
 const POOL_SIZE = 8;
-/** Forward gap past which a fresh seek beats stepping frame by frame. */
-const SEEK_AHEAD_LIMIT = 1;
+/** One iterator should cover the whole clip — 1s caused a seek every ~2s → 140-720ms stall → 17fps. */
+const SEEK_AHEAD_LIMIT = 5;
 /** Stand-in frame duration for containers that report none. */
 const NOMINAL_FRAME_DUR = 1 / 30;
 
