@@ -37,6 +37,40 @@ export type StartRecordingOpts = {
   cameraStream?: MediaStream | null;
 };
 
+// ── WebCodecs VP9 HW path (preferred) — falls back to MediaRecorder if unsupported ──
+async function tryWebCodecsScreen(
+  screenStream: MediaStream,
+): Promise<{ output: import("mediabunny").Output; stop: () => Promise<Blob> } | null> {
+  try {
+    const { Output, WebMOutputFormat, BufferTarget, MediaStreamVideoTrackSource } = await import("mediabunny");
+    const track = screenStream.getVideoTracks()[0];
+    if (!track) return null;
+    // Probe: will throw if codec/HW not supported
+    const output = new Output({ format: new WebMOutputFormat(), target: new BufferTarget() });
+    const source = new MediaStreamVideoTrackSource(track as unknown as MediaStreamVideoTrack, {
+      codec: "vp09.00.10.08" as unknown as import("mediabunny").VideoCodec,
+      bitrate: 12_000_000,
+      // @ts-ignore — mediabunny forwards to WebCodecs VideoEncoderConfig.hardwareAcceleration
+      hardwareAcceleration: "prefer-hardware",
+      keyFrameInterval: 2,
+    } as unknown as import("mediabunny").VideoEncodingConfig);
+    output.addVideoTrack(source);
+    await output.start();
+    return {
+      output,
+      stop: async () => {
+        source.close?.();
+        await output.finalize();
+        const buf = (output.target as InstanceType<typeof BufferTarget>).buffer;
+        if (!buf) throw new Error("WebCodecs output produced no data");
+        return new Blob([buf], { type: "video/webm;codecs=vp09" });
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Longest we wait for a recorder's final chunk before giving up on it. */
 const FLUSH_TIMEOUT_MS = 4000;
 
@@ -231,13 +265,21 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
       "video/webm",
     ].find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) || "video/webm";
 
+  // ── Try WebCodecs VP9 HW for screen (1920p60 HW → 60fps) before MediaRecorder VP8 SW (13fps)
+  let webCodecsScreen: { output: import("mediabunny").Output; stop: () => Promise<Blob> } | null = null;
+  if (screen.getTracks().length > 0) {
+    webCodecsScreen = await tryWebCodecsScreen(screen);
+    if (webCodecsScreen) console.log("[Record] screen: WebCodecs VP9 HW (prefer-hardware) — expect 60fps at 1920");
+    else console.log("[Record] screen: MediaRecorder", screenMime, "— may be SW");
+  }
+
   // Only create recorders for non-empty streams
   let screenRecorder: MediaRecorder | null = null;
   let facecamRecorder: MediaRecorder | null = null;
   const screenChunks: Blob[] = [];
   const facecamChunks: Blob[] = [];
 
-  if (screen.getTracks().length > 0) {
+  if (!webCodecsScreen && screen.getTracks().length > 0) {
     screenRecorder = new MediaRecorder(
       screen,
       MediaRecorder.isTypeSupported(screenMime)
@@ -284,17 +326,21 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     layout,
     shape,
     stop: async () => {
-      // Wait for the "stop" event, which the spec fires only after the final
-      // dataavailable. Polling `state` instead would resolve immediately —
-      // `stop()` flips it to "inactive" synchronously — and drop the last chunk.
-      await Promise.all([flushRecorder(screenRecorder), flushRecorder(facecamRecorder)]);
+      let screenBlob: Blob;
+      if (webCodecsScreen) {
+        const [scBlob] = await Promise.all([webCodecsScreen.stop(), flushRecorder(facecamRecorder)]);
+        screenBlob = scBlob;
+      } else {
+        await Promise.all([flushRecorder(screenRecorder), flushRecorder(facecamRecorder)]);
+        screenBlob = new Blob(screenChunks, { type: screenRecorder?.mimeType || "video/webm" });
+      }
 
       // Only now release the devices; stopping tracks first can truncate the
       // tail. A camera passed in by the caller is not ours to close.
       ownedTracks.forEach((t) => t.stop());
 
       return {
-        screenBlob: new Blob(screenChunks, { type: screenRecorder?.mimeType || "video/webm" }),
+        screenBlob,
         facecamBlob: new Blob(facecamChunks, { type: facecamRecorder?.mimeType || "video/webm" }),
       };
     },
