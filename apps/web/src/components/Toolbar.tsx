@@ -8,24 +8,7 @@
 import { useProjectStore } from "@/stores/projectStore";
 import { useVideoExport } from "@/lib/useVideoExport";
 
-function fmtTime(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${String(m).padStart(2, "0")}:${sec.toFixed(1).padStart(4, "0")}`;
-}
-
-function TimeReadout({ duration }: { duration: number }) {
-  const currentTime = useProjectStore((s) => s.currentTime);
-  return (
-    <span className="w-[110px] text-center text-[12px] tabular-nums" style={{ fontFamily: "var(--font-mono)", color: "#4d4d4d", letterSpacing: "-0.02em" }}>
-      {fmtTime(currentTime)} / {fmtTime(duration)}
-    </span>
-  );
-}
-
 export function Toolbar() {
-  const isPlaying = useProjectStore((s) => s.isPlaying);
-  const togglePlay = useProjectStore((s) => s.togglePlay);
   const project = useProjectStore((s) => s.project);
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);
@@ -33,7 +16,6 @@ export function Toolbar() {
   const canRedo = useProjectStore((s) => s.historyIndex < s.history.length - 1);
   const quickExport = useVideoExport();
 
-  const dur = project?.clip.duration ?? 0;
   const hasProject = project !== null;
 
   return (
@@ -64,33 +46,6 @@ export function Toolbar() {
           <span className="max-w-[140px] truncate font-[450]">{project ? `${project.id.slice(0, 8)}…` : "product-demo.ods"}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-60"><path d="m6 9 6 6 6-6" /></svg>
         </button>
-      </div>
-
-      {/* Center: play + time — prominent pill, 32px button, blue hover, pulse when playing */}
-      <div className="flex items-center gap-2 rounded-full border px-2 py-1 shadow-sm" style={{ background: "#ffffff", borderColor: "#ebebeb", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}>
-        <button
-          onClick={togglePlay}
-          disabled={!hasProject}
-          className="group flex h-8 w-8 items-center justify-center rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed active:scale-[0.96]"
-          style={{
-            background: isPlaying ? "#171717" : hasProject ? "#171717" : "#f5f5f5",
-            color: "#ffffff",
-            border: "1px solid #171717",
-            boxShadow: isPlaying ? "0 0 0 1px rgba(0,0,0,0.08) inset, 0 0 12px rgba(0,112,243,0.18)" : "0 1px 2px rgba(0,0,0,0.06)",
-          }}
-          onMouseEnter={(e) => { if (!hasProject) return; e.currentTarget.style.background = "#0070f3"; e.currentTarget.style.borderColor = "#0070f3"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "#171717"; e.currentTarget.style.borderColor = "#171717"; }}
-          title={hasProject ? "Play / Pause (Space)" : "Load a clip to play"}
-        >
-          {isPlaying ? (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-          ) : (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="ml-[1px]"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-          )}
-        </button>
-        <div className="h-5 w-px" style={{ background: "#ebebeb" }} />
-        <TimeReadout duration={dur} />
-        <span className="hidden sm:inline-flex items-center rounded-full bg-[#fafafa] px-2 py-0.5 font-mono text-[10px] tracking-wide" style={{ color: "#888", border: "1px solid #ebebeb" }}>{isPlaying ? "Playing" : hasProject ? "Paused" : "No clip"}</span>
       </div>
 
       {/* Right: actions */}
