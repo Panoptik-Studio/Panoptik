@@ -5,6 +5,7 @@
  */
 "use client";
 
+import * as React from "react";
 import { CaptionsPanel } from "@/components/CaptionsPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ExportPanel } from "@/components/ExportPanel";
@@ -19,19 +20,22 @@ import { ToolTrace } from "@/components/ToolTrace";
 import { Toolbar } from "@/components/Toolbar";
 import { ZoomPanel } from "@/components/ZoomPanel";
 
+type LeftTab = "media" | "zoom" | "text" | "captions" | "camera" | "stage";
 export default function EditorPage() {
+  const [activeTab, setActiveTab] = React.useState<LeftTab>("zoom");
   return (
     <div className="flex h-screen flex-col" style={{ background: "#fafafa" }}>
       <Toolbar />
 
       <div className="flex min-h-0 flex-1">
-        {/* Left — ex-app-shell-row (white, hairline, active indicator #171717) */}
+        {/* Left — 6 tabs grouped by job: Media / Zoom / Text / Captions / Camera / Stage */}
         <aside className="flex w-[56px] shrink-0 flex-col items-center gap-1.5 border-r bg-white py-4" style={{ borderColor: "#ebebeb" }}>
-          <ToolBtn icon="zoom" label="Add / Edit Zoom" kbd="Z" active />
-          <ToolBtn icon="canvas" label="Media & Video Canvas" />
-          <ToolBtn icon="text" label="Text Overlay" kbd="T" />
-          <div className="my-2 h-px w-6 rounded-full" style={{ background: "#ebebeb" }} />
-          <ToolBtn icon="settings" label="Project Settings" />
+          <ToolBtn icon="media" label="Media" active={activeTab === "media"} onClick={() => setActiveTab("media")} />
+          <ToolBtn icon="zoom" label="Zoom" kbd="Z" active={activeTab === "zoom"} onClick={() => setActiveTab("zoom")} />
+          <ToolBtn icon="text" label="Text" kbd="T" active={activeTab === "text"} onClick={() => setActiveTab("text")} />
+          <ToolBtn icon="captions" label="Captions" active={activeTab === "captions"} onClick={() => setActiveTab("captions")} />
+          <ToolBtn icon="camera" label="Camera" active={activeTab === "camera"} onClick={() => setActiveTab("camera")} />
+          <ToolBtn icon="stage" label="Stage" active={activeTab === "stage"} onClick={() => setActiveTab("stage")} />
           <div className="mt-auto flex flex-col items-center gap-2 pb-2">
             <div className="h-px w-6 rounded-full" style={{ background: "#ebebeb" }} />
             <div className="flex h-7 w-7 items-center justify-center rounded-full border bg-[#fafafa] text-[10px] font-bold tracking-widest" style={{ borderColor: "#ebebeb", color: "#888" }} title="Local · No upload">●</div>
@@ -46,15 +50,22 @@ export default function EditorPage() {
           <Timeline />
         </main>
 
-        {/* Right — white cards on soft canvas */}
+        {/* Right — tabbed inspector (Staging + active tab) */}
         <aside className="flex w-[340px] shrink-0 flex-col overflow-y-auto border-l bg-white" style={{ borderColor: "#ebebeb", scrollbarGutter: "stable" }}>
           <StagingPanel />
-          <ZoomPanel />
-          <StageControls />
-          <ProjectBrowser />
-          <CaptionsSlot />
-          <Inspector />
-          <ExportPanel />
+          {activeTab === "media" && <ProjectBrowser />}
+          {activeTab === "zoom" && (
+            <>
+              <ZoomPanel />
+              <Inspector />
+            </>
+          )}
+          {activeTab === "text" && <Inspector />}
+          {activeTab === "captions" && <CaptionsSlot />}
+          {activeTab === "camera" && <StageControls />}
+          {activeTab === "stage" && <StageControls />}
+          {/* Export always reachable via header, but also show in media tab */}
+          {activeTab === "media" && <ExportPanel />}
           <div className="border-t" style={{ borderColor: "#ebebeb" }}>
             <ToolTrace />
           </div>
@@ -76,22 +87,34 @@ function CaptionsSlot() {
   return <CaptionsPanel />; // DEV B: CaptionsPanel implemented
 }
 
-/* Left — ex-app-shell-row: active indicator #171717, rounded sm */
-function ToolBtn({ icon, label, kbd, active }: { icon: string; label: string; kbd?: string; active?: boolean }) {
+/* Left — 6 tabs: Media · Zoom · Text · Captions · Camera · Stage */
+function ToolBtn({ icon, label, kbd, active, onClick }: { icon: string; label: string; kbd?: string; active?: boolean; onClick?: () => void }) {
   const icons: Record<string, React.ReactNode> = {
+    media: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><rect x="2" y="2" width="20" height="16" rx="2"/><path d="M2 12h5l4-4 4 4h7"/><circle cx="8.5" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>
+    ),
     zoom: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
         <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" />
       </svg>
     ),
-    canvas: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
-        <rect width="18" height="18" x="3" y="3" rx="2" /><path d="M7 3v18" /><path d="M3 7.5h4" /><path d="M3 12h18" /><path d="M3 16.5h4" /><path d="M17 3v18" /><path d="M17 7.5h4" /><path d="M17 16.5h4" />
-      </svg>
-    ),
     text: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
         <polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" />
+      </svg>
+    ),
+    captions: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M3 7h18"/><path d="M3 12h10"/><path d="M3 17h14"/><path d="M17 7v10"/><path d="M7 12v5"/></svg>
+    ),
+    camera: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+    ),
+    stage: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+    ),
+    canvas: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+        <rect width="18" height="18" x="3" y="3" rx="2" /><path d="M7 3v18" /><path d="M3 7.5h4" /><path d="M3 12h18" /><path d="M3 16.5h4" /><path d="M17 3v18" /><path d="M17 7.5h4" /><path d="M17 16.5h4" />
       </svg>
     ),
     settings: (
@@ -103,6 +126,7 @@ function ToolBtn({ icon, label, kbd, active }: { icon: string; label: string; kb
   return (
     <div className="group relative">
       <button
+        onClick={onClick}
         className="relative flex h-9 w-9 items-center justify-center rounded-[8px] transition-colors"
         style={{
           color: active ? "#171717" : "#888",
