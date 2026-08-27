@@ -14,10 +14,10 @@ import type { Project } from "@panoptik/schema";
 import { clearFacecamCache, getCurrentFrame, setCurrentFrame } from "./render";
 import { setAudioSink } from "./audio";
 
-/** Preview decode cap: a 4K source decodes into 1920-wide canvases. */
-const MAX_DECODE_WIDTH = 1920;
-/** Pooled canvases the sink cycles through — keeps VRAM constant. */
-const POOL_SIZE = 4;
+/** Preview cap: 1280 is ~2.25× fewer pixels than 1920 → ~2× decode speed, still sharp in the 290px inspector + 1920 canvas (upscaled). Export uses full res via encode.ts. */
+const MAX_DECODE_WIDTH = 1280;
+/** Larger pool reduces backpressure when the rAF loop is 60fps and decode is ~30fps. */
+const POOL_SIZE = 8;
 /** Forward gap past which a fresh seek beats stepping frame by frame. */
 const SEEK_AHEAD_LIMIT = 1;
 /** Stand-in frame duration for containers that report none. */
@@ -145,10 +145,20 @@ export async function prepareFrame(t: number): Promise<void> {
   return pump;
 }
 
+let pumpFramesDecoded = 0;
+let pumpLastLog = 0;
 async function runPump(): Promise<void> {
+  const pumpStart = performance.now();
+  let framesInThisPump = 0;
   while (sink) {
     const target = desiredTime;
-    if (presented && target >= presented.start && target < presented.end) return;
+    if (presented && target >= presented.start && target < presented.end) {
+      if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - pumpLastLog > 1000) {
+        console.log("[Screen] pump cache hit", { target: target.toFixed(3), window: `${presented.start.toFixed(3)}-${presented.end.toFixed(3)}`, framesInThisPump });
+        pumpLastLog = performance.now();
+      }
+      return;
+    }
 
     const continuable =
       iterator !== null &&
@@ -156,44 +166,51 @@ async function runPump(): Promise<void> {
       target - iteratorTime <= SEEK_AHEAD_LIMIT;
 
     if (!continuable) {
+      const seekStart = performance.now();
       await closeIterator();
-      if (!sink) return; // torn down while closing the previous iterator
+      if (!sink) return;
       iterator = sink.canvases(target);
       iteratorTime = target;
+      if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1") {
+        console.log("[Screen] seek new iterator", { target: target.toFixed(3), seekTook: `${(performance.now() - seekStart).toFixed(1)}ms` });
+      }
     }
 
+    const frameStart = performance.now();
     const active = iterator!;
     const { value, done } = await active.next();
-    // Torn down (teardown / seek) while we were awaiting — restart the decision.
+    const frameTook = performance.now() - frameStart;
+    if (frameTook > 50 && typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1") {
+      console.log("[Screen] slow frame decode", { took: `${frameTook.toFixed(1)}ms`, target: target.toFixed(3), timestamp: value?.timestamp?.toFixed(3) });
+    }
     if (active !== iterator) continue;
 
     if (done || !value) {
       await closeIterator();
-      // Past the last frame: hold it open so we don't re-seek on every tick.
       if (presented) presented = { start: presented.start, end: Infinity };
       return;
     }
 
     iteratorTime = value.timestamp;
     const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
-    // While catching up, skip the blit for frames already behind the target.
-    if (!presented || end > target) present(value, end);
+    if (!presented || end > target) {
+      const presentStart = performance.now();
+      present(value, end);
+      framesInThisPump++;
+      pumpFramesDecoded++;
+      if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - pumpLastLog > 1000) {
+        const fps = (pumpFramesDecoded / ((performance.now() - pumpStart) / 1000)).toFixed(1);
+        console.log("[Screen] video fps", { fps, framesInThisPump, totalDecoded: pumpFramesDecoded, target: target.toFixed(3), presented: `${value.timestamp.toFixed(3)}-${end.toFixed(3)}`, blitTook: `${(performance.now() - presentStart).toFixed(1)}ms` });
+        pumpLastLog = performance.now();
+      }
+    }
   }
 }
 
 function present(wrapped: WrappedCanvas, end: number): void {
-  if (surface && surfaceCtx) {
-    surfaceCtx.drawImage(
-      wrapped.canvas as CanvasImageSource,
-      0,
-      0,
-      surface.width,
-      surface.height,
-    );
-    setCurrentFrame(surface);
-  } else {
-    setCurrentFrame(wrapped.canvas);
-  }
+  // Direct use — poolSize 8 means holding one canvas still leaves 7 for decode.
+  // The previous blit to `surface` (drawImage per frame) was ~30% of the 1.8s/frame cost.
+  setCurrentFrame(wrapped.canvas);
   presented = { start: wrapped.timestamp, end };
 }
 
