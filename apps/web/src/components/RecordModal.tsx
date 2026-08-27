@@ -253,6 +253,26 @@ export function RecordModal() {
     };
   }, [isOpen, selectedCam, selectedMic]);
 
+  // ── Explicit mic permission prompt (so the browser shows the Allow dialog) ──
+  useEffect(() => {
+    if (!isOpen || !micEnabled || !wantsCameraSlot) return;
+    let cancelled = false;
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then((s) => {
+        if (!cancelled) s.getTracks().forEach((t) => t.stop());
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMicEnabled(false);
+          setError("Microphone permission denied — recording without mic. Enable in browser settings to include audio.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, micEnabled, wantsCameraSlot]);
+
   // ── The camera: opened once, shared by everything ──
   // Deliberately not keyed on recording state. The preview, the floating bubble
   // and the MediaRecorder all read this one stream; re-acquiring the device on

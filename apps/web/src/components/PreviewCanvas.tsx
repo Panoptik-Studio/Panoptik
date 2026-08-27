@@ -140,6 +140,7 @@ function drawHandles(
 export function PreviewCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
 
@@ -147,6 +148,8 @@ export function PreviewCanvas() {
   // on every currentTime tick during playback.
   const project = useProjectStore((s) => s.project);
   const stagePadding = useProjectStore((s) => s.stagePadding);
+  const isPlaying = useProjectStore((s) => s.isPlaying);
+  const currentTime = useProjectStore((s) => s.currentTime);
   const addZoomPoint = useProjectStore((s) => s.addZoomPoint);
   const updateZoomPoint = useProjectStore((s) => s.updateZoomPoint);
   const setSelectedZoom = useProjectStore((s) => s.setSelectedZoom);
@@ -262,6 +265,37 @@ export function PreviewCanvas() {
       cancelAnimationFrame(rafRef.current);
     };
   }, [hasProject]);
+
+  // ── Preview audio — sync HTMLAudioElement to canvas time (hidden, no controls) ──
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !project) return;
+    // Source is the same blob URL as the video — contains the audio track
+    if (audio.src !== project.clip.src) {
+      audio.src = project.clip.src;
+      audio.load();
+    }
+  }, [project?.clip.src]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !project) return;
+    // Seamless seek when paused/scrubbing — don't thrash when playing (audio follows)
+    if (!isPlaying) {
+      const drift = Math.abs(audio.currentTime - currentTime);
+      if (drift > 0.15) audio.currentTime = currentTime;
+    }
+  }, [currentTime, isPlaying, project]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [isPlaying]);
 
   // ── Keyboard undo/redo + moment mark (Phase 2.4 + 3.3) ──
   useEffect(() => {
@@ -633,6 +667,9 @@ export function PreviewCanvas() {
           />
         </div>
       </div>
+      {/* Hidden audio for preview — same blob URL as video, synced to canvas time */}
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <audio ref={audioRef} preload="auto" className="hidden" crossOrigin="anonymous" />
       {toast && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border bg-[#171717] px-3.5 py-1.5 text-xs font-medium text-white shadow-vercel-5" style={{ borderColor: "#2a2a2a" }}>
           {toast}
