@@ -124,6 +124,11 @@ export function setCurrentFrame(frame: CanvasImageSource | null) {
   currentFrame = frame;
 }
 
+// Screen debug — enable via localStorage.setItem("panoptik:debugScreen","1")
+let screenRenderFrames = 0;
+let screenRenderLastLog = 0;
+let screenRenderNoFrame = 0;
+
 export function getCurrentFrame(): CanvasImageSource | null {
   return currentFrame;
 }
@@ -139,6 +144,15 @@ export function renderFrame(
 ): void {
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
+  screenRenderFrames++;
+  if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - screenRenderLastLog > 1000) {
+    const isOffscreen = typeof OffscreenCanvas !== "undefined" && ctx.canvas instanceof OffscreenCanvas;
+    console.log(`[Screen] renderFrame ${isOffscreen ? "export" : "canvas"}`, { t: t.toFixed(3), hasFrame: !!currentFrame, canvas: `${w}x${h}`, draws: screenRenderFrames, noFrame: screenRenderNoFrame });
+    screenRenderLastLog = performance.now();
+    screenRenderFrames = 0;
+    screenRenderNoFrame = 0;
+  }
+  if (!currentFrame) screenRenderNoFrame++;
 
   // ── Layer 1: Background ──
   drawBackground(ctx, project, w, h);
@@ -315,9 +329,13 @@ function drawFacecam(
   if (!video) return;
   const isExport = typeof OffscreenCanvas !== "undefined" && ctx.canvas instanceof OffscreenCanvas;
   if (isExport) {
-    // Export: don't seek the shared preview element — it would race with the
-    // preview's own seeks and stall on `Infinity` duration webm. Just draw the
-    // current frame; export's `prepareFrame` already steps the main video.
+    // Export: precise, synchronous seek — OffscreenCanvas has no real-time playback.
+    // Don't gate on playing/paused, just seek to t and draw if we have data.
+    try {
+      const dur = video.duration;
+      const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
+      if (Math.abs(video.currentTime - target) > 0.02) video.currentTime = target;
+    } catch { /* ignore */ }
     if (video.readyState < 1) return;
   } else {
     const dt = t - lastFacecamT;
