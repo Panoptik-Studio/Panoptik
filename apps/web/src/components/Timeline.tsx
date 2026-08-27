@@ -30,6 +30,7 @@ export function Timeline() {
   const [zoom, setZoom] = useState(0.52);
   const [draggingDiamond, setDraggingDiamond] = useState<{ id: string; committed: boolean } | null>(null);
   const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
+  const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
 
   const project = useProjectStore((s) => s.project);
   const currentTime = useProjectStore((s) => s.currentTime);
@@ -119,6 +120,7 @@ export function Timeline() {
   }, [canvasW, canvasH, duration, project?.zoomPoints, project?.stagedZoomPoints, selectedZoomId, timeToX]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
+    if (isDraggingPlayhead || draggingDiamond) return;
     if (!scrollRef.current) return;
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
@@ -140,6 +142,27 @@ export function Timeline() {
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     updateZoomPoint(draggingDiamond.id, { t: xToTime(x) });
   }, [draggingDiamond, updateZoomPoint, xToTime]);
+
+  const handleTimelinePointerDown = useCallback((e: React.PointerEvent) => {
+    if (!scrollRef.current || draggingDiamond) return;
+    const rect = scrollRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+    const px = timeToX(currentTime);
+    // If near playhead (20px), drag playhead; otherwise seek and start dragging
+    if (Math.abs(x - px) < 20 || (e.target as HTMLElement).closest('.playhead, .timeline-canvas, .timeline-scroll-area')) {
+      setIsDraggingPlayhead(true);
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      seek(xToTime(x));
+      e.preventDefault();
+    }
+  }, [currentTime, draggingDiamond, seek, timeToX, xToTime]);
+
+  const handleTimelinePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDraggingPlayhead || !scrollRef.current) return;
+    const rect = scrollRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+    seek(xToTime(x));
+  }, [isDraggingPlayhead, seek, xToTime]);
 
   // Resize handle
   const onResizeStart = useCallback((e: React.PointerEvent) => {
@@ -215,14 +238,16 @@ export function Timeline() {
         </div>
       </div>
 
-      {/* Scroll area + canvas + playhead */}
-      <div ref={scrollRef} className="timeline-scroll-area relative flex-1 overflow-auto bg-[#fafafa]" onClick={handleCanvasClick} onPointerMove={handleDiamondDrag} onPointerUp={() => setDraggingDiamond(null)}>
+      {/* Scroll area + canvas + playhead — seekbar draggable with cursor */}
+      <div ref={scrollRef} className="timeline-scroll-area relative flex-1 cursor-pointer overflow-auto bg-[#fafafa]" onClick={handleCanvasClick} onPointerDown={handleTimelinePointerDown} onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); }} onPointerUp={() => { setDraggingDiamond(null); setIsDraggingPlayhead(false); }} onPointerLeave={() => setIsDraggingPlayhead(false)}>
         <div className="relative" style={{ width: canvasW, height: canvasH }}>
           <canvas ref={canvasRef} className="timeline-canvas block" width={canvasW} height={canvasH} style={{ width: canvasW, height: canvasH }} />
-          {/* Playhead */}
-          <div className="playhead pointer-events-none absolute top-0 z-20 h-full w-px" style={{ transform: `translateX(${playheadX}px)`, background: "#0070f3" }}>
-            <div className="playhead-marker absolute -top-1 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 bg-[#0070f3] shadow-sm" />
-            <div className="playhead-line h-full w-px bg-[#0070f3]" />
+          {/* Playhead — draggable with grab cursor */}
+          <div className={`playhead absolute top-0 z-20 h-full ${isDraggingPlayhead ? "cursor-grabbing" : "cursor-grab"}`} style={{ transform: `translateX(${playheadX}px)` }} onPointerDown={(e) => { e.stopPropagation(); (e.target as HTMLElement).setPointerCapture(e.pointerId); setIsDraggingPlayhead(true); }}>
+            <div className="pointer-events-none absolute left-1/2 h-full w-px -translate-x-1/2 bg-[#0070f3]" />
+            <div className="playhead-marker pointer-events-none absolute -top-1 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 bg-[#0070f3] shadow-sm" />
+            {/* Hit area */}
+            <div className="absolute -left-3 top-0 h-full w-6" />
           </div>
           {/* End line */}
           <div className="end-line pointer-events-none absolute top-0 h-full w-px" style={{ transform: `translateX(${endX}px)`, borderLeft: "1px solid rgba(0,0,0,0.08)" }} />
