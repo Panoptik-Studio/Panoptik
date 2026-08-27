@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { PiPWindow } from "@/components/PiPWindow";
 import { isPipSupported, usePiPWindow } from "@/hooks/usePiPWindow";
+import { startRecording as engineStartRecording } from "@panoptik/engine";
 
 type RecordingLayout = "screenOnly" | "screenAndCamera" | "cameraOnly";
 type RecordingShape = "circle" | "square";
@@ -76,8 +77,7 @@ async function startRecording(opts: {
   microphoneEnabled: boolean;
   cameraStream?: MediaStream | null;
 }): Promise<RecordingHandles> {
-  const { startRecording: startRec } = await import("@panoptik/engine");
-  return startRec(opts);
+  return engineStartRecording(opts);
 }
 
 function formatTimer(sec: number): string {
@@ -359,16 +359,32 @@ export function RecordModal() {
     try {
       setError(null);
 
-      // Open the floating bubble first, while the Record click's transient user
-      // activation is still valid — requestWindow() is rejected without it, and
-      // the countdown plus the screen-picker would use it up. The bubble reads
-      // `cameraStream` directly, so there is no stream to hand it here.
-      if (wantsCameraSlot && pipSupported) {
-        await requestPipWindow(Math.round(camSize * 1400));
-      }
+      // getDisplayMedia and requestPipWindow BOTH require transient activation
+      // from the same click — only one can consume it. Prioritize screen capture
+      // (the core feature); PiP is best-effort and will silently fail if the
+      // activation is already spent, falling back to inline preview.
+      // Also: no dynamic import — that await would itself break the activation.
+      handlesRef.current = await startRecording({
+        layout,
+        shape,
+        cameraDeviceId: selectedCam || undefined,
+        microphoneDeviceId: selectedMic || undefined,
+        cameraEnabled: wantsCameraSlot,
+        microphoneEnabled: micEnabled,
+        cameraStream,
+      });
       recordingOwnsCameraRef.current = wantsCameraSlot;
 
-      // Countdown 3-2-1
+      // Try floating PiP after — if activation is spent it will reject, we catch.
+      if (wantsCameraSlot && pipSupported) {
+        try {
+          await requestPipWindow(Math.round(camSize * 1400));
+        } catch {
+          // PiP needs activation too — if screen picker consumed it, just stay inline.
+        }
+      }
+
+      // Countdown 3-2-1 (now safe — streams already acquired)
       setState("countingDown");
       for (let n = 3; n >= 1; n--) {
         setCountdown(n);
@@ -378,20 +394,6 @@ export function RecordModal() {
       setState("recording");
       elapsedRef.current = 0;
       setElapsed(0);
-
-      handlesRef.current = await startRecording({
-        layout,
-        shape,
-        cameraDeviceId: selectedCam || undefined,
-        microphoneDeviceId: selectedMic || undefined,
-        cameraEnabled: wantsCameraSlot,
-        microphoneEnabled: micEnabled,
-        // Record the camera that is already open and on screen. Asking the OS
-        // for the same device twice makes it renegotiate, which stutters every
-        // view of it — and a fresh preview-grade stream would also downgrade
-        // the take.
-        cameraStream,
-      });
 
       requestAnimationFrame(() => {
         if (screenLiveRef.current && handlesRef.current?.screenStream.getTracks().length)
