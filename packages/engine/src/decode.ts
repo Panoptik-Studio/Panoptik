@@ -27,6 +27,18 @@ let input: Input | null = null;
 let sink: CanvasSink | null = null;
 let duration = 0;
 let objectUrl: string | null = null;
+// Screen debug — enable via localStorage.setItem("panoptik:debugScreen","1")
+let screenDebugLastLog = 0;
+let screenDebugFrames = 0;
+let screenDebugDecodes = 0;
+function screenLog(msg: string, data?: Record<string, unknown>) {
+  if (typeof localStorage === "undefined" || localStorage.getItem("panoptik:debugScreen") !== "1") return;
+  const now = performance.now();
+  if (now - screenDebugLastLog > 1000) {
+    console.log(`[Screen] ${msg}`, data ?? "");
+    screenDebugLastLog = now;
+  }
+}
 
 let iterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
 let iteratorTime = -1;
@@ -117,9 +129,16 @@ export async function loadClip(file: File): Promise<Project> {
  */
 export async function prepareFrame(t: number): Promise<void> {
   if (!sink) return;
+  screenDebugFrames++;
+  if (presented && t >= presented.start && t < presented.end) {
+    screenLog("prepareFrame cache hit", { t: t.toFixed(3), window: `${presented.start.toFixed(3)}-${presented.end.toFixed(3)}`, pending: !!pump });
+  }
   desiredTime = Math.max(0, t);
   if (!pump) {
+    const start = performance.now();
     pump = runPump().finally(() => {
+      screenDebugDecodes++;
+      screenLog("pump done", { decodes: screenDebugDecodes, frames: screenDebugFrames, took: `${(performance.now() - start).toFixed(1)}ms`, target: t.toFixed(3) });
       pump = null;
     });
   }

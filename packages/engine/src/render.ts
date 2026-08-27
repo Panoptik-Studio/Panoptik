@@ -124,6 +124,11 @@ export function setCurrentFrame(frame: CanvasImageSource | null) {
   currentFrame = frame;
 }
 
+// Screen debug — enable via localStorage.setItem("panoptik:debugScreen","1")
+let screenRenderFrames = 0;
+let screenRenderLastLog = 0;
+let screenRenderNoFrame = 0;
+
 export function getCurrentFrame(): CanvasImageSource | null {
   return currentFrame;
 }
@@ -139,6 +144,15 @@ export function renderFrame(
 ): void {
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
+  screenRenderFrames++;
+  if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - screenRenderLastLog > 1000) {
+    const isOffscreen = typeof OffscreenCanvas !== "undefined" && ctx.canvas instanceof OffscreenCanvas;
+    console.log(`[Screen] renderFrame ${isOffscreen ? "export" : "canvas"}`, { t: t.toFixed(3), hasFrame: !!currentFrame, canvas: `${w}x${h}`, draws: screenRenderFrames, noFrame: screenRenderNoFrame });
+    screenRenderLastLog = performance.now();
+    screenRenderFrames = 0;
+    screenRenderNoFrame = 0;
+  }
+  if (!currentFrame) screenRenderNoFrame++;
 
   // ── Layer 1: Background ──
   drawBackground(ctx, project, w, h);
@@ -260,9 +274,6 @@ function drawCaptions(
 // currentTime = t % duration pre-draw; rounded-corner PiP at facecam.x/y/size
 // in screen space (never zoomed). Spec.md: x/y = top-left 0-1, size = 0-1 of canvas width.
 const facecamCache = new Map<string, HTMLVideoElement>();
-// Debug throttling — logs once per second when enabled via localStorage
-const FACECAM_DEBUG = typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugFacecam") === "1";
-let facecamStats = { frames: 0, draws: 0, skipsReady: 0, seeks: 0, lastLog: 0 };
 let lastFacecamT = 0;
 
 function getFacecamVideo(src: string): HTMLVideoElement | null {
@@ -316,50 +327,39 @@ function drawFacecam(
   if (!fc.src) return;
   const video = getFacecamVideo(fc.src);
   if (!video) return;
-  facecamStats.frames++;
-  // Detect playback vs scrub/pause: small dt (~1/60) → playing, else seeking.
-  const dt = t - lastFacecamT;
-  const isPlaying = Math.abs(dt) > 0.001 && Math.abs(dt) < 0.3;
-  lastFacecamT = t;
-
-  // During playback, let the video play at 1x and only re-sync on large drift.
-  // Seeking every frame (0.05 threshold) caused 94% skips: each seek drops
-  // readyState to 1 for ~300ms → blank → flicker.
-  if (isPlaying) {
-    if (video.paused) video.play().catch(() => {});
-    // Only seek if drift is large (e.g. timeline jump or scrub)
-    if (!video.seeking && Math.abs(video.currentTime - t) > 0.5) {
-      try {
-        const dur = video.duration;
-        const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
-        video.currentTime = target;
-        facecamStats.seeks++;
-      } catch { /* ignore */ }
-    }
-  } else {
-    // Paused / scrubbing: precise seek to t, pause the element
-    if (!video.paused) video.pause();
+  const isExport = typeof OffscreenCanvas !== "undefined" && ctx.canvas instanceof OffscreenCanvas;
+  if (isExport) {
+    // Export: precise, synchronous seek — OffscreenCanvas has no real-time playback.
+    // Don't gate on playing/paused, just seek to t and draw if we have data.
     try {
       const dur = video.duration;
       const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
-      if (Math.abs(video.currentTime - target) > 0.05) {
-        video.currentTime = target;
-        facecamStats.seeks++;
-      }
+      if (Math.abs(video.currentTime - target) > 0.02) video.currentTime = target;
     } catch { /* ignore */ }
-    if (video.readyState < 2) {
-      facecamStats.skipsReady++;
-      if (FACECAM_DEBUG && performance.now() - facecamStats.lastLog > 1000) {
-        console.log("[Facecam] skip readyState (paused)", { readyState: video.readyState, seeking: video.seeking, currentTime: video.currentTime.toFixed(2), t: t.toFixed(2), duration: video.duration });
-        facecamStats.lastLog = performance.now();
+    if (video.readyState < 1) return;
+  } else {
+    const dt = t - lastFacecamT;
+    const isPlaying = Math.abs(dt) > 0.001 && Math.abs(dt) < 0.3;
+    lastFacecamT = t;
+    if (isPlaying) {
+      if (video.paused) video.play().catch(() => {});
+      if (!video.seeking && Math.abs(video.currentTime - t) > 0.5) {
+        try {
+          const dur = video.duration;
+          const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
+          video.currentTime = target;
+        } catch { /* ignore */ }
       }
-      return;
+    } else {
+      if (!video.paused) video.pause();
+      try {
+        const dur = video.duration;
+        const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
+        if (Math.abs(video.currentTime - target) > 0.05) video.currentTime = target;
+      } catch { /* ignore */ }
+      if (video.readyState < 2) return;
     }
-  }
-  // For playing, draw even if readyState is 1 — we have a frame to show (old), don't blank
-  if (video.readyState < 1) {
-    facecamStats.skipsReady++;
-    return;
+    if (video.readyState < 1) return;
   }
 
   const pipW = Math.round(canvasW * fc.size);
@@ -393,15 +393,7 @@ function drawFacecam(
   ctx.clip();
   try {
     ctx.drawImage(video, clampedX, clampedY, pipW, pipH);
-    facecamStats.draws++;
-    if (FACECAM_DEBUG && performance.now() - facecamStats.lastLog > 1000) {
-      console.log("[Facecam] draw", { draws: facecamStats.draws, seeks: facecamStats.seeks, skips: facecamStats.skipsReady, frames: facecamStats.frames, readyState: video.readyState, seeking: video.seeking, currentTime: video.currentTime.toFixed(2), t: t.toFixed(2), pip: `${pipW}x${pipH}@${clampedX},${clampedY}`, cache: facecamCache.size });
-      facecamStats.lastLog = performance.now();
-      facecamStats.frames = facecamStats.draws = facecamStats.skipsReady = facecamStats.seeks = 0;
-    }
-  } catch (e) {
-    if (FACECAM_DEBUG) console.warn("[Facecam] drawImage failed", e);
-  }
+  } catch { /* video frame not ready */ }
   ctx.restore();
   // Subtle border — matches clip shape
   ctx.save();
