@@ -315,13 +315,9 @@ function drawFacecam(
   if (!video) return;
   const isExport = typeof OffscreenCanvas !== "undefined" && ctx.canvas instanceof OffscreenCanvas;
   if (isExport) {
-    // Export: precise, synchronous seek — OffscreenCanvas has no real-time playback.
-    // Don't gate on playing/paused, just seek to t and draw if we have data.
-    try {
-      const dur = video.duration;
-      const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
-      if (Math.abs(video.currentTime - target) > 0.02) video.currentTime = target;
-    } catch { /* ignore */ }
+    // Export: don't seek the shared preview element — it would race with the
+    // preview's own seeks and stall on `Infinity` duration webm. Just draw the
+    // current frame; export's `prepareFrame` already steps the main video.
     if (video.readyState < 1) return;
   } else {
     const dt = t - lastFacecamT;

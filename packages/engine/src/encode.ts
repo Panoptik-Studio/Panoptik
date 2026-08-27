@@ -55,6 +55,8 @@ function exportSize(project: Project, resolution: ExportOpts["resolution"]) {
 }
 
 export async function exportProject(project: Project, opts: ExportOpts): Promise<Blob> {
+  // Signal preview to pause its own prepareFrame — they share the global CanvasSink pump
+  if (typeof window !== "undefined") (window as unknown as { __isExporting?: boolean }).__isExporting = true;
   const { width, height } = exportSize(project, opts.resolution);
   const isMp4 = opts.format === "mp4";
 
@@ -107,12 +109,8 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
   try {
     for (let i = 0; i < totalFrames; i++) {
       const t = i / EXPORT_FPS;
-      // Decode before composing: renderFrame draws whatever frame is current,
-      // so without awaiting here every output frame would be the same picture.
       await prepareFrame(t);
       renderFrame(ctx as unknown as CanvasRenderingContext2D, project, t);
-      // Awaited so encoder backpressure actually throttles us rather than
-      // queueing the whole clip into memory.
       await videoSource.add(t, frameDuration);
       if (i % EXPORT_FPS === 0) emitProgress(i / totalFrames);
     }
@@ -129,6 +127,8 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
       await output.cancel();
     } catch { /* already torn down */ }
     throw err;
+  } finally {
+    if (typeof window !== "undefined") (window as unknown as { __isExporting?: boolean }).__isExporting = false;
   }
 
   emitProgress(1);

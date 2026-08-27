@@ -215,9 +215,9 @@ export function PreviewCanvas() {
       dirty = false;
       const t = useProjectStore.getState().currentTime;
 
-      // Only ask for a decode when the playhead actually moved, so an idle
-      // preview settles instead of re-arming itself every frame.
-      if (t !== requestedTime) {
+      // Don't contend with export's pump — it drives desiredTime at 30fps
+      const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
+      if (!isExporting && t !== requestedTime) {
         requestedTime = t;
         // Coalesced inside the engine — repeat calls only move the decode target.
         const pending = engine.prepareFrame(t);
