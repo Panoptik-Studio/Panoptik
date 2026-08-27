@@ -618,15 +618,14 @@ export function PreviewCanvas() {
     >
       {/* Vercel mesh halo behind stage */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ background: "radial-gradient(700px 420px at 50% 38%, rgba(0,124,240,0.18) 0%, transparent 60%), radial-gradient(560px 360px at 82% 78%, rgba(255,0,128,0.12) 0%, transparent 62%)" }} />
-      {/* Stage frame stays constant — padding shrinks the video inside, not the frame (original canvas size); stage aspect matches clip */}
-      <div className="relative flex h-full max-h-[56vh] w-full max-w-[64vw] items-center justify-center overflow-hidden rounded-xl border bg-white shadow-vercel-4 lg:max-h-[62vh]" style={{ borderColor: "#ebebeb", padding: stagePadding, aspectRatio: project ? `${project.clip.width} / ${project.clip.height}` : undefined, ...stageStyle }}>
-        <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center rounded-lg bg-transparent shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/10">
+      {/* Stage frame stays constant — padding shrinks the video inside, not the frame */}
+      <div className="relative flex h-full max-h-[56vh] w-full max-w-[64vw] items-center justify-center overflow-hidden rounded-xl border bg-white shadow-vercel-4 lg:max-h-[62vh]" style={{ borderColor: "#ebebeb", padding: stagePadding, ...stageStyle }}>
+        <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-black shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/10">
           <canvas
             ref={canvasRef}
             width={canvasSize.w}
             height={canvasSize.h}
-            className="block h-auto max-h-full w-auto max-w-full cursor-crosshair rounded-lg"
-            style={{ objectFit: "contain" }}
+            className="block h-full w-full cursor-crosshair object-contain"
             onClick={handleCanvasClick}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
