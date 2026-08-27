@@ -177,28 +177,28 @@ export function Timeline() {
         <div className="resize-handle-indicator h-[2px] w-8 rounded-full bg-[#d4d4d4]" />
       </div>
 
-      {/* Controls bar */}
+      {/* Controls bar — modern SVGs, no emoji */}
       <div className="timeline-bar flex h-[44px] shrink-0 items-center justify-between border-b bg-white px-3" style={{ borderColor: "#ebebeb" }}>
         <div className="controls-left flex items-center gap-1">
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5] disabled:opacity-40" title="Video"><span className="text-[14px]">🎬</span></button>
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Mic"><span className="text-[14px]">🎤</span></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5] disabled:opacity-40" title="Video"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Mic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 10a7 7 0 0 1-14 0"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
           <div className="ctrl-divider mx-1 h-4 w-px bg-[#ebebeb]" />
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Volume"><span className="text-[14px]">🔊</span></button>
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Split"><span className="text-[14px]">◫</span></button>
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Mosaic"><span className="text-[14px]">⊞</span></button>
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Speed"><span className="text-[14px]">⏱</span></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Volume"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Split"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Mosaic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Speed"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
           <div className="ctrl-divider mx-1 h-4 w-px bg-[#ebebeb]" />
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Eraser"><span className="text-[14px]">⌫</span></button>
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Undo"><span className="text-[14px]">↩</span></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Eraser"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M20 20H7L3 16l9-9 4 4-9 9z"/><path d="M6 11l8-8"/></svg></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" title="Undo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5A2.5 2.5 0 0 1 17 11.5v7"/></svg></button>
         </div>
 
         <div className="controls-center flex items-center gap-1.5">
-          <button className="ctrl-btn ctrl-btn--round flex h-7 w-7 items-center justify-center rounded-full border hover:bg-[#f5f5f5] disabled:opacity-40" disabled title="Stop"><span className="h-2 w-2 bg-[#171717] " /></button>
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5] disabled:opacity-40" disabled title="Prev"><span className="text-[14px]">⏮</span></button>
+          <button className="ctrl-btn ctrl-btn--round flex h-7 w-7 items-center justify-center rounded-full border hover:bg-[#f5f5f5] disabled:opacity-40" disabled title="Stop"><span className="h-2.5 w-2.5 bg-[#171717] rounded-[1px]" /></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5] disabled:opacity-40" disabled title="Prev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
           <button className="ctrl-btn ctrl-btn--play flex h-8 w-8 items-center justify-center rounded-full bg-[#171717] text-white hover:bg-black" onClick={() => isPlaying ? pause() : play()} title={isPlaying ? "Pause" : "Play"}>
-            <span className="text-[12px]">{isPlaying ? "❚❚" : "▶"}</span>
+            {isPlaying ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>}
           </button>
-          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5] disabled:opacity-40" disabled title="Next"><span className="text-[14px]">⏭</span></button>
+          <button className="ctrl-btn flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5] disabled:opacity-40" disabled title="Next"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
           <div className="time-display ml-2 flex items-center gap-1 font-mono text-xs">
             <span className="time-current font-medium" style={{ color: "#171717" }}>{fmtTime(currentTime)}</span>
             <span className="time-separator" style={{ color: "#888" }}>/</span>
@@ -207,11 +207,11 @@ export function Timeline() {
         </div>
 
         <div className="controls-right flex items-center gap-1">
-          <button className="ctrl-btn ctrl-btn--zoom flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" onClick={() => setZoom((z) => Math.max(0, z - 0.1))} title="Zoom out">−</button>
+          <button className="ctrl-btn ctrl-btn--zoom flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" onClick={() => setZoom((z) => Math.max(0, z - 0.1))} title="Zoom out"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>
           <input type="range" className="zoom-slider h-1 w-24 accent-[#171717]" min={0} max={1} step={0.01} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
-          <button className="ctrl-btn ctrl-btn--zoom flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" onClick={() => setZoom((z) => Math.min(1, z + 0.1))} title="Zoom in">+</button>
+          <button className="ctrl-btn ctrl-btn--zoom flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" onClick={() => setZoom((z) => Math.min(1, z + 0.1))} title="Zoom in"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="11" x2="17" y2="11"/><line x1="14" y1="8" x2="14" y2="14"/></svg></button>
           <div className="ctrl-divider mx-1 h-4 w-px bg-[#ebebeb]" />
-          <button className="ctrl-btn ctrl-btn--zoom flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" onClick={() => setZoom(0.52)} title="Fit"><span className="text-[14px]">⛶</span></button>
+          <button className="ctrl-btn ctrl-btn--zoom flex h-7 w-7 items-center justify-center rounded hover:bg-[#f5f5f5]" onClick={() => setZoom(0.52)} title="Fit"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg></button>
         </div>
       </div>
 

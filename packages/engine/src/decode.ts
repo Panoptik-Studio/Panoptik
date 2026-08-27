@@ -90,12 +90,26 @@ export async function loadClip(file: File): Promise<Project> {
   const decodeW = Math.max(2, Math.round(displayWidth * scale));
   const decodeH = Math.max(2, Math.round(displayHeight * scale));
 
-  sink = new CanvasSink(track, {
-    width: decodeW,
-    height: decodeH,
-    fit: "fill",
-    poolSize: POOL_SIZE,
-  });
+  try {
+    sink = new CanvasSink(track, {
+      width: decodeW,
+      height: decodeH,
+      fit: "fill",
+      poolSize: POOL_SIZE,
+    });
+  } catch (e) {
+    console.warn("[Decode] CanvasSink init failed, trying fallback 1280/pool2", e);
+    try {
+      sink = new CanvasSink(track, {
+        width: Math.min(decodeW, 1280),
+        height: Math.min(decodeH, 720),
+        fit: "fill",
+        poolSize: 2,
+      });
+    } catch (e2) {
+      throw new Error(`VideoDecoder failed for ${file.type} ${decodeW}x${decodeH}: ${String(e2)} — try Chrome or H264 MP4. First error: ${String(e)}`);
+    }
+  }
   duration = await track.computeDuration();
   createSurface(decodeW, decodeH);
 
@@ -178,7 +192,18 @@ async function runPump(): Promise<void> {
 
     const frameStart = performance.now();
     const active = iterator!;
-    const { value, done } = await active.next();
+    let value: WrappedCanvas | void;
+    let done: boolean | undefined;
+    try {
+      const res = await active.next();
+      value = res.value;
+      done = res.done;
+    } catch (e) {
+      console.warn("[Decode] VideoDecoder next() EncodingError — skipping frame", e);
+      desiredTime = target + 0.1;
+      await closeIterator();
+      continue;
+    }
     const frameTook = performance.now() - frameStart;
     if (frameTook > 50 && typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1") {
       console.log("[Screen] slow frame decode", { took: `${frameTook.toFixed(1)}ms`, target: target.toFixed(3), timestamp: value?.timestamp?.toFixed(3) });
