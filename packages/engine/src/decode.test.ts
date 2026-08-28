@@ -244,3 +244,82 @@ describe("variable-rate footage", () => {
     vi.doUnmock("mediabunny");
   });
 });
+
+describe("facecam during export", () => {
+  const camFile = () => new File([new Uint8Array(2048)], "cam.webm", { type: "video/webm" });
+
+  /**
+   * The camera track has holes just like the screen does. Hunting for a frame
+   * that contains the requested time drains the iterator on the first hole and
+   * then the camera is frozen for every remaining frame of the export — the
+   * stall that the export path used to race a 200ms timeout against.
+   */
+  it("crosses a hole without draining the rest of the camera track", async () => {
+    const FRAMES = [
+      { timestamp: 2.60, duration: 0.033 },
+      { timestamp: 2.65, duration: 0.033 },
+      // Nothing covers 2.7: 2.65 ends at 2.683 and the next starts at 2.90.
+      { timestamp: 2.90, duration: 0.033 },
+      ...Array.from({ length: 400 }, (_, i) => ({ timestamp: 3 + i * 0.033, duration: 0.033 })),
+    ];
+    let decoded = 0;
+
+    vi.resetModules();
+    vi.doMock("mediabunny", () => ({
+      ALL_FORMATS: "all",
+      BlobSource: vi.fn().mockImplementation((f: File) => ({ file: f })),
+      AudioBufferSink: vi.fn(),
+      Input: vi.fn().mockImplementation(() => ({
+        getPrimaryVideoTrack: vi.fn().mockResolvedValue({
+          canDecode: vi.fn().mockResolvedValue(true),
+          computeDuration: vi.fn().mockResolvedValue(20),
+          getDisplayWidth: vi.fn().mockResolvedValue(640),
+          getDisplayHeight: vi.fn().mockResolvedValue(480),
+        }),
+        getPrimaryAudioTrack: vi.fn().mockResolvedValue(null),
+        dispose: vi.fn(),
+      })),
+      CanvasSink: vi.fn().mockImplementation(() => ({
+        canvases: (start = 0) => {
+          const from = FRAMES.filter((f) => f.timestamp + f.duration > start);
+          return (async function* () {
+            for (const f of from) {
+              decoded++;
+              yield { canvas: { _mock: true }, ...f };
+            }
+          })();
+        },
+      })),
+    }));
+
+    const mod = await import("./decode");
+    (globalThis as unknown as { window: Record<string, unknown> }).window = { __isExporting: true };
+    await mod.setFacecamBlob(camFile());
+
+    // Walk up to the hole, then straight through it.
+    await mod.prepareFacecamFrame(2.6);
+    decoded = 0;
+    await Promise.race([
+      mod.prepareFacecamFrame(2.7),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("facecam stalled on the hole")), 3000)),
+    ]);
+    expect(decoded).toBeLessThan(10);
+
+    // The hole must now read as covered. If the frame past it were recorded as
+    // starting at 2.90, asking for 2.7 again would look like a backwards seek
+    // and rewind the iterator to 0 — re-decoding the track once per frame.
+    decoded = 0;
+    await mod.prepareFacecamFrame(2.7);
+    expect(decoded).toBe(0);
+
+    // The camera must keep advancing after the hole rather than being pinned
+    // to one frame for the rest of the export.
+    decoded = 0;
+    await mod.prepareFacecamFrame(3.5);
+    expect(decoded).toBeGreaterThan(0);
+
+    await mod.resetFacecamExportIterator();
+    delete (globalThis as unknown as { window?: unknown }).window;
+    vi.doUnmock("mediabunny");
+  });
+});

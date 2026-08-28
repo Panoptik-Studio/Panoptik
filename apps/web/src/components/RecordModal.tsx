@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { PiPWindow } from "@/components/PiPWindow";
 import { isPipSupported, usePiPWindow } from "@/hooks/usePiPWindow";
-import { startRecording as engineStartRecording } from "@panoptik/engine";
+import { startRecording as engineStartRecording, type RecordingHandles } from "@panoptik/engine";
 
 type RecordingLayout = "screenOnly" | "screenAndCamera" | "cameraOnly";
 type RecordingShape = "circle" | "square";
@@ -59,14 +59,6 @@ function facecamPlacement(corner: CameraCorner, size: number, canvasAspect: numb
     size,
   };
 }
-
-type RecordingHandles = {
-  screenStream: MediaStream;
-  facecamStream: MediaStream;
-  layout: RecordingLayout;
-  shape: RecordingShape;
-  stop: () => Promise<{ screenBlob: Blob; facecamBlob: Blob }>;
-};
 
 async function startRecording(opts: {
   layout: RecordingLayout;
@@ -414,9 +406,16 @@ export function RecordModal() {
         await new Promise((r) => setTimeout(r, 700));
       }
       setCountdown(null);
+
+      // Encoding starts here, not at acquisition: the picker, the permission
+      // prompts and the 3-2-1 above would otherwise all land at the head of
+      // the take as several seconds of dead footage.
+      await handlesRef.current.begin();
+
       setState("recording");
       elapsedRef.current = 0;
       setElapsed(0);
+      startTimeRef.current = performance.now();
 
       // Sharing a whole monitor captures the floating bubble along with it, so
       // the take would show the camera twice: once burned into the screen

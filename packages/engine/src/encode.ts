@@ -19,7 +19,7 @@ import {
 } from "mediabunny";
 import type { ExportOpts, Project } from "@panoptik/schema";
 import { presetAspect } from "./layout";
-import { prepareFrame, prepareAllFrames, resetExportIterator } from "./decode";
+import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator } from "./decode";
 import { renderFrame } from "./render";
 
 /** Long-edge pixel height for each preset; width follows the clip's aspect. */
@@ -75,6 +75,8 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
   // Reset sequential iterator so a second export starts from 0, not EOS.
   try {
     await resetExportIterator();
+    // The camera has its own iterator and must rewind with the screen.
+    await resetFacecamExportIterator();
   } catch { /* ignore */ }
   try {
     const { width, height } = exportSize(project, opts.resolution);
@@ -244,16 +246,12 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
         const tSrc = tEff * playbackRate;
         // Decode before composing: renderFrame draws whatever frame is current,
         // so without awaiting here every output frame would be the same picture.
-        // Use prepareFrame for screen; facecam via prepareAllFrames was stalling at 2.7s (webm facecam hole) — fallback to screen only for now, facecam will be stale but export completes. TODO: fix facecam hole handling.
         if (i % 30 === 0) console.log("[Export] frame", i, "/", totalFrames, "tEff", tEff.toFixed(2), "tSrc", tSrc.toFixed(2));
-        await prepareFrame(tSrc);
-        // Also try facecam but don't block export if it stalls — race with timeout
-        try {
-          await Promise.race([
-            prepareAllFrames(tSrc).catch(()=>{}),
-            new Promise((_, rej) => setTimeout(() => rej(new Error("facecam timeout")), 200)),
-          ]);
-        } catch { /* facecam stall, continue with screen */ }
+        // Screen and camera together — stepping only the screen leaves the
+        // camera frozen on whatever frame the preview last decoded. The
+        // facecam runs its own forward-only iterator, so a hole in the webm
+        // no longer stalls it and there is nothing to race a timeout against.
+        await prepareAllFrames(tSrc);
         renderFrame(ctx as unknown as CanvasRenderingContext2D, project, tSrc);
         // Awaited so encoder backpressure actually throttles us rather than
         // queueing the whole clip into memory.

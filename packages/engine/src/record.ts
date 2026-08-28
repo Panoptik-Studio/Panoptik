@@ -16,6 +16,12 @@ export type RecordingHandles = {
   facecamStream: MediaStream;
   layout: RecordingLayout;
   shape: RecordingShape;
+  /**
+   * Begin encoding. Separate from acquisition because the permission prompts
+   * have to happen up front, while the countdown runs afterwards — encoding
+   * from acquisition would put the countdown at the head of every take.
+   */
+  begin: () => Promise<void>;
   stop: () => Promise<{
     screenBlob: Blob;
     facecamBlob: Blob;
@@ -40,7 +46,7 @@ export type StartRecordingOpts = {
 // ── WebCodecs VP9 HW path (preferred) — falls back to MediaRecorder if unsupported ──
 async function tryWebCodecsScreen(
   screenStream: MediaStream,
-): Promise<{ output: import("mediabunny").Output; stop: () => Promise<Blob> } | null> {
+): Promise<{ output: import("mediabunny").Output; start: () => Promise<void>; stop: () => Promise<Blob> } | null> {
   try {
     const { Output, WebMOutputFormat, BufferTarget, MediaStreamVideoTrackSource } = await import("mediabunny");
     const track = screenStream.getVideoTracks()[0];
@@ -55,9 +61,11 @@ async function tryWebCodecsScreen(
       keyFrameInterval: 2,
     } as unknown as import("mediabunny").VideoEncodingConfig);
     output.addVideoTrack(source);
-    await output.start();
     return {
       output,
+      // Starting the Output is what makes it consume the track, so it is held
+      // back until the countdown has finished.
+      start: () => output.start(),
       stop: async () => {
         source.close?.();
         await output.finalize();
@@ -75,20 +83,30 @@ async function tryWebCodecsScreen(
 const FLUSH_TIMEOUT_MS = 4000;
 
 /**
- * Longest we wait for the captured surface to produce its first frame. The OS
- * compositor takes a moment to spin up; beyond this we start anyway rather than
- * leave the user staring at a dead Record button.
+ * Longest we wait for the captured surface to settle. The OS compositor takes a
+ * moment to spin up; beyond this we start anyway rather than leave the user
+ * staring at a dead Record button.
  */
 const FIRST_FRAME_TIMEOUT_MS = 5000;
 
 /**
- * Resolve once the stream has actually painted a frame.
+ * How many frames must arrive before we call the surface ready.
  *
- * getDisplayMedia resolves as soon as the user picks a surface, but the first
- * frame can be seconds behind it. The camera and microphone are live well
- * before that, so starting every recorder together let them run on while the
- * screen recorded nothing — the take opened with a frozen picture over live
- * audio. Waiting here lines all three up at the same instant.
+ * Waiting for a single frame is not enough: macOS delivers frame one almost
+ * immediately and then takes seconds over frame two, so the recording opens on
+ * one still image held for the whole ramp-up. Requiring a few consecutive
+ * frames means the pipeline is genuinely producing before anything is encoded.
+ */
+const WARMUP_FRAMES = 3;
+
+/**
+ * Resolve once the stream is genuinely producing frames.
+ *
+ * getDisplayMedia resolves as soon as the user picks a surface, but the capture
+ * pipeline is not running yet: the first frame can be seconds behind, and the
+ * next few seconds behind that. The camera and microphone are live well before
+ * either, so starting every encoder together opened the take on a frozen
+ * picture over live audio. Waiting for the surface to settle lines them up.
  */
 async function waitForFirstFrame(stream: MediaStream): Promise<void> {
   const track = stream.getVideoTracks()[0];
@@ -117,8 +135,14 @@ async function waitForFirstFrame(stream: MediaStream): Promise<void> {
         requestVideoFrameCallback?: (cb: () => void) => number;
       }).requestVideoFrameCallback;
       if (typeof rvfc === "function") {
-        // Fires on a genuinely presented frame, which is what we are after.
-        rvfc.call(video, done);
+        // Each callback is a genuinely presented frame. Chain a few so we know
+        // the surface is delivering at rate, not just once.
+        let seen = 0;
+        const onFrame = () => {
+          if (++seen >= WARMUP_FRAMES) done();
+          else rvfc.call(video, onFrame);
+        };
+        rvfc.call(video, onFrame);
       } else {
         video.addEventListener("loadeddata", done, { once: true });
       }
@@ -332,7 +356,7 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   }
 
   // ── Try WebCodecs VP9 HW for screen (1920p60 HW → 60fps) before MediaRecorder VP8 SW (13fps)
-  let webCodecsScreen: { output: import("mediabunny").Output; stop: () => Promise<Blob> } | null = null;
+  let webCodecsScreen: { output: import("mediabunny").Output; start: () => Promise<void>; stop: () => Promise<Blob> } | null = null;
   if (screen.getTracks().length > 0) {
     webCodecsScreen = await tryWebCodecsScreen(screen);
     if (webCodecsScreen) console.log("[Record] screen: WebCodecs VP9 HW (prefer-hardware) — expect 60fps at 1920");
@@ -355,7 +379,6 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     screenRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) screenChunks.push(e.data);
     };
-    screenRecorder.start(100);
   }
 
   if (facecam.getTracks().length > 0) {
@@ -368,7 +391,6 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     facecamRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) facecamChunks.push(e.data);
     };
-    facecamRecorder.start(100);
   }
 
   // If both recorders are null (shouldn't happen), throw early
@@ -377,6 +399,9 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     return {
       screenStream: screen,
       facecamStream: facecam,
+      begin: async () => {
+        if (webCodecsScreen) await webCodecsScreen.start();
+      },
       layout,
       shape,
       stop: async () => {
@@ -391,6 +416,12 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     facecamStream: facecam,
     layout,
     shape,
+    begin: async () => {
+      // One instant for every source, after the countdown.
+      if (webCodecsScreen) await webCodecsScreen.start();
+      if (screenRecorder && screenRecorder.state === "inactive") screenRecorder.start(100);
+      if (facecamRecorder && facecamRecorder.state === "inactive") facecamRecorder.start(100);
+    },
     stop: async () => {
       let screenBlob: Blob;
       if (webCodecsScreen) {

@@ -129,6 +129,24 @@ let fcSurfaceCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D |
 let fcAspect = 16 / 9;
 let fcDesired = 0;
 let fcPump: Promise<void> | null = null;
+let fcExportIterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
+
+/** Drop the camera's export iterator so the next export starts from zero. */
+export async function resetFacecamExportIterator(): Promise<void> {
+  if (fcExportIterator) {
+    try { await fcExportIterator.return(); } catch { /* already done */ }
+    fcExportIterator = null;
+  }
+  fcPresented = null;
+}
+
+/** Blit a decoded camera frame onto the surface renderFrame reads. */
+function presentFacecam(value: WrappedCanvas, end: number, start = value.timestamp): void {
+  if (fcSurface && fcSurfaceCtx) {
+    fcSurfaceCtx.drawImage(value.canvas as CanvasImageSource, 0, 0, fcSurface.width, fcSurface.height);
+  }
+  fcPresented = { start, end };
+}
 
 /** The decoded camera frame, or null when there is no camera track. */
 export function getFacecamSurface(): CanvasImageSource | null {
@@ -188,6 +206,43 @@ async function openFacecamSink(blob: Blob): Promise<void> {
 /** Decode the camera frame covering `t`. Coalesces like the clip's pump. */
 export async function prepareFacecamFrame(t: number): Promise<void> {
   if (!fcSink) return;
+  const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
+  const qt = Math.max(0, t);
+  if (isExporting) {
+    // Same sequential sweep as the screen: one forward iterator over the whole
+    // export, no seeking. The camera has to be stepped alongside the screen or
+    // its surface keeps whatever frame the preview happened to leave there,
+    // and every exported frame shows that one still image.
+    if (!fcExportIterator) fcExportIterator = fcSink.canvases(0);
+    else if (qt === 0) {
+      await resetFacecamExportIterator();
+      fcExportIterator = fcSink.canvases(0);
+    } else if (fcPresented && qt < fcPresented.start) {
+      await resetFacecamExportIterator();
+      fcExportIterator = fcSink.canvases(0);
+    }
+    while (true) {
+      if (fcPresented && qt >= fcPresented.start && qt < fcPresented.end) return;
+      const { value, done } = await fcExportIterator.next();
+      if (done || !value) {
+        // The camera is usually shorter than the screen; hold its last frame
+        // rather than spinning on done for the remaining screen frames.
+        if (fcPresented) fcPresented = { start: fcPresented.start, end: Infinity };
+        return;
+      }
+      const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
+      if (value.timestamp > qt) {
+        // A hole: the camera recorded nothing at qt, so no frame will ever
+        // contain it. Without this the loop drains the whole track hunting for
+        // one and the camera freezes for the rest of the export — which is the
+        // 2.7s stall the export timeout was working around.
+        presentFacecam(value, end, Math.min(value.timestamp, qt));
+        return;
+      }
+      presentFacecam(value, end);
+      if (qt < end) return;
+    }
+  }
   fcDesired = Math.max(0, t);
   if (!fcPump) {
     fcPump = runFacecamPump().finally(() => {
@@ -224,17 +279,21 @@ async function runFacecamPump(): Promise<void> {
 
     fcIteratorTime = value.timestamp;
     const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
-    if (!fcPresented || end > target) {
-      if (fcSurface && fcSurfaceCtx) {
-        fcSurfaceCtx.drawImage(value.canvas as CanvasImageSource, 0, 0, fcSurface.width, fcSurface.height);
-      }
-      fcPresented = { start: value.timestamp, end };
+    // Only the frame whose interval contains the target, and stop at the first
+    // frame past it — the same seek-storm and hole hazards as the screen pump.
+    if (value.timestamp <= target && target < end) {
+      presentFacecam(value, end);
+    } else if (value.timestamp > target) {
+      if (!fcPresented) presentFacecam(value, end, Math.min(value.timestamp, target));
+      else fcPresented = { start: fcPresented.start, end: value.timestamp };
+      return;
     }
   }
 }
 
 async function teardownFacecam(): Promise<void> {
   fcSink = null;
+  await resetFacecamExportIterator();
   const inflight = fcPump;
   await closeFacecamIterator();
   if (inflight) {
