@@ -6,7 +6,7 @@
 "use client";
 
 import { useProjectStore } from "@/stores/projectStore";
-import type { Background, Facecam } from "@panoptik/schema";
+import type { Background } from "@panoptik/schema";
 
 const THEMES: { name: string; bg: { kind: "solid" | "gradient"; color?: string; stops?: [string, string] }; swatch: string }[] = [
   { name: "Vercel", bg: { kind: "gradient", stops: ["#007cf0", "#7928ca"] }, swatch: "linear-gradient(135deg, #007cf0 0%, #7928ca 55%, #ff0080 100%)" },
@@ -17,20 +17,6 @@ const THEMES: { name: string; bg: { kind: "solid" | "gradient"; color?: string; 
   { name: "Paper", bg: { kind: "solid", color: "#ffffff" }, swatch: "#ffffff" },
 ];
 
-/** Webcam tracks are 16:9; the PiP keeps that aspect while `size` scales its width. */
-const CAMERA_ASPECT = 16 / 9;
-
-/**
- * Facecam top-left (0-1) for each corner. `size` is a fraction of canvas width,
- * so the height inset goes through both the canvas and camera aspects.
- */
-const CAMERA_CORNERS = [
-  { id: "topLeft", label: "Top left", at: () => ({ x: 0.03, y: 0.03 }) },
-  { id: "topRight", label: "Top right", at: (s: number) => ({ x: 0.97 - s, y: 0.03 }) },
-  { id: "bottomLeft", label: "Bottom left", at: (s: number, h: number) => ({ x: 0.03, y: 0.97 - h }) },
-  { id: "bottomRight", label: "Bottom right", at: (s: number, h: number) => ({ x: 0.97 - s, y: 0.97 - h }) },
-] as const;
-
 function isSameBackground(bg1: Background, bg2: Background): boolean {
   if (bg1.kind !== bg2.kind) return false;
   if (bg1.kind === "solid" && bg2.kind === "solid") return bg1.color === bg2.color;
@@ -38,15 +24,6 @@ function isSameBackground(bg1: Background, bg2: Background): boolean {
     return bg1.stops[0] === bg2.stops[0] && bg1.stops[1] === bg2.stops[1];
   }
   return true;
-}
-
-function isSameFacecam(fc1: Facecam, fc2: Facecam): boolean {
-  return (
-    Math.abs(fc1.size - fc2.size) < 0.01 &&
-    Math.abs(fc1.x - fc2.x) < 0.01 &&
-    Math.abs(fc1.y - fc2.y) < 0.01 &&
-    (fc1.shape ?? "square") === (fc2.shape ?? "square")
-  );
 }
 
 function MatchClipButton({
@@ -165,11 +142,6 @@ export function StageControls() {
   const allSameSpeed = selectedSegs.every((s) => s.speed === seg.speed);
   const allSameAspect = selectedSegs.every((s) => s.aspectPreset === seg.aspectPreset);
   const allSameBg = selectedSegs.every((s) => isSameBackground(s.background, seg.background));
-  const allSameFacecam = selectedSegs.every((s) => isSameFacecam(s.facecam, seg.facecam));
-
-  const camHeightFraction = (size: number) =>
-    (size * (project.media.width / project.media.height)) / CAMERA_ASPECT;
-
   return (
     <div className="pk-panel">
       <div className="mb-3 flex items-center justify-between">
@@ -439,108 +411,7 @@ export function StageControls() {
         </div>
       </div>
 
-      {/* Camera — only meaningful once a recording carried a facecam track */}
-      {seg.facecam.src && (
-        <div className="mb-4">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="pk-label">Camera</span>
-            <div className="flex items-center gap-1.5">
-              {prevSeg && prevSeg.facecam.src && (
-                <MatchClipButton
-                  direction="prev"
-                  onClick={() =>
-                    setFacecam({
-                      size: prevSeg.facecam.size,
-                      x: prevSeg.facecam.x,
-                      y: prevSeg.facecam.y,
-                      shape: prevSeg.facecam.shape,
-                    })
-                  }
-                  title={`Apply camera position & size from Seg ${minIndex}`}
-                  label="Match prev"
-                  isSame={allSameFacecam && isSameFacecam(seg.facecam, prevSeg.facecam)}
-                />
-              )}
-              {nextSeg && nextSeg.facecam.src && (
-                <MatchClipButton
-                  direction="next"
-                  onClick={() =>
-                    setFacecam({
-                      size: nextSeg.facecam.size,
-                      x: nextSeg.facecam.x,
-                      y: nextSeg.facecam.y,
-                      shape: nextSeg.facecam.shape,
-                    })
-                  }
-                  title={`Apply camera position & size from Seg ${maxIndex + 2}`}
-                  label="Match next"
-                  isSame={allSameFacecam && isSameFacecam(seg.facecam, nextSeg.facecam)}
-                />
-              )}
-              <span className="pk-help ml-1">
-                {Math.round(seg.facecam.size * 100)}%
-              </span>
-            </div>
-          </div>
-          <div className="mb-2 grid grid-cols-4 gap-1.5">
-            {CAMERA_CORNERS.map((c) => {
-              const size = seg.facecam.size;
-              const target = c.at(size, camHeightFraction(size));
-              const active =
-                allSameFacecam &&
-                Math.abs(seg.facecam.x - target.x) < 0.02 &&
-                Math.abs(seg.facecam.y - target.y) < 0.02;
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => setFacecam(target)}
-                  title={c.label}
-                  aria-label={c.label}
-                  aria-pressed={active}
-                  className="pk-seg"
-                  data-active={active}
-                >
-                  {c.label.split(" ")[0]![0]}
-                  {c.label.split(" ")[1]![0]}
-                </button>
-              );
-            })}
-          </div>
-          <input
-            type="range"
-            min={0.1}
-            max={0.4}
-            step={0.01}
-            value={seg.facecam.size}
-            onChange={(e) => {
-              const size = Number(e.target.value);
-              const hFrac = camHeightFraction(size);
-              setFacecam({
-                size,
-                x: seg.facecam.x > 0.5 ? 0.97 - size : seg.facecam.x,
-                y: seg.facecam.y > 0.5 ? 0.97 - hFrac : seg.facecam.y,
-              });
-            }}
-            className="pk-range"
-            aria-label="Camera size"
-          />
-          <div className="mt-2 flex gap-1.5">
-            {(["circle", "square"] as const).map((s) => {
-              const active = allSameFacecam && (seg.facecam.shape ?? "square") === s;
-              return (
-                <button
-                  key={s}
-                  onClick={() => setFacecam({ shape: s })}
-                  className="pk-seg flex-1 capitalize"
-                  data-active={active}
-                >
-                  {s}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+
 
       {/* Themes — beautiful presets for stage background (gradient/solid) */}
       <div>

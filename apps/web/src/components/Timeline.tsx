@@ -16,13 +16,16 @@ import {
   resolveSegment,
   sourceToTimeline,
 } from "@panoptik/engine";
+import { TRANSITION_ICONS } from "./CameraControls";
 
-const RULER_HEIGHT = 28;
-const TRACK_HEIGHT = 36;
+const RULER_HEIGHT = 26;
+const TRACK_HEIGHT = 34;
+const FACECAM_TRACK_Y = 72;
+const FACECAM_TRACK_HEIGHT = 28;
 const DIAMOND_SIZE = 10;
-const SHELL_MIN_H = 140;
+const SHELL_MIN_H = 150;
 const SHELL_MAX_H = 420;
-const SHELL_DEFAULT_H = 220;
+const SHELL_DEFAULT_H = 230;
 
 function drawRoundRect(
   ctx: CanvasRenderingContext2D,
@@ -66,6 +69,13 @@ export function Timeline() {
   const [draggingDiamond, setDraggingDiamond] = useState<{ id: string; committed: boolean; segmentId: string } | null>(null);
   const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
+  const [transitionPopover, setTransitionPopover] = useState<{
+    x: number;
+    y: number;
+    targetSegId: string;
+    fromSegIdx: number;
+    toSegIdx: number;
+  } | null>(null);
 
   const project = useProjectStore((s) => s.project);
   const currentTime = useProjectStore((s) => s.currentTime);
@@ -104,7 +114,7 @@ export function Timeline() {
   // Canvas width scales with zoom: 0→0.5×, 1→2× base — ruler uses on-timeline duration
   const baseW = 1387;
   const canvasW = Math.round(baseW * (0.5 + zoom * 1.5));
-  const canvasH = 108;
+  const canvasH = 114;
   const timeToX = useCallback((t: number) => (t / duration) * canvasW, [duration, canvasW]);
   const xToTime = useCallback((x: number) => Math.max(0, Math.min(duration, (x / canvasW) * duration)), [duration, canvasW]);
 
@@ -135,11 +145,11 @@ export function Timeline() {
     // Identify active segment under playhead
     const activeSegId = project ? resolveSegment(project, currentTime)?.segment.id : null;
 
-    // Ruler bg
+    // ── 1. Ruler bg ──
     ctx.fillStyle = "#fafafa";
-    ctx.fillRect(0, 0, canvasW, 28);
+    ctx.fillRect(0, 0, canvasW, 26);
     ctx.fillStyle = "#ebebeb";
-    ctx.fillRect(0, 27, canvasW, 1);
+    ctx.fillRect(0, 25, canvasW, 1);
 
     // Ticks — on-timeline duration
     const interval = duration <= 30 ? 1 : duration <= 120 ? 5 : 10;
@@ -152,18 +162,20 @@ export function Timeline() {
       const major = t % (interval * 5) === 0 || t === 0;
       ctx.beginPath();
       ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, major ? 11 : 6);
+      ctx.lineTo(x + 0.5, major ? 10 : 5);
       ctx.stroke();
       if (major) {
         const label = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
-        ctx.fillText(label, x + 4, 20);
+        ctx.fillText(label, x + 4, 18);
       }
     }
 
-    // Segment filmstrip blocks
-    const TRACK_Y = 36;
+    const TRACK_Y = 32;
+    const segments = project?.segments ?? [];
+
+    // ── 2. Video Filmstrip Blocks ──
     let acc = 0;
-    for (const seg of project?.segments ?? []) {
+    for (const seg of segments) {
       const d = segmentDuration(seg);
       const x0 = timeToX(acc);
       const x1 = timeToX(acc + d);
@@ -172,7 +184,7 @@ export function Timeline() {
         ? seg.id === activeSegId
         : (selectedSegmentIds.length > 0 ? selectedSegmentIds.includes(seg.id) : seg.id === selectedSegmentId);
 
-      // 1. Clip filmstrip to the rounded segment block so thumbnails stay neat
+      // Clip filmstrip to the rounded segment block
       ctx.save();
       drawRoundRect(ctx, x0, TRACK_Y, segW, TRACK_HEIGHT, 4);
       ctx.clip();
@@ -183,7 +195,7 @@ export function Timeline() {
 
       // Tile thumbnails across the segment
       const tileH = TRACK_HEIGHT;
-      const tileW = 54; // ~16:9 proportion for 36px height
+      const tileW = 54;
       const numTiles = Math.max(1, Math.ceil(segW / tileW));
 
       for (let i = 0; i < numTiles; i++) {
@@ -191,27 +203,21 @@ export function Timeline() {
         const currentTileW = Math.min(tileW, x1 - tx);
         if (currentTileW <= 0) continue;
 
-        // Calculate the timestamp corresponding to the center of this thumbnail tile
         const progress = Math.max(0, Math.min(1, (tx + currentTileW / 2 - x0) / segW));
         const srcT = seg.srcStart + progress * (seg.srcEnd - seg.srcStart);
 
         const thumb = getThumbnail(srcT);
         if (thumb) {
-          // Draw extracted video frame thumbnail
           ctx.drawImage(thumb, 0, 0, thumb.width, thumb.height, tx, TRACK_Y, currentTileW, tileH);
         } else {
-          // Clean, modern placeholder tile (sleek neutral with subtle filmstrip mark)
           ctx.fillStyle = i % 2 === 0 ? "#f0f2f5" : "#e8ebed";
           ctx.fillRect(tx, TRACK_Y, currentTileW, tileH);
-
-          // Subtle placeholder frame outline
           if (currentTileW >= 20) {
             ctx.fillStyle = "rgba(0, 0, 0, 0.03)";
             ctx.fillRect(tx + 4, TRACK_Y + 4, currentTileW - 8, tileH - 8);
           }
         }
 
-        // Subtle frame separator between thumbnail tiles
         if (i > 0) {
           ctx.strokeStyle = "rgba(0, 0, 0, 0.08)";
           ctx.lineWidth = 1;
@@ -222,7 +228,6 @@ export function Timeline() {
         }
       }
 
-      // If selected, apply a subtle blue tint over the segment
       if (selected) {
         ctx.fillStyle = "rgba(0, 112, 243, 0.10)";
         ctx.fillRect(x0, TRACK_Y, segW, TRACK_HEIGHT);
@@ -230,7 +235,7 @@ export function Timeline() {
 
       ctx.restore();
 
-      // 2. Outer segment stroke
+      // Outer segment stroke
       if (selected) {
         ctx.strokeStyle = "#0070f3";
         ctx.lineWidth = 2;
@@ -243,7 +248,7 @@ export function Timeline() {
         ctx.stroke();
       }
 
-      // 3. Speed badge
+      // Speed badge
       if (seg.speed !== 1) {
         const speedText = `${String(seg.speed).replace(/\.?0$/, "")}x`;
         ctx.font = "bold 9px monospace";
@@ -261,9 +266,9 @@ export function Timeline() {
         ctx.fillText(speedText, badgeX + 4, badgeY + 10);
       }
 
-      // 4. Split boundary between segments
+      // Split boundary line
       if (acc + d < duration) {
-        ctx.strokeStyle = "#888888";
+        ctx.strokeStyle = "#94a3b8";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(x1 + 0.5, TRACK_Y - 2);
@@ -274,13 +279,13 @@ export function Timeline() {
       acc += d;
     }
 
-    // Diamonds — per segment, positioned via sourceToTimeline
-    for (const seg of project?.segments ?? []) {
+    // ── 3. Zoom Diamonds ──
+    for (const seg of segments) {
       for (const zp of [...seg.zoomPoints, ...seg.stagedZoomPoints]) {
         const st = sourceToTimeline(project!, seg.id, zp.t);
         if (st == null) continue;
         const x = timeToX(st);
-        const y = 36 + TRACK_HEIGHT / 2;
+        const y = TRACK_Y + TRACK_HEIGHT / 2;
         const staged = !!seg.stagedZoomPoints.find((s) => s.id === zp.id);
         const selected = zp.id === selectedZoomId;
         ctx.save();
@@ -296,6 +301,86 @@ export function Timeline() {
         ctx.stroke();
         ctx.restore();
       }
+    }
+
+    // ── 4. Dedicated Facecam Track (Grouped with Video) ──
+    let fcAcc = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]!;
+      const d = segmentDuration(seg);
+      const x0 = timeToX(fcAcc);
+      const x1 = timeToX(fcAcc + d);
+      const segW = Math.max(1, x1 - x0);
+      const selected = isPlaying
+        ? seg.id === activeSegId
+        : (selectedSegmentIds.length > 0 ? selectedSegmentIds.includes(seg.id) : seg.id === selectedSegmentId);
+
+      const hasCam = !!seg.facecam.src;
+
+      ctx.save();
+      drawRoundRect(ctx, x0, FACECAM_TRACK_Y, segW, FACECAM_TRACK_HEIGHT, 4);
+      ctx.clip();
+
+      if (hasCam) {
+        ctx.fillStyle = selected ? "#eff6ff" : "#f8fafc";
+        ctx.fillRect(x0, FACECAM_TRACK_Y, segW, FACECAM_TRACK_HEIGHT);
+
+        // Subtle gradient sheen
+        const grad = ctx.createLinearGradient(x0, FACECAM_TRACK_Y, x0, FACECAM_TRACK_Y + FACECAM_TRACK_HEIGHT);
+        grad.addColorStop(0, "rgba(255, 255, 255, 0.6)");
+        grad.addColorStop(1, "rgba(0, 0, 0, 0.03)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(x0, FACECAM_TRACK_Y, segW, FACECAM_TRACK_HEIGHT);
+
+        const cornerText = seg.facecam.x < 0.5
+          ? (seg.facecam.y < 0.5 ? "TL" : "BL")
+          : (seg.facecam.y < 0.5 ? "TR" : "BR");
+        const shapeIcon = seg.facecam.shape === "circle" ? "●" : "■";
+
+        ctx.fillStyle = selected ? "#0070f3" : "#475569";
+        ctx.font = "bold 9px monospace";
+        if (segW > 70) {
+          ctx.fillText(`CAM · ${cornerText} ${shapeIcon}`, x0 + 6, FACECAM_TRACK_Y + 18);
+        } else if (segW > 30) {
+          ctx.fillText(`CAM · ${cornerText}`, x0 + 4, FACECAM_TRACK_Y + 18);
+        } else {
+          ctx.fillText("CAM", x0 + 3, FACECAM_TRACK_Y + 18);
+        }
+      } else {
+        ctx.fillStyle = "#fafafa";
+        ctx.fillRect(x0, FACECAM_TRACK_Y, segW, FACECAM_TRACK_HEIGHT);
+        if (segW > 50) {
+          ctx.fillStyle = "#94a3b8";
+          ctx.font = "9px monospace";
+          ctx.fillText("NO CAM", x0 + 6, FACECAM_TRACK_Y + 18);
+        }
+      }
+      ctx.restore();
+
+      // Outer stroke for facecam clip
+      if (selected) {
+        ctx.strokeStyle = "#0070f3";
+        ctx.lineWidth = 1.5;
+        drawRoundRect(ctx, x0 + 1, FACECAM_TRACK_Y + 1, Math.max(1, segW - 2), FACECAM_TRACK_HEIGHT - 2, 4);
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = "#e2e8f0";
+        ctx.lineWidth = 1;
+        drawRoundRect(ctx, x0 + 0.5, FACECAM_TRACK_Y + 0.5, Math.max(1, segW - 1), FACECAM_TRACK_HEIGHT - 1, 4);
+        ctx.stroke();
+      }
+
+      // Group split line extending down
+      if (fcAcc + d < duration) {
+        ctx.strokeStyle = "#94a3b8";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x1 + 0.5, FACECAM_TRACK_Y - 2);
+        ctx.lineTo(x1 + 0.5, FACECAM_TRACK_Y + FACECAM_TRACK_HEIGHT + 2);
+        ctx.stroke();
+      }
+
+      fcAcc += d;
     }
   }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying]);
 
@@ -439,12 +524,14 @@ export function Timeline() {
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target?.closest("#timeline-context-menu")) return;
+      if (target?.closest("#timeline-context-menu") || target?.closest("#facecam-transition-popover")) return;
       setContextMenu(null);
+      setTransitionPopover(null);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setContextMenu(null);
+        setTransitionPopover(null);
       }
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
@@ -632,13 +719,172 @@ export function Timeline() {
               if (st == null) return null;
               const isStaged = !!seg.stagedZoomPoints.find((s) => s.id === zp.id);
               return (
-                <div key={zp.id} className="absolute top-[36px] z-10 h-9 w-6 -translate-x-1/2 cursor-grab" style={{ left: timeToX(st) }} onPointerDown={(e) => { e.stopPropagation(); (e.target as HTMLElement).setPointerCapture(e.pointerId); setDraggingDiamond({ id: zp.id, committed: !isStaged, segmentId: seg.id }); setSelectedZoom(zp.id); selectSegment(seg.id); }} onMouseEnter={() => setHoveredDiamond(zp.id)} onMouseLeave={() => setHoveredDiamond(null)}>
+                <div
+                  key={zp.id}
+                  className="absolute top-[32px] z-10 h-9 w-6 -translate-x-1/2 cursor-grab"
+                  style={{ left: timeToX(st) }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                    setDraggingDiamond({ id: zp.id, committed: !isStaged, segmentId: seg.id });
+                    setSelectedZoom(zp.id);
+                    selectSegment(seg.id);
+                  }}
+                  onMouseEnter={() => setHoveredDiamond(zp.id)}
+                  onMouseLeave={() => setHoveredDiamond(null)}
+                >
                   {hoveredDiamond === zp.id && (
-                    <button className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#ee0000] text-[8px] font-bold text-white" onClick={(e) => { e.stopPropagation(); isStaged ? removeStagedZoom(zp.id) : removeZoomPoint(zp.id); }}>×</button>
+                    <button
+                      className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#ee0000] text-[8px] font-bold text-white shadow-sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        isStaged ? removeStagedZoom(zp.id) : removeZoomPoint(zp.id);
+                      }}
+                    >
+                      ×
+                    </button>
                   )}
                 </div>
               );
             }),
+          )}
+
+          {/* Facecam Transition Interactive Nodes in between clips */}
+          {(() => {
+            let trAcc = 0;
+            return project.segments.slice(0, -1).map((seg, i) => {
+              const nextSeg = project.segments[i + 1]!;
+              trAcc += segmentDuration(seg);
+              const splitX = timeToX(trAcc);
+              const transType = nextSeg.facecam.transition ?? "smooth";
+
+              return (
+                <button
+                  key={`trans-pill-${seg.id}-${nextSeg.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    selectSegment(nextSeg.id, false);
+                    setTransitionPopover({
+                      x: Math.min(canvasW - 220, Math.max(10, splitX - 100)),
+                      y: FACECAM_TRACK_Y,
+                      targetSegId: nextSeg.id,
+                      fromSegIdx: i + 1,
+                      toSegIdx: i + 2,
+                    });
+                  }}
+                  title={`Facecam Transition: ${transType} (${(nextSeg.facecam.transitionDuration ?? 0.45).toFixed(2)}s). Click to customize.`}
+                  className="absolute z-20 flex h-[20px] w-[24px] -translate-x-1/2 items-center justify-center rounded-md border border-[#cbd5e1] bg-white text-[#475569] shadow-sm hover:border-[#0070f3] hover:text-[#0070f3] hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                  style={{ left: splitX, top: FACECAM_TRACK_Y + (FACECAM_TRACK_HEIGHT - 20) / 2 }}
+                >
+                  <span className="flex items-center justify-center scale-90">
+                    {TRANSITION_ICONS[transType] ?? TRANSITION_ICONS.smooth}
+                  </span>
+                </button>
+              );
+            });
+          })()}
+
+          {/* Inline Facecam Transition Popover */}
+          {transitionPopover && (
+            <div
+              id="facecam-transition-popover"
+              className="absolute z-40 w-[240px] rounded-2xl border bg-white p-3 shadow-vercel-4 animate-in fade-in zoom-in-95 duration-100"
+              style={{
+                left: transitionPopover.x,
+                top: Math.max(10, FACECAM_TRACK_Y - 145),
+                borderColor: "#ebebeb",
+                boxShadow: "0 12px 36px rgba(0,0,0,0.18)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-[#111]">
+                    Facecam Transition
+                  </span>
+                  <span className="rounded bg-[#f0f7ff] px-1.5 py-0.2 text-[10px] font-semibold text-[#0070f3]">
+                    Seg {transitionPopover.fromSegIdx} ➔ {transitionPopover.toSegIdx}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setTransitionPopover(null)}
+                  className="flex h-5 w-5 items-center justify-center rounded-full text-xs text-[#888] hover:bg-[#f5f5f5]"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                {[
+                  { id: "smooth", name: "Smooth Float" },
+                  { id: "spring", name: "Spring Pop" },
+                  { id: "fade", name: "Crossfade" },
+                  { id: "slide", name: "Corner Slide" },
+                  { id: "cut", name: "Instant Cut" },
+                ].map((t) => {
+                  const targetSeg = project.segments.find((s) => s.id === transitionPopover.targetSegId);
+                  const currentType = targetSeg?.facecam.transition ?? "smooth";
+                  const active = currentType === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        updateSegment(transitionPopover.targetSegId, {
+                          facecam: {
+                            ...(targetSeg?.facecam ?? { x: 0.8, y: 0.8, size: 0.22, src: null }),
+                            transition: t.id as any,
+                          },
+                        });
+                      }}
+                      className={`flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs font-medium transition-all ${
+                        active ? "bg-[#f0f7ff] text-[#0070f3] font-semibold" : "text-[#333] hover:bg-[#f5f5f5]"
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className={`flex h-5 w-5 items-center justify-center rounded ${
+                          active ? "text-[#0070f3]" : "text-[#666]"
+                        }`}>
+                          {TRANSITION_ICONS[t.id]}
+                        </span>
+                        <span>{t.name}</span>
+                      </span>
+                      {active && <span className="text-[11px]">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Duration slider */}
+              {(() => {
+                const targetSeg = project.segments.find((s) => s.id === transitionPopover.targetSegId);
+                const dur = targetSeg?.facecam.transitionDuration ?? 0.45;
+                return (
+                  <div className="mt-2 border-t border-[#f0f0f0] pt-2">
+                    <div className="mb-1 flex items-center justify-between text-[11px]">
+                      <span className="text-[#666]">Duration</span>
+                      <span className="font-mono font-bold text-[#0070f3]">{dur.toFixed(2)}s</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={1.0}
+                      step={0.05}
+                      value={dur}
+                      onChange={(e) => {
+                        const nextDur = Number(e.target.value);
+                        updateSegment(transitionPopover.targetSegId, {
+                          facecam: {
+                            ...(targetSeg?.facecam ?? { x: 0.8, y: 0.8, size: 0.22, src: null }),
+                            transitionDuration: nextDur,
+                          },
+                        });
+                      }}
+                      className="pk-range w-full"
+                    />
+                  </div>
+                );
+              })()}
+            </div>
           )}
         </div>
       </div>

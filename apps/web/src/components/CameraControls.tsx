@@ -13,19 +13,87 @@ import type { Facecam } from "@panoptik/schema";
 const CAMERA_ASPECT = 16 / 9;
 
 const CAMERA_CORNERS = [
-  { id: "topLeft", label: "Top Left", icon: "↖", at: () => ({ x: 0.03, y: 0.03 }) },
-  { id: "topRight", label: "Top Right", icon: "↗", at: (s: number) => ({ x: 0.97 - s, y: 0.03 }) },
-  { id: "bottomLeft", label: "Bottom Left", icon: "↙", at: (s: number, h: number) => ({ x: 0.03, y: 0.97 - h }) },
-  { id: "bottomRight", label: "Bottom Right", icon: "↘", at: (s: number, h: number) => ({ x: 0.97 - s, y: 0.97 - h }) },
+  {
+    id: "topLeft",
+    label: "Top Left",
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="7 17 7 7 17 7" />
+        <line x1="7" y1="7" x2="17" y2="17" />
+      </svg>
+    ),
+    at: () => ({ x: 0.03, y: 0.03 }),
+  },
+  {
+    id: "topRight",
+    label: "Top Right",
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="7 7 17 7 17 17" />
+        <line x1="17" y1="7" x2="7" y2="17" />
+      </svg>
+    ),
+    at: (s: number) => ({ x: 0.97 - s, y: 0.03 }),
+  },
+  {
+    id: "bottomLeft",
+    label: "Bottom Left",
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="17 17 7 17 7 7" />
+        <line x1="7" y1="17" x2="17" y2="7" />
+      </svg>
+    ),
+    at: (s: number, h: number) => ({ x: 0.03, y: 0.97 - h }),
+  },
+  {
+    id: "bottomRight",
+    label: "Bottom Right",
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="7 17 17 17 17 7" />
+        <line x1="17" y1="17" x2="7" y2="7" />
+      </svg>
+    ),
+    at: (s: number, h: number) => ({ x: 0.97 - s, y: 0.97 - h }),
+  },
 ] as const;
 
-const TRANSITION_STYLES = [
-  { id: "smooth", name: "Smooth Float", desc: "Gentle ease between positions", icon: "〰️" },
-  { id: "spring", name: "Spring Pop", desc: "Dynamic pop-in animation", icon: "✨" },
-  { id: "fade", name: "Crossfade", desc: "Smooth opacity dissolve", icon: "🌫️" },
-  { id: "slide", name: "Corner Slide", desc: "Glide in from screen boundary", icon: "⏩" },
-  { id: "cut", name: "Instant Cut", desc: "Direct cut without transition", icon: "✂️" },
-] as const;
+export const TRANSITION_ICONS: Record<string, React.ReactNode> = {
+  smooth: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 12c4-8 8-8 10 0s6 8 10 0" />
+    </svg>
+  ),
+  spring: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2v4m0 12v4M2 12h4m12 0h4m-3.17-6.83l-2.83 2.83m-8 8l-2.83 2.83m0-13.66l2.83 2.83m8 8l2.83 2.83" />
+    </svg>
+  ),
+  fade: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
+      <circle cx="12" cy="12" r="4" fill="currentColor" fillOpacity="0.3" />
+    </svg>
+  ),
+  slide: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="13 17 18 12 13 7" />
+      <polyline points="6 17 11 12 6 7" />
+    </svg>
+  ),
+  cut: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <line x1="20" y1="4" x2="8.12" y2="15.88" />
+      <line x1="14.47" y1="14.48" x2="20" y2="20" />
+      <line x1="8.12" y1="8.12" x2="12" y2="12" />
+    </svg>
+  ),
+};
+
+
 
 function isSameFacecam(fc1: Facecam, fc2: Facecam): boolean {
   return (
@@ -86,9 +154,7 @@ export function CameraControls() {
   const updateSelectedSegments = useProjectStore((s) => s.updateSelectedSegments);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedTransition, setSelectedTransition] = useState<string>("smooth");
-  const [transitionDuration, setTransitionDuration] = useState<number>(0.4);
-  const [activeSection, setActiveSection] = useState<"placement" | "transitions" | "reshoot">("placement");
+  const [activeSection, setActiveSection] = useState<"placement" | "reshoot">("placement");
 
   if (!project) {
     return (
@@ -226,7 +292,7 @@ export function CameraControls() {
         </div>
       </div>
 
-      {/* Section Sub-Tabs: Placement / Transitions / Reshoot */}
+      {/* Section Sub-Tabs: Placement / Reshoot */}
       <div className="mb-4 flex rounded-xl border border-[#ebebeb] bg-[#f8f8f8] p-1 shadow-inner">
         <button
           onClick={() => setActiveSection("placement")}
@@ -236,17 +302,11 @@ export function CameraControls() {
               : "text-[#666] hover:text-[#111]"
           }`}
         >
-          <span>📍 Placement</span>
-        </button>
-        <button
-          onClick={() => setActiveSection("transitions")}
-          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition-all ${
-            activeSection === "transitions"
-              ? "bg-white text-[#111] shadow-sm"
-              : "text-[#666] hover:text-[#111]"
-          }`}
-        >
-          <span>✨ Transitions</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 3v4m0 10v4m-9-9h4m10 0h4" />
+          </svg>
+          <span>Placement</span>
         </button>
         <button
           onClick={() => setActiveSection("reshoot")}
@@ -256,7 +316,11 @@ export function CameraControls() {
               : "text-[#666] hover:text-[#111]"
           }`}
         >
-          <span>🎥 Reshoot</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7" />
+            <rect x="1" y="5" width="15" height="14" rx="2" />
+          </svg>
+          <span>Reshoot & Source</span>
         </button>
       </div>
 
@@ -322,8 +386,8 @@ export function CameraControls() {
                     }}
                   >
                     <span className="text-xs font-semibold text-[#333]">{c.label}</span>
-                    <span className={`flex h-6 w-6 items-center justify-center rounded-lg text-xs font-bold ${
-                      active ? "bg-[#0070f3] text-white" : "bg-[#f5f5f5] text-[#666]"
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-lg text-xs font-bold transition-all ${
+                      active ? "bg-[#0070f3] text-white" : "bg-[#f5f5f5] text-[#666] group-hover:bg-[#e0f2fe] group-hover:text-[#0070f3]"
                     }`}>
                       {c.icon}
                     </span>
@@ -421,104 +485,10 @@ export function CameraControls() {
             </div>
           </div>
 
-          {/* Fine Tuning Coordinates */}
-          <div className="rounded-xl border border-[#ebebeb] bg-[#fafafa] p-3">
-            <span className="pk-label mb-2 block font-semibold">Fine Coordinates</span>
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-[#666]">Horizontal (X)</span>
-                <span className="font-mono text-[#111]">{Math.round(seg.facecam.x * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(0, 1 - seg.facecam.size)}
-                step={0.01}
-                value={seg.facecam.x}
-                onChange={(e) => setFacecam({ x: Number(e.target.value) })}
-                className="pk-range"
-              />
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[#666]">Vertical (Y)</span>
-                <span className="font-mono text-[#111]">{Math.round(seg.facecam.y * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(0, 1 - camHeightFraction(seg.facecam.size))}
-                step={0.01}
-                value={seg.facecam.y}
-                onChange={(e) => setFacecam({ y: Number(e.target.value) })}
-                className="pk-range"
-              />
-            </div>
-          </div>
         </div>
       )}
 
-      {/* SECTION 2: TRANSITIONS */}
-      {activeSection === "transitions" && (
-        <div>
-          <span className="pk-label mb-2 block">Facecam Transition Style</span>
-          <div className="space-y-2">
-            {TRANSITION_STYLES.map((t) => {
-              const currentTrans = seg.facecam.transition ?? "smooth";
-              const active = currentTrans === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setFacecam({ transition: t.id as any })}
-                  className="flex w-full items-center justify-between rounded-xl border p-2.5 text-left transition-all hover:border-[#0070f3]"
-                  style={{
-                    borderColor: active ? "#0070f3" : "#ebebeb",
-                    background: active ? "#f0f7ff" : "#ffffff",
-                    boxShadow: active ? "0 0 0 2px rgba(0,112,243,0.2)" : "none",
-                  }}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-base">{t.icon}</span>
-                    <div>
-                      <div className="text-xs font-semibold text-[#222]">{t.name}</div>
-                      <div className="text-[11px] text-[#777]">{t.desc}</div>
-                    </div>
-                  </div>
-                  {active && (
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#0070f3] text-[10px] text-white">
-                      ✓
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Transition Duration */}
-          <div className="mt-4 rounded-xl border border-[#ebebeb] bg-[#fafafa] p-3">
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="pk-label">Transition Speed</span>
-              <span className="pk-value font-mono font-bold" style={{ color: "#0070f3" }}>
-                {(seg.facecam.transitionDuration ?? 0.45).toFixed(2)}s
-              </span>
-            </div>
-            <input
-              type="range"
-              min={0.1}
-              max={1.0}
-              step={0.05}
-              value={seg.facecam.transitionDuration ?? 0.45}
-              onChange={(e) => setFacecam({ transitionDuration: Number(e.target.value) })}
-              className="pk-range"
-            />
-            <div className="mt-2 flex justify-between text-[10px] text-[#888]">
-              <span>Snappy (0.2s)</span>
-              <span>Default (0.45s)</span>
-              <span>Cinematic (0.8s)</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SECTION 3: RESHOOT & SOURCE */}
+      {/* SECTION 2: RESHOOT & SOURCE */}
       {activeSection === "reshoot" && (
         <div className="space-y-3">
           <input
