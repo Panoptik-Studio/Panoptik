@@ -21,6 +21,7 @@ import type { ExportOpts, Project } from "@panoptik/schema";
 import { presetAspect } from "./layout";
 import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator } from "./decode";
 import { renderFrame } from "./render";
+import { timeStretch } from "./timeStretch";
 
 /** Long-edge pixel height for each preset; width follows the clip's aspect. */
 const RESOLUTION_HEIGHTS: Record<ExportOpts["resolution"], number> = {
@@ -190,46 +191,16 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
       console.warn("[Export] no encodable audio codec -> silent. Try WebM on Linux.");
     }
 
-    // Resample audio for speed if needed (pitch-corrected)
+    // Pitch-preserving time-stretch for speed. The old path used
+    // AudioBufferSourceNode.playbackRate (vari-speed), which raised the pitch
+    // like a chipmunk — only the preview's <audio> element preserved pitch.
     let spedAudioBuffer: AudioBuffer | null = audioBuffer;
     if (audioBuffer && playbackRate !== 1) {
       try {
-        const rate = playbackRate;
-        // Use OfflineAudioContext to time-stretch: render at playbackRate
-        const OfflineCtx = (globalThis as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
-        if (OfflineCtx) {
-          const ctx = new OfflineCtx(audioBuffer.numberOfChannels, Math.ceil(audioBuffer.length / rate), audioBuffer.sampleRate);
-          const src = ctx.createBufferSource();
-          src.buffer = audioBuffer;
-          src.playbackRate.value = rate;
-          src.connect(ctx.destination);
-          src.start(0);
-          spedAudioBuffer = await ctx.startRendering();
-          console.log("[Export] resampled audio", { from: audioBuffer.duration.toFixed(2), to: spedAudioBuffer.duration.toFixed(2), rate });
-        } else {
-          // Fallback: crude channel data resample (no pitch correction but keeps duration)
-          const len = Math.ceil(audioBuffer.length / rate);
-          const Ctx2 = (globalThis as unknown as { AudioContext?: typeof AudioContext }).AudioContext;
-          const tmp = Ctx2 ? new Ctx2() : null;
-          const dest = tmp ? tmp.createBuffer(audioBuffer.numberOfChannels, len, audioBuffer.sampleRate) : null;
-          if (dest) {
-            for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
-              const src = audioBuffer.getChannelData(ch);
-              const dst = dest.getChannelData(ch);
-              for (let i = 0; i < len; i++) {
-                const idx = i * rate;
-                const i0 = Math.floor(idx);
-                const i1 = Math.min(src.length - 1, i0 + 1);
-                const f = idx - i0;
-                dst[i] = src[i0]! * (1 - f) + src[i1]! * f;
-              }
-            }
-            spedAudioBuffer = dest;
-            try { tmp?.close(); } catch { /* ignore */ }
-          }
-        }
+        spedAudioBuffer = timeStretch(audioBuffer, playbackRate);
+        console.log("[Export] pitch-preserving time-stretch", { from: audioBuffer.duration.toFixed(2), to: spedAudioBuffer.duration.toFixed(2), rate: playbackRate, ch: spedAudioBuffer.numberOfChannels, sr: spedAudioBuffer.sampleRate });
       } catch (e) {
-        console.warn("[Export] audio resample failed, using original", e);
+        console.warn("[Export] audio time-stretch failed, using original", e);
         spedAudioBuffer = audioBuffer;
       }
     }
