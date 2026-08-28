@@ -553,7 +553,7 @@ function drawFacecam(
 
   const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
   const activeSrc = decodedFacecamSrc?.() ?? null;
-  const isDecodedSourceMatch = !activeSrc || fc.src === activeSrc;
+  const isDecodedSourceMatch = !activeSrc || !fc.src || fc.src === activeSrc;
 
   // During export, prioritize the deterministic WebCodecs decoded frame source
   if (isExporting && isDecodedSourceMatch) {

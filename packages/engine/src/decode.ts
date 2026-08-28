@@ -58,6 +58,9 @@ let desiredTime = 0;
 let pump: Promise<void> | null = null;
 let facecamUrl: string | null = null;
 let exportIterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
+let currentExportFrame: WrappedCanvas | null = null;
+let nextExportFrame: WrappedCanvas | null = null;
+let exportEos = false;
 
 let audioInput: Input | null = null;
 let audioUrl: string | null = null;
@@ -139,6 +142,9 @@ let fcAspect = 16 / 9;
 let fcDesired = 0;
 let fcPump: Promise<void> | null = null;
 let fcExportIterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
+let fcCurrentExportFrame: WrappedCanvas | null = null;
+let fcNextExportFrame: WrappedCanvas | null = null;
+let fcExportEos = false;
 
 /** Drop the camera's export iterator so the next export starts from zero. */
 export async function resetFacecamExportIterator(): Promise<void> {
@@ -146,6 +152,9 @@ export async function resetFacecamExportIterator(): Promise<void> {
     try { await fcExportIterator.return(); } catch { /* already done */ }
     fcExportIterator = null;
   }
+  fcCurrentExportFrame = null;
+  fcNextExportFrame = null;
+  fcExportEos = false;
   fcPresented = null;
 }
 
@@ -204,8 +213,7 @@ async function openFacecamSink(blob: Blob): Promise<void> {
     const w = rawW > 0 ? rawW : 1280;
     const h = rawH > 0 ? rawH : 720;
     fcAspect = h > 0 ? w / h : 16 / 9;
-    // The PiP is small on screen; decoding the camera at full size would cost
-    // far more than it shows.
+    // Sized to support full quality in both preview and export.
     const dw = Math.max(2, Math.min(w, MAX_FACECAM_WIDTH));
     const dh = Math.max(2, Math.round(dw / fcAspect));
     fcSink = new CanvasSink(track, { width: dw, height: dh, fit: "fill", poolSize: 4 });
@@ -236,39 +244,49 @@ export async function prepareFacecamFrame(t: number): Promise<void> {
   const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
   const qt = Math.max(0, t);
   if (isExporting) {
-    // Same sequential sweep as the screen: one forward iterator over the whole
-    // export, no seeking. The camera has to be stepped alongside the screen or
-    // its surface keeps whatever frame the preview happened to leave there,
-    // and every exported frame shows that one still image.
-    if (!fcExportIterator) fcExportIterator = fcSink.canvases(0);
-    else if (qt === 0) {
-      await resetFacecamExportIterator();
+    if (!fcExportIterator) {
       fcExportIterator = fcSink.canvases(0);
-    } else if (fcPresented && qt < fcPresented.start) {
+      fcCurrentExportFrame = null;
+      fcNextExportFrame = null;
+      fcExportEos = false;
+    } else if (qt === 0 || (fcCurrentExportFrame && qt < fcCurrentExportFrame.timestamp)) {
       await resetFacecamExportIterator();
+      if (!fcSink) return;
       fcExportIterator = fcSink.canvases(0);
     }
-    while (true) {
-      if (fcPresented && qt >= fcPresented.start && qt < fcPresented.end) return;
-      const { value, done } = await fcExportIterator.next();
-      if (done || !value) {
-        // The camera is usually shorter than the screen; hold its last frame
-        // rather than spinning on done for the remaining screen frames.
-        if (fcPresented) fcPresented = { start: fcPresented.start, end: Infinity };
-        return;
+
+    if (!fcCurrentExportFrame && !fcExportEos) {
+      const res = await fcExportIterator.next();
+      if (res.done || !res.value) {
+        fcExportEos = true;
+      } else {
+        fcCurrentExportFrame = res.value;
+        const dur = fcCurrentExportFrame.duration > 0 ? fcCurrentExportFrame.duration : NOMINAL_FRAME_DUR;
+        presentFacecam(fcCurrentExportFrame, fcCurrentExportFrame.timestamp + dur);
       }
-      const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
-      if (value.timestamp > qt) {
-        // A hole: the camera recorded nothing at qt, so no frame will ever
-        // contain it. Without this the loop drains the whole track hunting for
-        // one and the camera freezes for the rest of the export — which is the
-        // 2.7s stall the export timeout was working around.
-        presentFacecam(value, end, Math.min(value.timestamp, qt));
-        return;
-      }
-      presentFacecam(value, end);
-      if (qt < end) return;
     }
+
+    while (!fcExportEos) {
+      if (!fcNextExportFrame) {
+        const res = await fcExportIterator.next();
+        if (res.done || !res.value) {
+          fcExportEos = true;
+          fcNextExportFrame = null;
+          break;
+        }
+        fcNextExportFrame = res.value;
+      }
+
+      if (fcNextExportFrame.timestamp <= qt) {
+        fcCurrentExportFrame = fcNextExportFrame;
+        fcNextExportFrame = null;
+        const dur = fcCurrentExportFrame.duration > 0 ? fcCurrentExportFrame.duration : NOMINAL_FRAME_DUR;
+        presentFacecam(fcCurrentExportFrame, fcCurrentExportFrame.timestamp + dur);
+      } else {
+        break;
+      }
+    }
+    return;
   }
   fcDesired = Math.max(0, t);
   if (!fcPump) {
@@ -383,11 +401,11 @@ export async function prepareAllFrames(t: number, fcT?: number): Promise<void> {
  * Mint the facecam's object URL here so teardown can revoke it alongside the
  * clip's — otherwise every re-import pins another full recording in memory.
  */
-export async function setFacecamBlob(blob: Blob | null): Promise<string | null> {
+export async function setFacecamBlob(blob: Blob | null, knownUrl?: string | null): Promise<string | null> {
   clearFacecamCache();
   await teardownFacecam();
   if (!blob || blob.size === 0) return null;
-  facecamUrl = registerObjectUrl(blob);
+  facecamUrl = knownUrl ?? registerObjectUrl(blob);
   await openFacecamSink(blob);
   await prepareFacecamFrame(0);
   return facecamUrl;
@@ -466,8 +484,10 @@ export async function resetExportIterator(): Promise<void> {
     try { await exportIterator.return(); } catch { /* already done */ }
     exportIterator = null;
   }
-  // Don't clear `presented` here — the preview may be on a different t.
-  // The next export will iterate from 0 and overwrite it as it steps.
+  currentExportFrame = null;
+  nextExportFrame = null;
+  exportEos = false;
+  presented = null;
 }
 
 export async function prepareFrame(t: number): Promise<void> {
@@ -475,34 +495,49 @@ export async function prepareFrame(t: number): Promise<void> {
   const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
   const qt = Math.max(0, t);
   if (isExporting) {
-    // Sequential path avoids the SEEK_AHEAD_LIMIT seek-storm that on Linux
-    // mp4/avc1 causes 130ms VideoDecoder re-init per frame at tail (14.8s).
-    // One forward iterator from 0 covers the whole export with no seeks.
-    if (!exportIterator) exportIterator = sink.canvases(0);
-    else if (qt === 0) {
-      // Second export in same session must start over, not resume at EOS.
-      await resetExportIterator();
+    if (!exportIterator) {
       exportIterator = sink.canvases(0);
-    } else if (presented && qt < presented.start) {
-      // Non-monotonic jump backwards (shouldn't happen in export's 0..duration
-      // sweep, but guards against a stale iterator after a preview seek).
+      currentExportFrame = null;
+      nextExportFrame = null;
+      exportEos = false;
+    } else if (qt === 0 || (currentExportFrame && qt < currentExportFrame.timestamp)) {
       await resetExportIterator();
+      if (!sink) return;
       exportIterator = sink.canvases(0);
     }
-    while (true) {
-      if (presented && qt >= presented.start && qt < presented.end) return;
-      const { value, done } = await exportIterator.next();
-      if (done || !value) {
-        // Past EOS: hold last frame so renderFrame still has something to draw.
-        // Extend presented to Infinity so future tail frames are cache hits
-        // instead of spinning on done.
-        if (presented) presented = { start: presented.start, end: Infinity };
-        return;
+
+    if (!currentExportFrame && !exportEos) {
+      const res = await exportIterator.next();
+      if (res.done || !res.value) {
+        exportEos = true;
+      } else {
+        currentExportFrame = res.value;
+        const dur = currentExportFrame.duration > 0 ? currentExportFrame.duration : NOMINAL_FRAME_DUR;
+        present(currentExportFrame, currentExportFrame.timestamp + dur);
       }
-      const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
-      present(value, end);
-      if (qt >= value.timestamp && qt < end) return;
     }
+
+    while (!exportEos) {
+      if (!nextExportFrame) {
+        const res = await exportIterator.next();
+        if (res.done || !res.value) {
+          exportEos = true;
+          nextExportFrame = null;
+          break;
+        }
+        nextExportFrame = res.value;
+      }
+
+      if (nextExportFrame.timestamp <= qt) {
+        currentExportFrame = nextExportFrame;
+        nextExportFrame = null;
+        const dur = currentExportFrame.duration > 0 ? currentExportFrame.duration : NOMINAL_FRAME_DUR;
+        present(currentExportFrame, currentExportFrame.timestamp + dur);
+      } else {
+        break;
+      }
+    }
+    return;
   }
   screenDebugFrames++;
   if (presented && t >= presented.start && t < presented.end) {
@@ -672,10 +707,7 @@ async function teardown(): Promise<void> {
   sink = null;
   const inflight = pump;
   await closeIterator();
-  if (exportIterator) {
-    try { await exportIterator.return(); } catch { /* already done */ }
-    exportIterator = null;
-  }
+  await resetExportIterator();
   if (inflight) {
     try {
       await inflight;

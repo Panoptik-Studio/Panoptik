@@ -106,8 +106,9 @@ describe("getProjectCameraTransform across multi-clip boundaries", () => {
   it("zoom in clip 1 continues holding and easing out smoothly into clip 2", () => {
     const proj: Project = {
       id: "p1",
-      name: "Test",
       media: { width: 1920, height: 1080, duration: 10, src: "blob:test" },
+      audioSrc: null,
+      clickLog: [],
       segments: [
         {
           id: "seg1",
@@ -358,7 +359,8 @@ describe("facecam PiP placement", () => {
     const size = 0.2;
     const draw = drawnPiP({ src: "blob:cam", x: 0.97 - size, y: 0.97 - size, size, shape: "circle" });
     expect(draw).toBeDefined();
-    const dest = draw!.length === 10
+    if (!draw) return;
+    const dest = draw.length === 10
       ? { dx: draw[6] as number, dy: draw[7] as number, dw: draw[8] as number, dh: draw[9] as number }
       : { dx: draw[2] as number, dy: draw[3] as number, dw: draw[4] as number, dh: draw[5] as number };
     expect(dest.dx + dest.dw).toBeLessThanOrEqual(1920);
@@ -369,6 +371,8 @@ describe("facecam PiP placement", () => {
 
   it("keeps a top-left camera fully inside the canvas", () => {
     const draw = drawnPiP({ src: "blob:cam", x: 0.03, y: 0.03, size: 0.2, shape: "square" });
+    expect(draw).toBeDefined();
+    if (!draw) return;
     const dest = draw.length === 10
       ? { dx: draw[6] as number, dy: draw[7] as number, dw: draw[8] as number, dh: draw[9] as number }
       : { dx: draw[2] as number, dy: draw[3] as number, dw: draw[4] as number, dh: draw[5] as number };
@@ -404,6 +408,22 @@ describe("facecam PiP placement", () => {
     renderFrame(ctx, makeProject({ facecam: { src: "blob:short", x: 0.7, y: 0.7, size: 0.2 } }), 9);
     expect(el.currentTime).toBeLessThan(4);
     expect(el.currentTime).toBeGreaterThan(3.9);
+  });
+
+  it("uses decoded WebCodecs frame during export when available", async () => {
+    const { setFacecamFrameSource } = await import("./render");
+    const mockCanvas = { width: 640, height: 480 } as unknown as CanvasImageSource;
+    setFacecamFrameSource(() => mockCanvas, () => 640 / 480, () => "blob:export-cam");
+
+    (globalThis as unknown as { window: Record<string, unknown> }).window = { __isExporting: true };
+    const { ctx, calls } = makeCtx();
+    renderFrame(ctx, makeProject({ facecam: { src: "blob:export-cam", x: 0.7, y: 0.7, size: 0.2 } }), 1);
+
+    const draw = calls.find((c) => c[0] === "drawImage" && c[1] === mockCanvas);
+    expect(draw).toBeDefined();
+
+    delete (globalThis as unknown as { window?: unknown }).window;
+    setFacecamFrameSource(null, null, null);
   });
 });
 

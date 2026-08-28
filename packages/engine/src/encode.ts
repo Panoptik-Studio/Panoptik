@@ -281,7 +281,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
             const resp = await fetch(segFcSrc);
             const blob = await resp.blob();
             const { setFacecamBlob, resetFacecamExportIterator } = await import("./decode");
-            await setFacecamBlob(blob);
+            await setFacecamBlob(blob, segFcSrc);
             await resetFacecamExportIterator();
             activeFacecamSrc = segFcSrc;
           } catch (e) {
@@ -295,7 +295,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           const srcT = seg.srcStart + tEff * seg.speed;
           if (i % 60 === 0) console.log("[Export] frame", i, "/", totalFrames, "seg", seg.id, "tEff", tEff.toFixed(2), "srcT", srcT.toFixed(2));
           const fcStartT = seg.facecam?.startT ?? 0;
-          const fcT = Math.max(0, (timelineCursor + tEff) - fcStartT);
+          const fcT = fcStartT > 0 ? Math.max(0, (timelineCursor + tEff) - fcStartT) : srcT;
           await prepareAllFrames(srcT, fcT);
           renderFrame(ctx as unknown as CanvasRenderingContext2D, project, timelineCursor + tEff);
           // Awaited so encoder backpressure actually throttles us rather than
