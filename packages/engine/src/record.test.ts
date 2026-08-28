@@ -159,6 +159,30 @@ describe("startRecording", () => {
     expect(recorders.every((r) => r.startCount === 1)).toBe(true);
   });
 
+  it("leaves a caller-supplied camera track open, and closes the ones it opened", async () => {
+    // The contract that the caller has to honour: a track handed in stays the
+    // caller's to close, because the caller is still previewing it. Everything
+    // startRecording opened itself is released.
+    const { startRecording } = await import("./record");
+    const borrowed = new FakeTrack("video");
+    const handles = await startRecording({
+      layout: "screenAndCamera",
+      shape: "circle",
+      cameraEnabled: true,
+      microphoneEnabled: true,
+      cameraStream: new FakeStream([borrowed]) as unknown as MediaStream,
+    });
+
+    await handles.begin();
+    await handles.stop();
+
+    // Borrowed: still live. Whoever lent it has to stop it.
+    expect(borrowed.readyState).toBe("live");
+    // Opened here: released.
+    const screenTracks = handles.screenStream.getTracks();
+    expect(screenTracks.every((t) => t.readyState === "ended")).toBe(true);
+  });
+
   it("does not restart a recorder if begin() is called twice", async () => {
     const { startRecording } = await import("./record");
     const handles = await startRecording({

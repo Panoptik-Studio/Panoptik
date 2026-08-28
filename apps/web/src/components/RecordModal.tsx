@@ -126,6 +126,10 @@ export function RecordModal() {
   // While a take is running the recorder closes the camera track, so the
   // effect that opened it must not also close it.
   const recordingOwnsCameraRef = useRef(false);
+  // The live preview camera. Held in a ref rather than only in the opening
+  // effect's closure: the device has to be releasable from the stop handler
+  // too, and a closure that has already been cleaned up cannot do that.
+  const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
   // Set when the floating bubble had to be closed because the whole screen is
   // being captured and it would have been recorded.
   const [bubbleSuppressed, setBubbleSuppressed] = useState(false);
@@ -289,6 +293,7 @@ export function RecordModal() {
           return;
         }
         opened = track;
+        cameraTrackRef.current = track;
         setCameraStream(new MediaStream([track]));
       })
       .catch(() => { /* no camera: the slot shows its placeholder */ });
@@ -297,9 +302,37 @@ export function RecordModal() {
       setCameraStream(null);
       // The recorder holds this same track while a take is running and closes
       // it when the take ends, so releasing it here would cut the recording.
-      if (opened && !recordingOwnsCameraRef.current) opened.stop();
+      if (opened && !recordingOwnsCameraRef.current) {
+        opened.stop();
+        if (cameraTrackRef.current === opened) cameraTrackRef.current = null;
+      }
     };
   }, [isOpen, wantsCameraSlot, selectedCam]);
+
+  /**
+   * Close the preview camera and turn the hardware light off.
+   *
+   * startRecording() borrows this track rather than reopening the device, and
+   * it only stops tracks it opened itself — so nothing in the engine will ever
+   * close this one. It has to be released here.
+   */
+  const releaseCamera = useCallback(() => {
+    const track = cameraTrackRef.current;
+    cameraTrackRef.current = null;
+    track?.stop();
+    setCameraStream(null);
+  }, []);
+
+  // Last resort. The opening effect declines to stop the track while a take is
+  // running, so that a re-render cannot cut the recording — but on unmount
+  // there is no take left to protect, and no later cleanup to fall back on.
+  useEffect(
+    () => () => {
+      cameraTrackRef.current?.stop();
+      cameraTrackRef.current = null;
+    },
+    [],
+  );
 
   // Keep preview video srcObject in sync when layout toggles
   useEffect(() => {
@@ -493,20 +526,24 @@ export function RecordModal() {
       elapsedRef.current = 0;
       setElapsed(0);
       handlesRef.current = null;
-      // The take released the camera track; hand ownership back so reopening
-      // the recorder acquires a fresh one.
       recordingOwnsCameraRef.current = false;
       setBubbleSuppressed(false);
-      setCameraStream(null);
+      // The take is over, so the preview is finished with the camera too.
+      // Waiting for the opening effect to unmount is not enough: on the error
+      // path the modal stays open, its deps never change, and the cleanup that
+      // would have stopped the device never runs.
+      releaseCamera();
     }
-  }, [setProject, layout, shape, corner, camSize, closePipWindow]);
+  }, [setProject, layout, shape, corner, camSize, closePipWindow, releaseCamera]);
 
   const handleClose = useCallback(() => {
     if (state === "recording" || state === "countingDown") return;
     setIsOpen(false);
     setError(null);
     setCountdown(null);
-  }, [state]);
+    // Dismissing the modal without recording still has to give the device back.
+    releaseCamera();
+  }, [state, releaseCamera]);
 
   if (!isOpen) return null;
 
