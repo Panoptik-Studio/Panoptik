@@ -371,12 +371,86 @@ export function resolveInterpolatedFacecam(
   };
 }
 
+/**
+ * Decoded background images, keyed by object URL.
+ *
+ * renderFrame is synchronous and is the one path shared by the preview and the
+ * encoder, so an image has to be decoded before drawing rather than during it.
+ * Callers preload through ensureBackgroundImages(); a miss here degrades to a
+ * flat fill instead of dropping a frame.
+ */
+const bgImages = new Map<string, CanvasImageSource>();
+const bgImageLoads = new Map<string, Promise<void>>();
+
+/** Decode every image background a project references. Safe to call often. */
+export async function ensureBackgroundImages(project: Project): Promise<void> {
+  const srcs = new Set<string>();
+  for (const seg of project.segments) {
+    if (seg.background.kind === "image" && seg.background.src) srcs.add(seg.background.src);
+  }
+  await Promise.all([...srcs].map(loadBackgroundImage));
+}
+
+function loadBackgroundImage(src: string): Promise<void> {
+  if (bgImages.has(src)) return Promise.resolve();
+  const inFlight = bgImageLoads.get(src);
+  if (inFlight) return inFlight;
+
+  const load = (async () => {
+    try {
+      // createImageBitmap decodes off the main thread and gives the renderer a
+      // ready-to-draw surface; <img> would still decode on first paint.
+      const blob = await (await fetch(src)).blob();
+      bgImages.set(src, await createImageBitmap(blob));
+    } catch {
+      /* unreadable or revoked — drawBackground falls back to a flat fill */
+    } finally {
+      bgImageLoads.delete(src);
+    }
+  })();
+  bgImageLoads.set(src, load);
+  return load;
+}
+
+/** Drop decoded images, closing bitmaps so their memory is released. */
+export function clearBackgroundImages(keep?: Set<string>): void {
+  for (const [src, img] of bgImages) {
+    if (keep?.has(src)) continue;
+    if (typeof ImageBitmap !== "undefined" && img instanceof ImageBitmap) img.close();
+    bgImages.delete(src);
+  }
+}
+
 function drawBackground(
   ctx: CanvasRenderingContext2D,
   bg: Background,
   w: number,
   h: number,
 ): void {
+  if (bg.kind === "image") {
+    const img = bgImages.get(bg.src);
+    if (!img) {
+      // Not decoded yet. A neutral fill reads better than a flash of white.
+      ctx.fillStyle = "#111827";
+      ctx.fillRect(0, 0, w, h);
+      return;
+    }
+    const texW = (img as { width: number }).width || w;
+    const texH = (img as { height: number }).height || h;
+    // Cover crops to fill; contain fits the whole image and letterboxes.
+    const scale =
+      bg.fit === "contain"
+        ? Math.min(w / texW, h / texH)
+        : Math.max(w / texW, h / texH);
+    const dw = texW * scale;
+    const dh = texH * scale;
+    if (bg.fit === "contain") {
+      ctx.fillStyle = "#111827";
+      ctx.fillRect(0, 0, w, h);
+    }
+    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    return;
+  }
   if (bg.kind === "solid") {
     ctx.fillStyle = bg.color;
     ctx.fillRect(0, 0, w, h);

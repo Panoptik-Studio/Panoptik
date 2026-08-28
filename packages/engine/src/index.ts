@@ -47,6 +47,8 @@ export {
   getProjectCameraTransform,
   renderFrame,
   resolveInterpolatedFacecam,
+  ensureBackgroundImages,
+  clearBackgroundImages,
 } from "./render";
 export type { Transform, Viewport, RenderOptions } from "./render";
 

@@ -20,6 +20,7 @@ import { engine } from "@/lib/engineProvider";
 import {
   IDENTITY,
   cameraViewport,
+  ensureBackgroundImages,
   canvasToFrame,
   frameRect,
   frameToCanvas,
@@ -1044,6 +1045,31 @@ export function PreviewCanvas() {
     e.target.value = "";
   }, []);
 
+  // renderFrame draws image backgrounds synchronously from a decoded cache, so
+  // a newly chosen image has to be decoded before the next paint, or the stage
+  // shows the placeholder fill instead. Must sit above the early return below:
+  // as a conditional hook it changed the hook count between renders.
+  const bgImageKey = (project?.segments ?? [])
+    .map((sg) => (sg.background.kind === "image" ? sg.background.src : ""))
+    .filter(Boolean)
+    .join("|");
+  useEffect(() => {
+    if (!bgImageKey) return;
+    const current = useProjectStore.getState().project;
+    if (!current) return;
+    let cancelled = false;
+    ensureBackgroundImages(current).then(() => {
+      // Repaint once decoding finishes; without this the frame that triggered
+      // the load keeps the placeholder fill it drew.
+      if (cancelled || !canvasRef.current) return;
+      const ctx = canvasRef.current.getContext("2d");
+      if (ctx) engine.renderFrame(ctx, current, useProjectStore.getState().currentTime);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bgImageKey]);
+
   if (!project) {
     return (
       <div
@@ -1114,6 +1140,7 @@ export function PreviewCanvas() {
   // crosses into another segment the surroundings follow it.
   const activeSeg = resolveActive(project, currentTime).seg;
 
+
   const stageStyle = (() => {
     const bg = activeSeg.background;
     if (bg.kind === "gradient") {
@@ -1121,6 +1148,17 @@ export function PreviewCanvas() {
       return { background: `linear-gradient(135deg, ${a} 0%, ${b} 100%)` };
     }
     if (bg.kind === "solid") return { background: bg.color };
+    if (bg.kind === "image") {
+      // The surround mirrors what the canvas draws, so the padding around the
+      // video does not fall back to an unrelated gradient.
+      return {
+        backgroundImage: `url("${bg.src}")`,
+        backgroundSize: bg.fit === "contain" ? "contain" : "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundColor: "#111827",
+      };
+    }
     return { background: "linear-gradient(135deg, #007cf0 0%, #7928ca 45%, #ff4d4d 100%)" };
   })();
 

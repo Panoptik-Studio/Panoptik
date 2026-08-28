@@ -91,9 +91,20 @@ function speed(v: unknown, fallback: number): number {
   return Math.round(raw * 20) / 20;
 }
 
-function background(v: unknown, fallback: Background): Background {
+function background(
+  v: unknown,
+  fallback: Background,
+  imageSrc: string | null,
+): Background {
   if (!v || typeof v !== "object") return fallback;
-  const b = v as { kind?: string; color?: unknown; stops?: unknown };
+  const b = v as { kind?: string; color?: unknown; stops?: unknown; fit?: unknown };
+  if (b.kind === "image") {
+    // Same rule as every other media source: the stored src is a dead object
+    // URL at best and attacker-controlled at worst, so the only accepted value
+    // is the one minted from the blob we just read back out of OPFS.
+    if (!imageSrc) return fallback;
+    return { kind: "image", src: imageSrc, fit: b.fit === "contain" ? "contain" : "cover" };
+  }
   if (b.kind === "solid") return { kind: "solid", color: color(b.color, "#000000") };
   if (b.kind === "gradient") {
     const stops = Array.isArray(b.stops) ? b.stops : [];
@@ -124,8 +135,12 @@ function facecam(v: unknown, fallback: Segment["facecam"]): Segment["facecam"] {
  * supplies every source and hard range bounds (its [srcStart, srcEnd] window);
  * only settings and annotations are taken from `saved` when present.
  */
-function mergeSegment(fresh: Segment, saved: Partial<Segment> | null | undefined): Segment {
-  return sanitizeSegment(fresh, saved, fresh.facecam.src);
+function mergeSegment(
+  fresh: Segment,
+  saved: Partial<Segment> | null | undefined,
+  backgroundImageSrc: string | null = null,
+): Segment {
+  return sanitizeSegment(fresh, saved, fresh.facecam.src, backgroundImageSrc);
 }
 
 /**
@@ -141,6 +156,7 @@ function restoreSegment(
   fresh: Segment,
   freshFacecamSrc: string | null,
   mediaDuration: number,
+  backgroundImageSrc: string | null,
 ): Segment | null {
   if (!saved || typeof saved !== "object") return null;
   const srcStart = num(saved.srcStart, fresh.srcStart, 0, mediaDuration);
@@ -156,6 +172,7 @@ function restoreSegment(
     },
     saved,
     freshFacecamSrc,
+    backgroundImageSrc,
   );
 }
 
@@ -168,6 +185,7 @@ function sanitizeSegment(
   base: Segment,
   saved: Partial<Segment> | null | undefined,
   savedFacecamSrc: string | null,
+  savedBackgroundImageSrc: string | null,
 ): Segment {
   const lo = base.srcStart;
   const hi = base.srcEnd;
@@ -176,7 +194,7 @@ function sanitizeSegment(
     speed: speed(saved?.speed, base.speed),
     stagePadding: num(saved?.stagePadding, base.stagePadding, 0, 48),
     aspectPreset: aspectPreset(saved?.aspectPreset, base.aspectPreset),
-    background: background(saved?.background, base.background),
+    background: background(saved?.background, base.background, savedBackgroundImageSrc),
     facecam: facecam(saved?.facecam, { ...base.facecam, src: savedFacecamSrc }),
     zoomPoints: arr<unknown>(saved?.zoomPoints, MAX_ZOOMS)
       .map((z) => zoomPoint(z, lo, hi))
@@ -214,7 +232,12 @@ function sanitizeSegment(
  * bare annotations/settings object with no windows) merge by index onto the
  * fresh segments, exactly as before.
  */
-export function mergeSavedProject(fresh: Project, saved: Partial<Project> | null | undefined): Project {
+export function mergeSavedProject(
+  fresh: Project,
+  saved: Partial<Project> | null | undefined,
+  /** Object URLs for background images re-opened from storage, per segment. */
+  backgroundImageUrls: (string | null)[] = [],
+): Project {
   if (!saved || typeof saved !== "object") return fresh;
   const media = (saved.media ?? {}) as Partial<Media>;
   const mediaDuration = fresh.media.duration;
@@ -234,11 +257,14 @@ export function mergeSavedProject(fresh: Project, saved: Partial<Project> | null
   let segments: Segment[];
   if (freshSeg && savedSegs.length > 0 && hasWindows) {
     const restored = savedSegs
-      .map((s) => restoreSegment(s, freshSeg, freshSeg.facecam.src, mediaDuration))
+      .map((s, i) =>
+        restoreSegment(s, freshSeg, freshSeg.facecam.src, mediaDuration, backgroundImageUrls[i] ?? null),
+      )
       .filter((s): s is Segment => s !== null);
-    segments = restored.length > 0 ? restored : [mergeSegment(freshSeg, savedSegs[0])];
+    segments =
+      restored.length > 0 ? restored : [mergeSegment(freshSeg, savedSegs[0], backgroundImageUrls[0] ?? null)];
   } else {
-    segments = fresh.segments.map((seg, i) => mergeSegment(seg, savedSegs[i]));
+    segments = fresh.segments.map((seg, i) => mergeSegment(seg, savedSegs[i], backgroundImageUrls[i] ?? null));
   }
 
   return {

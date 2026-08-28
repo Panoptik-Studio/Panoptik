@@ -29,7 +29,15 @@ export type Caption = { text: string; start: number; end: number };
 export type Background =
   | { kind: "solid"; color: string }
   | { kind: "gradient"; stops: [string, string] }
-  | { kind: "blur" };
+  | { kind: "blur" }
+  /**
+   * A still image behind the video.
+   *
+   * `src` is always an object URL for a blob held by this session — never a
+   * remote address. A stored project's src is dead on reload, so it is re-minted
+   * from the copy in OPFS rather than trusted from JSON.
+   */
+  | { kind: "image"; src: string; fit: "cover" | "contain" };
 
 export type Facecam = {
   src: string | null;

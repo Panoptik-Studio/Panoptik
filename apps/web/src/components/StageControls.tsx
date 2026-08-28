@@ -5,6 +5,7 @@
  */
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import type { Background } from "@panoptik/schema";
 
@@ -17,11 +18,29 @@ const THEMES: { name: string; bg: { kind: "solid" | "gradient"; color?: string; 
   { name: "Paper", bg: { kind: "solid", color: "#ffffff" }, swatch: "#ffffff" },
 ];
 
+/**
+ * What "remove image" falls back to — the same background a project starts on,
+ * so clearing one lands somewhere recognisable rather than on an arbitrary theme.
+ *
+ * The object URL is deliberately NOT revoked here: history holds whole project
+ * snapshots, so an undo can bring this background back, and a revoked URL would
+ * return as an unpaintable blank. They are released when the panel unmounts.
+ */
+const DEFAULT_BACKGROUND = { kind: "solid", color: "#000000" } as const;
+
+/** Pictures large enough to stall the encoder are refused rather than resized. */
+const MAX_BG_IMAGE_BYTES = 20 * 1024 * 1024;
+
 function isSameBackground(bg1: Background, bg2: Background): boolean {
   if (bg1.kind !== bg2.kind) return false;
   if (bg1.kind === "solid" && bg2.kind === "solid") return bg1.color === bg2.color;
   if (bg1.kind === "gradient" && bg2.kind === "gradient") {
     return bg1.stops[0] === bg2.stops[0] && bg1.stops[1] === bg2.stops[1];
+  }
+  // Two clips share an image background only when it is the same image shown
+  // the same way — otherwise Match prev would claim they already agree.
+  if (bg1.kind === "image" && bg2.kind === "image") {
+    return bg1.src === bg2.src && bg1.fit === bg2.fit;
   }
   return true;
 }
@@ -92,6 +111,56 @@ export function StageControls() {
   const selectAllSegments = useProjectStore((s) => s.selectAllSegments);
   const setStagePadding = useProjectStore((s) => s.setStagePadding);
   const stageBackground = useProjectStore((s) => s.stageBackground);
+  const bgFileRef = useRef<HTMLInputElement | null>(null);
+  const [bgImageError, setBgImageError] = useState<string | null>(null);
+  // Object URLs this panel minted, so replacing an image can release the one it
+  // replaced instead of holding every picture the user ever tried.
+  const ownedBgUrls = useRef<string[]>([]);
+
+  useEffect(
+    () => () => {
+      ownedBgUrls.current.forEach((u) => URL.revokeObjectURL(u));
+      ownedBgUrls.current = [];
+    },
+    [],
+  );
+
+  /**
+   * Turn a picked file into a staged image background.
+   *
+   * The file never leaves the machine: it becomes an object URL that the
+   * renderer decodes, and a copy is written to OPFS on the next autosave so the
+   * background survives a reload.
+   */
+  const applyImageBackground = useCallback(
+    async (file: File) => {
+      setBgImageError(null);
+      if (!file.type.startsWith("image/")) {
+        setBgImageError("That file is not an image.");
+        return;
+      }
+      if (file.size > MAX_BG_IMAGE_BYTES) {
+        setBgImageError(`Image is ${(file.size / 1e6).toFixed(0)} MB — keep it under 20 MB.`);
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      try {
+        // Decode before staging, so a corrupt file fails here with a message
+        // rather than silently rendering as a flat fill behind every frame.
+        const { ensureBackgroundImages } = await import("@panoptik/engine");
+        await ensureBackgroundImages({
+          segments: [{ background: { kind: "image", src: url, fit: "cover" } }],
+        } as unknown as Parameters<typeof ensureBackgroundImages>[0]);
+      } catch {
+        URL.revokeObjectURL(url);
+        setBgImageError("That image could not be read.");
+        return;
+      }
+      ownedBgUrls.current.push(url);
+      stageBackground({ kind: "image", src: url, fit: "cover" });
+    },
+    [stageBackground],
+  );
   const setAspectPreset = useProjectStore((s) => s.setAspectPreset);
   const setFacecam = useProjectStore((s) => s.setFacecam);
   const updateSegment = useProjectStore((s) => s.updateSegment);
@@ -142,6 +211,7 @@ export function StageControls() {
   const allSameSpeed = selectedSegs.every((s) => s.speed === seg.speed);
   const allSameAspect = selectedSegs.every((s) => s.aspectPreset === seg.aspectPreset);
   const allSameBg = selectedSegs.every((s) => isSameBackground(s.background, seg.background));
+  const isImageBg = allSameBg && seg.background.kind === "image";
   return (
     <div className="pk-panel">
       <div className="mb-3 flex items-center justify-between">
@@ -463,7 +533,91 @@ export function StageControls() {
               </button>
             );
           })}
+
+          {/* Bring your own image */}
+          <button
+            onClick={() => bgFileRef.current?.click()}
+            className="group relative overflow-hidden rounded-[12px] border p-2 text-left transition-all hover:border-[#0070f3]"
+            style={{
+              borderColor: isImageBg ? "#0070f3" : "#ebebeb",
+              background: "#ffffff",
+              boxShadow: isImageBg ? "0 0 0 2px #0070f3" : "0 2px 12px rgba(0,0,0,0.04)",
+            }}
+            title="Use an image from your computer"
+          >
+            <div
+              className="flex h-10 items-center justify-center rounded-md border"
+              style={{
+                borderColor: "rgba(0,0,0,0.06)",
+                background: isImageBg
+                  ? `center / cover no-repeat url("${(seg.background as { src: string }).src}")`
+                  : "#f1f1f1",
+                color: "#666",
+              }}
+            >
+              {!isImageBg && (
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="m21 15-5-5L5 21" />
+                </svg>
+              )}
+            </div>
+            <p className="pk-ui mt-1.5 text-center text-[11px] font-medium" style={{ color: isImageBg ? "#0070f3" : "#424242" }}>
+              {isImageBg ? "Change" : "Image"}
+            </p>
+          </button>
         </div>
+
+        <input
+          ref={bgFileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            // Reset so picking the same file twice still fires a change event.
+            e.target.value = "";
+            if (file) applyImageBackground(file);
+          }}
+        />
+
+        {isImageBg && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="pk-label">Fit</span>
+            <button
+              className="pk-seg flex-1"
+              data-active={(seg.background as { fit: string }).fit !== "contain"}
+              onClick={() => stageBackground({ ...(seg.background as { kind: "image"; src: string }), fit: "cover" })}
+              title="Fill the frame, cropping the edges"
+            >
+              Cover
+            </button>
+            <button
+              className="pk-seg flex-1"
+              data-active={(seg.background as { fit: string }).fit === "contain"}
+              onClick={() => stageBackground({ ...(seg.background as { kind: "image"; src: string }), fit: "contain" })}
+              title="Show the whole image, letterboxed"
+            >
+              Contain
+            </button>
+            <button
+              className="pk-icon-btn"
+              onClick={() => stageBackground(DEFAULT_BACKGROUND)}
+              title="Remove image background"
+              aria-label="Remove image background"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {bgImageError && (
+          <p className="pk-help mt-2" style={{ fontSize: 11, color: "#e11d48" }}>{bgImageError}</p>
+        )}
+
         <p className="pk-help mt-2" style={{ fontSize: 11 }}>
           {isGrouped ? `Applies background to all ${selectedSegs.length} selected clips.` : "Applies to stage background behind video. Staged, commit to keep."}
         </p>
