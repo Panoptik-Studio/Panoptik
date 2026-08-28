@@ -45,6 +45,8 @@ function screenLog(msg: string, data?: Record<string, unknown>) {
 let iterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
 let iteratorTime = -1;
 let presented: { start: number; end: number } | null = null;
+let pendingFrame: WrappedCanvas | null = null;
+let pendingFrameEnd = 0;
 
 let surface: HTMLCanvasElement | OffscreenCanvas | null = null;
 let surfaceCtx:
@@ -124,6 +126,8 @@ let fcSink: CanvasSink | null = null;
 let fcIterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
 let fcIteratorTime = -1;
 let fcPresented: { start: number; end: number } | null = null;
+let fcPendingFrame: WrappedCanvas | null = null;
+let fcPendingFrameEnd = 0;
 let fcSurface: HTMLCanvasElement | OffscreenCanvas | null = null;
 let fcSurfaceCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
 let fcAspect = 16 / 9;
@@ -164,6 +168,8 @@ async function closeFacecamIterator(): Promise<void> {
   const it = fcIterator;
   fcIterator = null;
   fcIteratorTime = -1;
+  fcPendingFrame = null;
+  fcPendingFrameEnd = 0;
   if (it) {
     try {
       await it.return();
@@ -266,26 +272,44 @@ async function runFacecamPump(): Promise<void> {
       fcIteratorTime = target;
     }
 
-    const active = fcIterator!;
-    const { value, done } = await active.next();
-    if (active !== fcIterator) continue;
-
-    if (done || !value) {
-      await closeFacecamIterator();
-      // Past the camera's end, hold its last frame rather than re-seeking.
-      if (fcPresented) fcPresented = { start: fcPresented.start, end: Infinity };
-      return;
+    // If we buffered the next frame while handling a hole, use it before pulling a new one.
+    let value: WrappedCanvas | undefined;
+    let done: boolean | undefined;
+    let end: number;
+    if (fcPendingFrame) {
+      value = fcPendingFrame;
+      done = false;
+      end = fcPendingFrameEnd;
+      fcPendingFrame = null;
+      fcPendingFrameEnd = 0;
+    } else {
+      const active = fcIterator!;
+      const res = await active.next();
+      if (active !== fcIterator) continue;
+      if (res.done || !res.value) {
+        await closeFacecamIterator();
+        // Past the camera's end, hold its last frame rather than re-seeking.
+        if (fcPresented) fcPresented = { start: fcPresented.start, end: Infinity };
+        return;
+      }
+      value = res.value;
+      done = res.done;
+      fcIteratorTime = value.timestamp;
+      end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
     }
+    if (value) fcIteratorTime = value.timestamp;
 
-    fcIteratorTime = value.timestamp;
-    const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
     // Only the frame whose interval contains the target, and stop at the first
     // frame past it — the same seek-storm and hole hazards as the screen pump.
     if (value.timestamp <= target && target < end) {
       presentFacecam(value, end);
     } else if (value.timestamp > target) {
       if (!fcPresented) presentFacecam(value, end, Math.min(value.timestamp, target));
-      else fcPresented = { start: fcPresented.start, end: value.timestamp };
+      else {
+        fcPendingFrame = value;
+        fcPendingFrameEnd = end;
+        fcPresented = { start: fcPresented.start, end: value.timestamp };
+      }
       return;
     }
   }
@@ -498,23 +522,38 @@ async function runPump(): Promise<void> {
       }
     }
 
-    const frameStart = performance.now();
-    const active = iterator!;
-    const { value, done } = await active.next();
-    const frameTook = performance.now() - frameStart;
-    if (frameTook > 50 && typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1") {
-      console.log("[Screen] slow frame decode", { took: `${frameTook.toFixed(1)}ms`, target: target.toFixed(3), timestamp: value?.timestamp?.toFixed(3) });
+    // If we buffered the next frame while handling a hole, use it before pulling a new one.
+    let value: WrappedCanvas | undefined;
+    let done: boolean | undefined;
+    let end: number;
+    if (pendingFrame) {
+      value = pendingFrame;
+      done = false;
+      end = pendingFrameEnd;
+      pendingFrame = null;
+      pendingFrameEnd = 0;
+      // iteratorTime already reflects this frame's timestamp from when it was buffered
+    } else {
+      const frameStart = performance.now();
+      const active = iterator!;
+      const res = await active.next();
+      const frameTook = performance.now() - frameStart;
+      if (frameTook > 50 && typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1") {
+        console.log("[Screen] slow frame decode", { took: `${frameTook.toFixed(1)}ms`, target: target.toFixed(3), timestamp: res.value?.timestamp?.toFixed(3) });
+      }
+      if (active !== iterator) continue;
+      if (res.done || !res.value) {
+        await closeIterator();
+        if (presented) presented = { start: presented.start, end: Infinity };
+        return;
+      }
+      value = res.value;
+      done = res.done;
+      iteratorTime = value.timestamp;
+      end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
     }
-    if (active !== iterator) continue;
-
-    if (done || !value) {
-      await closeIterator();
-      if (presented) presented = { start: presented.start, end: Infinity };
-      return;
-    }
-
-    iteratorTime = value.timestamp;
-    const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
+    // Ensure iteratorTime is set for pending path as well (already set when buffered)
+    if (value) iteratorTime = value.timestamp;
     // Only present the frame whose interval [timestamp, end) contains target.
     // The old `!presented || end > target` also presented future frames that
     // start *after* target (e.g. 14.811 when target is 14.800) which made
@@ -547,7 +586,13 @@ async function runPump(): Promise<void> {
         // back over the target, or the next request repeats this scan.
         present(value, end, Math.min(value.timestamp, target));
       } else {
-        // Hold the frame before the hole until the next one actually begins.
+        // Hold the frame before the hole until the next one actually begins,
+        // but don't lose the next frame — buffer it so the following request
+        // can present it instead of skipping it (which caused the 8.9s+ freeze
+        // where the stale frame was held indefinitely and the preview dropped
+        // to 0 effective fps while the decode appeared "cache hit").
+        pendingFrame = value;
+        pendingFrameEnd = end;
         presented = { start: presented.start, end: value.timestamp };
       }
       return;
@@ -583,6 +628,8 @@ async function closeIterator(): Promise<void> {
   const it = iterator;
   iterator = null;
   iteratorTime = -1;
+  pendingFrame = null;
+  pendingFrameEnd = 0;
   if (it) {
     try {
       await it.return();
