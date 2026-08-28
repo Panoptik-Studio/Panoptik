@@ -182,39 +182,70 @@ export default function Home() {
           </div>
         </section>
 
-        {/* How it works — Gift4Day arrow pattern + detailed cards */}
+        {/* How it works — arrow flow, pipeline detail, capability chips */}
         <section id="how" style={{ background: "#F8F8F8", padding: "80px 0" }}>
           <div className="container" style={{ paddingTop: 8, paddingBottom: 8 }}>
+            <style>{`
+              .how-grid { scrollbar-width: none; scroll-snap-type: x proximity; }
+              .how-grid::-webkit-scrollbar { display: none; }
+              .how-arrow { width: 60px; height: 80px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; margin-top: 96px; opacity: 0.9; }
+              .how-card { flex: 1 1 300px; max-width: 360px; min-width: 280px; background: #fff; border: 1px solid #ebebeb; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; box-shadow: 0 2px 12px rgba(0,0,0,0.04); scroll-snap-align: center; transition: box-shadow 0.25s, transform 0.25s, border-color 0.25s; }
+              .how-card:hover { box-shadow: 0 12px 32px rgba(0,0,0,0.09); transform: translateY(-3px); border-color: #d3e5ff; }
+              .how-spec { display: flex; gap: 8px; align-items: flex-start; font-family: var(--font-nunito); font-size: 12.5px; line-height: 155%; color: #666; }
+              .how-spec svg { flex-shrink: 0; margin-top: 3px; }
+              .how-deep { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; max-width: 1100px; margin: 40px auto 0; }
+              .how-deep-card { background: #fff; border: 1px solid #ebebeb; border-radius: 16px; padding: 20px; transition: border-color 0.25s, box-shadow 0.25s; }
+              .how-deep-card:hover { border-color: #d3e5ff; box-shadow: 0 8px 24px rgba(0,0,0,0.06); }
+              .how-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 1000px; margin: 32px auto 0; }
+              @media (max-width: 1100px) { .how-grid { flex-wrap: wrap; gap: 20px; justify-content: center; padding: 12px 24px; max-width: 100%; } .how-arrow { display: none !important; } .how-deep { grid-template-columns: repeat(2, 1fr); } }
+              @media (max-width: 768px) { .how-grid { flex-direction: column; align-items: center; gap: 20px; padding: 12px 16px; } .how-arrow { display: none !important; } .how-deep { grid-template-columns: 1fr; } }
+            `}</style>
+
             <div style={{ textAlign: "center", maxWidth: 760, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14, marginBottom: 40, padding: "0 12px" }}>
               <span style={{ fontFamily: "var(--font-poppins)", fontSize: 12, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "#0070f3" }}>— How it works —</span>
               <h2 style={{ fontFamily: "var(--font-lato)", fontWeight: 800, fontSize: "clamp(26px, 4.6vw, 60px)", lineHeight: "120%", color: "#1A1A1A" }}>How It <em style={{ fontFamily: "var(--font-alkatra)", fontWeight: 700, fontStyle: "normal" }}>Works</em>?</h2>
-              <p style={{ fontFamily: "var(--font-poppins)", fontWeight: 300, fontSize: 16, color: "#424242", lineHeight: "160%", maxWidth: 560, margin: "0 auto" }}>
-                Record or import, let your agent propose, review the staged diff on your timeline, commit, and export — preview equals export, every pixel.
+              <p style={{ fontFamily: "var(--font-poppins)", fontWeight: 300, fontSize: 16, color: "#424242", lineHeight: "160%", maxWidth: 580, margin: "0 auto" }}>
+                Record or import, edit it yourself or hand the first pass to an agent, review every change before it lands, and export. The preview you approve is the file you get.
               </p>
             </div>
 
-            {/* Arrows + cards — no side cut */}
             <div style={{ display: "flex", justifyContent: "flex-start", alignItems: "flex-start", gap: 20, overflowX: "auto", padding: "16px 32px 24px", maxWidth: "fit-content", margin: "0 auto" }} className="how-grid">
-              <style>{`
-                .how-grid { scrollbar-width: none; scroll-snap-type: x proximity; }
-                .how-grid::-webkit-scrollbar { display: none; }
-                .how-arrow { width: 60px; height: 80px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; margin-top: 56px; opacity: 0.9; }
-                @media (max-width: 1100px) { .how-grid { flex-wrap: wrap; gap: 20px; justify-content: center; padding: 12px 24px; max-width: 100%; } .how-arrow { display: none !important; } }
-                @media (max-width: 768px) { .how-grid { flex-direction: column; align-items: center; gap: 20px; padding: 12px 16px; } .how-arrow { display: none !important; } }
-              `}</style>
               {[
-                { n: "01", t: "Record or import", d: "Capture screen + webcam + mic — pick layout (screen / screen+camera / camera) and shape (circle/square), use 3-2-1 countdown and teleprompter, or simply drop MP4/WebM/MOV. All local, no upload.", c: "#1F1F1F", tags: ["Screen", "Webcam", "Mic", "Teleprompter"] },
-                { n: "02", t: "Co-edit with agent", d: "In ChatGPT the agent sees your canvas and calls WebMCP tools: propose_zoom_points, generate_captions (Whisper), set_background, add_text_overlay. Every proposal lands as a dashed amber ghost on your timeline — staged, never auto-committed. Review, drag to retime, hover × to discard, check ToolTrace.", c: "#0070f3", tags: ["WebMCP", "Staged", "Timeline", "Ghosts"] },
-                { n: "03", t: "Commit & export", d: "Open the staged diff, approve → ghosts become solid, history pushes, undo/redo across all kinds. The same renderFrame draws preview and 1080p MP4/WebM: background → clamped zoom → facecam PiP (circle/square) → text → captions. Download locally.", c: "#10b981", tags: ["Diff", "History", "MP4", "WebM"] },
+                {
+                  n: "01", t: "Record or import", c: "#1F1F1F",
+                  d: "Capture screen, webcam and microphone in a single take — or drop in an MP4, WebM or MOV you already have.",
+                  specs: ["Screen, window or tab capture", "Circle or square camera, any corner", "3-2-1 countdown and built-in teleprompter", "Screen and camera kept as separate tracks"],
+                  tags: ["Screen", "Webcam", "Mic", "Teleprompter"],
+                },
+                {
+                  n: "02", t: "Edit, or delegate it", c: "#0070f3",
+                  d: "Do it by hand, or let an agent take the first pass. Through WebMCP it reads the real project and calls typed tools — no screenshot guesswork.",
+                  specs: ["propose_zoom_points, generate_captions", "set_background, add_text_overlay", "Proposals arrive as dashed ghosts on the timeline", "Nothing is committed without your approval"],
+                  tags: ["WebMCP", "Staged", "Ghosts", "ToolTrace"],
+                },
+                {
+                  n: "03", t: "Review and export", c: "#10b981",
+                  d: "Open the staged diff, keep what you want, and the ghosts turn solid. One renderer draws both the preview and the finished file.",
+                  specs: ["Undo and redo across every kind of edit", "Preview and export share one render path", "1080p MP4 (H.264) or WebM (VP9)", "Saved on device, reopens where you left it"],
+                  tags: ["Diff", "History", "MP4", "WebM"],
+                },
               ].map((c, idx) => (
                 <div key={c.n} style={{ display: "contents" }}>
-                  <div style={{ flex: "1 1 300px", maxWidth: 360, minWidth: 280, background: "#fff", border: "1px solid #ebebeb", borderRadius: 16, padding: 24, display: "flex", flexDirection: "column", gap: 12, flexShrink: 0, minHeight: 240, boxShadow: "0 2px 12px rgba(0,0,0,0.04)", scrollSnapAlign: "center" }}>
+                  <div className="how-card">
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <span style={{ width: 36, height: 36, borderRadius: 100, background: c.c, color: "#fff", display: "grid", placeItems: "center", fontFamily: "var(--font-poppins)", fontWeight: 700, fontSize: 13 }}>{c.n}</span>
-                      <span style={{ fontFamily: "var(--font-poppins)", fontWeight: 600, fontSize: 16, color: "#1A1A1A" }}>{c.t}</span>
+                      <span style={{ fontFamily: "var(--font-poppins)", fontWeight: 600, fontSize: 16.5, color: "#1A1A1A" }}>{c.t}</span>
                     </div>
-                    <p style={{ fontFamily: "var(--font-nunito)", fontSize: 13.5, lineHeight: "160%", color: "#555", margin: 0 }}>{c.d}</p>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: "auto", paddingTop: 4 }}>
+                    <p style={{ fontFamily: "var(--font-nunito)", fontSize: 13.5, lineHeight: "162%", color: "#555", margin: 0 }}>{c.d}</p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7, paddingTop: 2 }}>
+                      {c.specs.map((sp) => (
+                        <span key={sp} className="how-spec">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={c.c} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                          {sp}
+                        </span>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: "auto", paddingTop: 10 }}>
                       {c.tags.map((tag) => (
                         <span key={tag} style={{ background: c.n === "02" ? "#d3e5ff" : "#f1f1f1", border: `1px solid ${c.n === "02" ? "#0070f3" : "#ebebeb"}`, borderRadius: 100, padding: "4px 10px", fontFamily: "var(--font-poppins)", fontSize: 10, color: c.n === "02" ? "#0070f3" : "#666" }}>{tag}</span>
                       ))}
@@ -232,7 +263,32 @@ export default function Home() {
               ))}
             </div>
 
-            <div style={{ marginTop: 24, background: "#fff", border: "1px solid #ebebeb", borderRadius: 16, padding: 16, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", maxWidth: 1100, marginLeft: "auto", marginRight: "auto" }}>
+            {/* Under the hood — the parts that are genuinely unusual */}
+            <div style={{ textAlign: "center", marginTop: 48 }}>
+              <span style={{ fontFamily: "var(--font-poppins)", fontSize: 11, fontWeight: 500, letterSpacing: "0.14em", textTransform: "uppercase", color: "#888" }}>Under the hood</span>
+            </div>
+            <div className="how-deep">
+              {[
+                { k: "Capture", v: "MediaRecorder, with a hardware VP9 path through WebCodecs when the machine offers one. Encoding starts after the countdown, so takes do not open on dead footage." },
+                { k: "Decode", v: "mediabunny drives WebCodecs through a coalesced frame pump — one forward sweep rather than a seek per frame, which is what keeps scrubbing smooth on long recordings." },
+                { k: "Compose", v: "Background, zoom, camera bubble, text and captions are drawn in a single pass. Preview and export call the same function, so the two cannot drift apart." },
+                { k: "Persist", v: "Projects live in the browser's own file system. Media is written once, edits autosave as JSON, and your last project reopens when you come back." },
+              ].map((d) => (
+                <div key={d.k} className="how-deep-card">
+                  <p style={{ fontFamily: "var(--font-poppins)", fontWeight: 600, fontSize: 13, color: "#1A1A1A", margin: "0 0 8px" }}>{d.k}</p>
+                  <p style={{ fontFamily: "var(--font-nunito)", fontSize: 12.5, lineHeight: "160%", color: "#666", margin: 0 }}>{d.v}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* What is actually in the editor */}
+            <div className="how-chips">
+              {["Zoom keyframes with easing", "Focal point drag", "Camera bubble, circle or square", "Speed 0.25×–3× without pitch shift", "Local Whisper captions", "Text overlays", "Solid, gradient or blurred backgrounds", "16:9 · 9:16 · 1:1 · 4:3 · source", "Undo and redo", "Export lock while rendering"].map((f) => (
+                <span key={f} style={{ background: "#fff", border: "1px solid #ebebeb", borderRadius: 100, padding: "7px 14px", fontFamily: "var(--font-poppins)", fontSize: 11.5, color: "#555" }}>{f}</span>
+              ))}
+            </div>
+
+            <div style={{ marginTop: 32, background: "#fff", border: "1px solid #ebebeb", borderRadius: 16, padding: 16, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", maxWidth: 1100, marginLeft: "auto", marginRight: "auto" }}>
               <span style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--font-poppins)", fontSize: 12, color: "#1A1A1A" }}>
                 <span style={{ width: 28, height: 28, borderRadius: 8, background: "#1F1F1F", color: "#fff", display: "grid", placeItems: "center", fontSize: 12 }}>▶</span>
                 <span><strong>Tip:</strong> <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "2px 6px", fontFamily: "monospace", fontSize: 11 }}>Space</code> play/pause · <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "2px 6px", fontFamily: "monospace", fontSize: 11 }}>M</code> mark</span>
@@ -253,31 +309,44 @@ export default function Home() {
               .faq-list { display: flex; flex-direction: column; gap: 16px; max-width: 1180px; margin: 0 auto; }
               .faq-item { background: #fff; border-radius: 20px; overflow: hidden; transition: box-shadow 0.2s; }
               .faq-item:hover { box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
-              .faq-row { display: flex; justify-content: space-between; align-items: center; padding: 32px 40px; cursor: pointer; list-style: none; user-select: none; gap: 16px; }
+              .faq-row { display: flex; justify-content: space-between; align-items: center; padding: 24px 32px; cursor: pointer; list-style: none; user-select: none; gap: 16px; }
               .faq-row::-webkit-details-marker { display: none; }
-              .faq-question { font-family: var(--font-poppins); font-weight: 600; font-size: 28px; line-height: 1.2; color: #1A1A1A; }
+              .faq-question { font-family: var(--font-poppins); font-weight: 600; font-size: 22px; line-height: 1.3; color: #1A1A1A; }
+              .faq-cat { flex-shrink: 0; font-family: var(--font-poppins); font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #0070f3; background: #d3e5ff; border-radius: 100px; padding: 5px 11px; }
+              .faq-item[open] .faq-question { color: #0070f3; }
               .faq-chevron { width: 24px; height: 24px; flex-shrink: 0; color: #888; display: flex; align-items: center; justify-content: center; transition: transform 0.3s, color 0.3s; }
               .faq-chevron svg { width: 20px; height: 20px; }
               .faq-item[open] .faq-chevron { transform: rotate(180deg); color: #1A1A1A; }
-              .faq-answer { padding: 0 40px 28px; font-family: var(--font-poppins); font-size: 18px; line-height: 150%; color: #424242; animation: faq-fade-in 0.4s cubic-bezier(0.4,0,0.2,1); }
+              .faq-answer { padding: 0 32px 26px; max-width: 78ch; font-family: var(--font-nunito); font-size: 15.5px; line-height: 172%; color: #555; animation: faq-fade-in 0.4s cubic-bezier(0.4,0,0.2,1); }
               @keyframes faq-fade-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
               @media (max-width: 900px) { .faq-inner { padding: 0 24px; } .faq-title { font-size: 44px; } .faq-row { padding: 24px; } }
-              @media (max-width: 768px) { .faq-inner { padding: 0 16px; } .faq-title { font-size: 33px; } .faq-question { font-size: 20px; } .faq-answer { padding: 0 16px 16px; } }
+              @media (max-width: 900px) { .faq-cat { display: none; } }
+              @media (max-width: 768px) { .faq-inner { padding: 0 16px; } .faq-title { font-size: 33px; } .faq-question { font-size: 17px; } .faq-answer { padding: 0 20px 18px; font-size: 14.5px; } }
             `}</style>
             <div className="faq-header">
               <h2 className="faq-title"><em>FAQs</em>?</h2>
-              <p className="faq-subtitle">Everything you need to know before you hit record.</p>
+              <p className="faq-subtitle">Everything worth knowing before you hit record.</p>
             </div>
             <div className="faq-list">
               {[
-                { q: "What is Panoptik?", a: "A browser-native demo studio. Record screen + camera, co-edit on the same canvas with your AI agent via WebMCP, and export MP4/WebM — preview equals export." },
-                { q: "What is WebMCP?", a: "Model Context Protocol for the web. Instead of screenshots, the agent sees your canvas and calls structured tools — propose_zoom_points, generate_captions, set_background — staged as ghosts you approve." },
-                { q: "Is anything uploaded?", a: "No. Captions run locally via Whisper in a worker (Xenova), video decodes via WebCodecs, all in your browser. No API keys, no server." },
-                { q: "How do zoom points work?", a: "Click the preview while paused to add a zoom at the playhead (or let the agent propose). Drag the focal to reposition, drag diamonds on the timeline to retime. Hold is automatic until the next point." },
+                { c: "Basics", q: "What is Panoptik?", a: "A demo studio that runs entirely in your browser. Record your screen and camera, edit on a real timeline — zoom keyframes, captions, backgrounds, text — and export a finished MP4 or WebM. Nothing installs, nothing uploads." },
+                { c: "Basics", q: "Do I need an AI agent to use it?", a: "No. Every tool is there in the editor and works on its own; the agent is an optional first pass, not the way in. If you never connect one, nothing about the app changes." },
+                { c: "Agent", q: "What is WebMCP?", a: "Model Context Protocol, for the web. Rather than reading screenshots and guessing, a connected agent sees the actual project and calls typed tools — propose_zoom_points, generate_captions, set_background, add_text_overlay — with real arguments." },
+                { c: "Agent", q: "Can the agent change my video without asking?", a: "No. Anything it proposes lands as a dashed ghost on the timeline and stays there until you approve it. You can retime a proposal by dragging it, discard it, or open ToolTrace to see exactly which call produced it." },
+                { c: "Privacy", q: "Is anything uploaded?", a: "No, and there is nowhere for it to go — there is no server and no API key. Video decodes through WebCodecs, captions run on a local Whisper model in a worker, and your recordings are written to the browser's own storage on your machine." },
+                { c: "Privacy", q: "What happens to my camera and mic when I stop?", a: "They are released as soon as the take ends, and the hardware indicator goes out. The camera is only opened while the record panel is showing you a preview or a recording is running." },
+                { c: "Editing", q: "How do zoom points work?", a: "Pause and click the preview to drop a zoom at the playhead, or let the agent propose a set. Drag the focal point to reframe, drag the diamonds on the timeline to retime, and the shot holds at that zoom until the next point takes over." },
+                { c: "Editing", q: "Can I change the speed without chipmunk audio?", a: "Yes. Speed runs from 0.25× to 3×, and the audio is time-stretched rather than resampled, so voices keep their pitch. Preview and export are remapped through the same clock, so they stay in agreement." },
+                { c: "Export", q: "What do I get at the end?", a: "A 1080p MP4 (H.264) or WebM (VP9), in 16:9, 9:16, 1:1, 4:3 or your source aspect. The preview and the exported file are drawn by the same renderer, so what you signed off is what lands in the file." },
+                { c: "Export", q: "Will my work survive a reload?", a: "Yes. Media is written to the browser's file system once and edits autosave as JSON, so closing the tab is safe and your last project reopens on its own. You can also delete a project and its media outright." },
+                { c: "Support", q: "Which browsers work?", a: "Chrome and Edge are the target today, because the capture and encode paths lean on WebCodecs and the floating camera window uses Document Picture-in-Picture. Other browsers are not supported yet." },
               ].map((f, i) => (
                 <details key={i} className="faq-item">
                   <summary className="faq-row">
-                    <span className="faq-question">{f.q}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+                      <span className="faq-cat">{f.c}</span>
+                      <span className="faq-question">{f.q}</span>
+                    </span>
                     <span className="faq-chevron">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="20" height="20"><polyline points="6 9 12 15 18 9" /></svg>
                     </span>

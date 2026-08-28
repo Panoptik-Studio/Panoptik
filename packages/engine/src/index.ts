@@ -8,6 +8,7 @@
 
 import type { ExportOpts, Project } from "@panoptik/schema";
 import type { ExportFrameOpts } from "./encode";
+import type { RenderOptions } from "./render";
 
 export interface MediaEngine {
   /** Seek + decode the frame at `t` into an internal cache. Call before renderFrame. */
