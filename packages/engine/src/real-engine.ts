@@ -3,8 +3,9 @@
  * Wires decode.ts → render.ts → audio.ts into the MediaEngine interface.
  * Preview and export share renderFrame + prepareFrame.
  */
-import type { ExportOpts, Project } from "@panoptik/schema";
+import type { Project } from "@panoptik/schema";
 import type { MediaEngine } from "./index";
+import type { ExportFrameOpts } from "./encode";
 import {
   loadClip as decodeLoadClip,
   prepareFrame as decodePrepareFrame,
@@ -66,7 +67,7 @@ export function createRealEngine(): MediaEngine {
     async getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
       return audioGetBuffer(project);
     },
-    async exportProject(project: Project, opts: ExportOpts): Promise<Blob> {
+    async exportProject(project: Project, opts: ExportFrameOpts): Promise<Blob> {
       return encodeProject(project, opts);
     },
   };

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { concatDurations, makeMock, sliceAndStretchAudio } from "./timeStretch";
-import type { Segment } from "@panoptik/schema";
+import type { Project, Segment } from "@panoptik/schema";
 
 // mediabunny pulls in WebCodecs at import time; the sizing math under test is pure.
 vi.mock("mediabunny", () => ({
@@ -18,12 +18,14 @@ vi.mock("mediabunny", () => ({
 const { __test } = await import("./encode");
 
 /** A v1.2 project whose single segment keeps the media's own aspect. */
-const proj = (width: number, height: number) =>
+const proj = (width: number, height: number): Project =>
   ({
+    id: "p1",
     media: { src: "", duration: 10, width, height },
+    audioSrc: null,
     segments: [seg({ srcEnd: 10 })],
     clickLog: [],
-  }) as never;
+  }) as Project;
 
 function seg(overrides: Partial<Segment> = {}): Segment {
   return {
@@ -68,6 +70,21 @@ describe("export sizing", () => {
 
   it("upscales a small source rather than refusing it", () => {
     expect(__test.exportSize(proj(640, 360), "1080p")).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it("sizes the frame to the selected segment's aspect, not the first segment's", () => {
+    const p = proj(1920, 1080);
+    p.segments = [
+      seg({ id: "wide", aspectPreset: "16:9" }),
+      seg({ id: "tall", srcStart: 10, srcEnd: 20, aspectPreset: "9:16" }),
+    ];
+    // Preview sizes the canvas to the SELECTED segment — export must agree.
+    expect(__test.exportSize(p, "1080p", "wide")).toEqual({ width: 1920, height: 1080 });
+    expect(__test.exportSize(p, "1080p", "tall")).toEqual({ width: 608, height: 1080 });
+    // With no selection, the first segment decides (preview's fallback too).
+    expect(__test.exportSize(p, "1080p")).toEqual({ width: 1920, height: 1080 });
+    // Unknown id also falls back to the first segment.
+    expect(__test.exportSize(p, "1080p", "missing")).toEqual({ width: 1920, height: 1080 });
   });
 });
 

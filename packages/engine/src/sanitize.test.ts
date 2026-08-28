@@ -166,4 +166,112 @@ describe("mergeSavedProject", () => {
   it("returns the fresh project untouched when there is nothing saved", () => {
     expect(mergeSavedProject(fresh(), null)).toEqual(fresh());
   });
+
+  it("preserves a saved split topology: every segment's boundaries and settings", () => {
+    const out = mergeSavedProject(fresh(), {
+      id: "stored-project",
+      media: { width: 1, height: 1, duration: 99 },
+      segments: [
+        {
+          id: "seg-a",
+          srcStart: 0,
+          srcEnd: 4,
+          speed: 2,
+          stagePadding: 12,
+          aspectPreset: "16:9",
+          background: { kind: "solid", color: "#112233" },
+          facecam: { src: "blob:stale-cam", x: 0.1, y: 0.2, size: 0.3 },
+          zoomPoints: [{ id: "za", t: 2, to: { scale: 2, x: 0.5, y: 0.5 }, dur: 0.5, ease: "linear" }],
+          stagedZoomPoints: [],
+          textOverlays: [],
+          stagedTextOverlays: [],
+          captions: [],
+          stagedCaptions: [],
+        },
+        {
+          id: "seg-b",
+          srcStart: 4,
+          srcEnd: 10,
+          speed: 1,
+          stagePadding: 0,
+          aspectPreset: "9:16",
+          background: { kind: "gradient", stops: ["#aa0000", "#0000aa"] },
+          facecam: { src: "blob:stale-cam", x: 0.8, y: 0.8, size: 0.2 },
+          zoomPoints: [{ id: "zb", t: 6, to: { scale: 1.5, x: 0.4, y: 0.4 }, dur: 0.5, ease: "linear" }],
+          stagedZoomPoints: [],
+          textOverlays: [],
+          stagedTextOverlays: [],
+          captions: [],
+          stagedCaptions: [],
+        },
+      ],
+    } as unknown as Partial<Project>);
+
+    expect(out.id).toBe("stored-project");
+    expect(out.segments).toHaveLength(2);
+    // Saved split boundaries survive the restore.
+    expect(out.segments.map((s) => [s.id, s.srcStart, s.srcEnd])).toEqual([
+      ["seg-a", 0, 4],
+      ["seg-b", 4, 10],
+    ]);
+    // Per-segment settings are kept.
+    expect(out.segments[0]).toMatchObject({
+      speed: 2,
+      stagePadding: 12,
+      aspectPreset: "16:9",
+      background: { kind: "solid", color: "#112233" },
+    });
+    expect(out.segments[1]).toMatchObject({
+      speed: 1,
+      aspectPreset: "9:16",
+    });
+    // Annotations stay in their own segment, clamped to its source window.
+    expect(out.segments[0]!.zoomPoints.map((z) => z.t)).toEqual([2]);
+    expect(out.segments[1]!.zoomPoints.map((z) => z.t)).toEqual([6]);
+    // Sources come from the freshly re-opened media, never from storage.
+    expect(out.media.src).toBe("blob:fresh-clip");
+    for (const s of out.segments) expect(s.facecam.src).toBe("blob:fresh-cam");
+    expect(out.segments[0]!.facecam.x).toBeCloseTo(0.1);
+  });
+
+  it("clamps saved split boundaries into the fresh media window", () => {
+    const out = mergeSavedProject(fresh(), {
+      segments: [
+        { id: "under", srcStart: -5, srcEnd: 2, speed: 1 },
+        { id: "over", srcStart: 9, srcEnd: 500, speed: 1 },
+        { id: "jan", srcStart: 3, srcEnd: 7, speed: 1 },
+      ],
+    } as unknown as Partial<Project>);
+
+    expect(out.segments.map((s) => [s.id, s.srcStart, s.srcEnd])).toEqual([
+      ["under", 0, 2],
+      ["over", 9, 10],
+      ["jan", 3, 7],
+    ]);
+  });
+
+  it("drops saved segments whose window is degenerate or fully out of range", () => {
+    const out = mergeSavedProject(fresh(), {
+      segments: [
+        { id: "reversed", srcStart: 8, srcEnd: 4, speed: 1 },
+        { id: "zero", srcStart: 5, srcEnd: 5, speed: 1 },
+        { id: "way-out", srcStart: 50, srcEnd: 60, speed: 1 },
+        { id: "good", srcStart: 1, srcEnd: 9, speed: 1 },
+      ],
+    } as unknown as Partial<Project>);
+
+    expect(out.segments.map((s) => s.id)).toEqual(["good"]);
+  });
+
+  it("falls back to a single fresh segment when the saved project has no segments", () => {
+    const out = mergeSavedProject(fresh(), {
+      id: "stored-project",
+      segments: [],
+      clickLog: [{ t: 1, x: 0.5, y: 0.5, type: "click" }],
+    } as unknown as Partial<Project>);
+
+    expect(out.segments).toHaveLength(1);
+    expect(out.segments[0]!.id).toBe("s1");
+    expect(out.clickLog).toHaveLength(1);
+  });
 });

@@ -25,6 +25,16 @@ import {
 const END_EPSILON = 0.05;
 
 /**
+ * Speed clamp shared with the engine's sanitize.speed(): bounded to [0.25, 3]
+ * and quantized to the 0.05 step the UI/engine grid uses, so any programmatic
+ * write lands on a value the renderer actually supports.
+ */
+function clampSpeed(v: number): number {
+  const raw = Math.min(3, Math.max(0.25, v));
+  return Math.round(raw * 20) / 20;
+}
+
+/**
  * Playback parks the playhead at the end of the clip. Pressing play there would
  * otherwise finish instantly, so start over instead.
  */
@@ -259,24 +269,27 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const b = structuredClone(orig);
     b.id = crypto.randomUUID();
     b.srcStart = t;
+    // Annotations are stored at ABSOLUTE source time (the `srcT` writers used),
+    // so B keeps its filtered set as-is — rebasing to `- t` would put every
+    // value below its own srcStart and silently drop the annotations.
     b.zoomPoints = orig.zoomPoints
       .filter((z) => z.t >= t)
-      .map((z) => ({ ...z, t: z.t - t }));
+      .map((z) => ({ ...z }));
     b.stagedZoomPoints = orig.stagedZoomPoints
       .filter((z) => z.t >= t)
-      .map((z) => ({ ...z, t: z.t - t }));
+      .map((z) => ({ ...z }));
     b.textOverlays = orig.textOverlays
       .filter((o) => o.timestamp >= t)
-      .map((o) => ({ ...o, timestamp: o.timestamp - t }));
+      .map((o) => ({ ...o }));
     b.stagedTextOverlays = orig.stagedTextOverlays
       .filter((o) => o.timestamp >= t)
-      .map((o) => ({ ...o, timestamp: o.timestamp - t }));
+      .map((o) => ({ ...o }));
     b.captions = orig.captions
       .filter((c) => c.start >= t)
-      .map((c) => ({ ...c, start: c.start - t, end: c.end - t }));
+      .map((c) => ({ ...c }));
     b.stagedCaptions = orig.stagedCaptions
       .filter((c) => c.start >= t)
-      .map((c) => ({ ...c, start: c.start - t, end: c.end - t }));
+      .map((c) => ({ ...c }));
 
     const idx = s.project.segments.indexOf(orig);
     const segments = [...s.project.segments];
@@ -288,10 +301,16 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   updateSegment: (id, updates) => {
     const s = get();
     if (!s.project) return;
+    // Bounded writes for programmatic/agent callers: speed is the one scalar
+    // that feeds the renderer's time mapping, so keep it on the engine's grid.
+    const applied =
+      updates.speed === undefined
+        ? updates
+        : { ...updates, speed: clampSpeed(updates.speed) };
     const project = {
       ...s.project,
       segments: s.project.segments.map((seg) =>
-        seg.id === id ? { ...seg, ...updates } : seg,
+        seg.id === id ? { ...seg, ...applied } : seg,
       ),
     };
     pushHistoryAndSet(project, s, set);

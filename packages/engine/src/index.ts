@@ -7,6 +7,7 @@
  */
 
 import type { ExportOpts, Project } from "@panoptik/schema";
+import type { ExportFrameOpts } from "./encode";
 
 export interface MediaEngine {
   /** Seek + decode the frame at `t` into an internal cache. Call before renderFrame. */
@@ -21,10 +22,13 @@ export interface MediaEngine {
   restoreProject(id: string): Promise<Project | null>;
   /** Full-clip mono AudioBuffer for transcription/export. null when no decodable audio. */
   getAudioBuffer(project: Project): Promise<AudioBuffer | null>;
-  exportProject(project: Project, opts: ExportOpts): Promise<Blob>;
+  /** Encode the project. `opts.selectedSegmentId` picks which segment's aspect
+   *  preset sets the output frame — the preview sizes to the same selection, so
+   *  export matches what the user is looking at. */
+  exportProject(project: Project, opts: ExportFrameOpts): Promise<Blob>;
 }
 
-export type { Project, ExportOpts };
+export type { Project, ExportOpts, ExportFrameOpts };
 export { createRealEngine } from "./real-engine";
 
 // Camera geometry — shared so the editor's focal handles land exactly where

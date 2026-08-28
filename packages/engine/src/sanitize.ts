@@ -125,15 +125,59 @@ function facecam(v: unknown, fallback: Segment["facecam"]): Segment["facecam"] {
  * only settings and annotations are taken from `saved` when present.
  */
 function mergeSegment(fresh: Segment, saved: Partial<Segment> | null | undefined): Segment {
-  const lo = fresh.srcStart;
-  const hi = fresh.srcEnd;
+  return sanitizeSegment(fresh, saved, fresh.facecam.src);
+}
+
+/**
+ * Rebuild one saved segment for the restore path. The saved split topology is
+ * the source of truth: each segment keeps its own identity and bounds (clamped
+ * into the freshly re-opened media) plus its settings/annotations. Media sources
+ * are NEVER taken from storage — the facecam source is the freshly re-opened
+ * one, and the window otherwise only exists inside the fresh media's duration.
+ * Returns null when the saved window is degenerate or entirely out of range.
+ */
+function restoreSegment(
+  saved: Partial<Segment> | null | undefined,
+  fresh: Segment,
+  freshFacecamSrc: string | null,
+  mediaDuration: number,
+): Segment | null {
+  if (!saved || typeof saved !== "object") return null;
+  const srcStart = num(saved.srcStart, fresh.srcStart, 0, mediaDuration);
+  const srcEnd = num(saved.srcEnd, fresh.srcEnd, srcStart, mediaDuration);
+  if (!(srcEnd > srcStart)) return null; // reversed / zero-width / out of range
+  return sanitizeSegment(
+    {
+      ...fresh,
+      id: typeof saved.id === "string" ? saved.id.slice(0, 100) : fresh.id,
+      srcStart,
+      srcEnd,
+      facecam: { ...fresh.facecam, src: freshFacecamSrc },
+    },
+    saved,
+    freshFacecamSrc,
+  );
+}
+
+/**
+ * Core sanitizer shared by {@link mergeSegment} and {@link restoreSegment}.
+ * `base` supplies the identity, the [srcStart, srcEnd] bounds annotations are
+ * clamped into, and every fallback for fields `saved` does not carry.
+ */
+function sanitizeSegment(
+  base: Segment,
+  saved: Partial<Segment> | null | undefined,
+  savedFacecamSrc: string | null,
+): Segment {
+  const lo = base.srcStart;
+  const hi = base.srcEnd;
   return {
-    ...fresh,
-    speed: speed(saved?.speed, fresh.speed),
-    stagePadding: num(saved?.stagePadding, fresh.stagePadding, 0, 48),
-    aspectPreset: aspectPreset(saved?.aspectPreset, fresh.aspectPreset),
-    background: background(saved?.background, fresh.background),
-    facecam: facecam(saved?.facecam, fresh.facecam),
+    ...base,
+    speed: speed(saved?.speed, base.speed),
+    stagePadding: num(saved?.stagePadding, base.stagePadding, 0, 48),
+    aspectPreset: aspectPreset(saved?.aspectPreset, base.aspectPreset),
+    background: background(saved?.background, base.background),
+    facecam: facecam(saved?.facecam, { ...base.facecam, src: savedFacecamSrc }),
     zoomPoints: arr<unknown>(saved?.zoomPoints, MAX_ZOOMS)
       .map((z) => zoomPoint(z, lo, hi))
       .filter((z): z is ZoomPoint => z !== null),
@@ -157,14 +201,45 @@ function mergeSegment(fresh: Segment, saved: Partial<Segment> | null | undefined
 
 /**
  * Merge a project read from storage onto one whose media has just been re-opened.
- * `fresh` supplies every source (media, id); only edits are taken from `saved`,
- * matched per-segment by index. Old v1.1 records are upgraded by migrateProject at
- * the load boundary, so `saved` is always the v1.2 shape here.
+ * `fresh` supplies every source (media, facecam); only edits are taken from
+ * `saved`. Old v1.1 records are upgraded by migrateProject at the load boundary,
+ * so `saved` is always the v1.2 shape here.
+ *
+ * Split topology: when the saved record carries explicit per-segment source
+ * windows (i.e. the record was saved after a split), each saved segment is the
+ * source of truth — its identity, boundaries (clamped into the freshly re-opened
+ * media) and settings survive the round-trip. Segments whose window is degenerate
+ * or out of range are dropped, and if none survive we fall back to the fresh
+ * single segment rather than hand back zero segments. Patch-style records (a
+ * bare annotations/settings object with no windows) merge by index onto the
+ * fresh segments, exactly as before.
  */
 export function mergeSavedProject(fresh: Project, saved: Partial<Project> | null | undefined): Project {
   if (!saved || typeof saved !== "object") return fresh;
   const media = (saved.media ?? {}) as Partial<Media>;
   const mediaDuration = fresh.media.duration;
+  const savedSegs = Array.isArray(saved.segments) ? saved.segments : [];
+  const freshSeg = fresh.segments[0];
+
+  const hasWindows = savedSegs.every(
+    (s) =>
+      !!s &&
+      typeof s === "object" &&
+      typeof (s as Partial<Segment>).srcStart === "number" &&
+      typeof (s as Partial<Segment>).srcEnd === "number" &&
+      Number.isFinite((s as Partial<Segment>).srcStart!) &&
+      Number.isFinite((s as Partial<Segment>).srcEnd!),
+  );
+
+  let segments: Segment[];
+  if (freshSeg && savedSegs.length > 0 && hasWindows) {
+    const restored = savedSegs
+      .map((s) => restoreSegment(s, freshSeg, freshSeg.facecam.src, mediaDuration))
+      .filter((s): s is Segment => s !== null);
+    segments = restored.length > 0 ? restored : [mergeSegment(freshSeg, savedSegs[0])];
+  } else {
+    segments = fresh.segments.map((seg, i) => mergeSegment(seg, savedSegs[i]));
+  }
 
   return {
     ...fresh,
@@ -174,7 +249,7 @@ export function mergeSavedProject(fresh: Project, saved: Partial<Project> | null
       width: num(media.width, fresh.media.width, 1, 100_000),
       height: num(media.height, fresh.media.height, 1, 100_000),
     },
-    segments: fresh.segments.map((seg, i) => mergeSegment(seg, saved.segments?.[i])),
+    segments,
     clickLog: arr<unknown>(saved.clickLog, MAX_CLICKS)
       .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
       .map((e) => ({

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useProjectStore } from "./projectStore";
 import { mockProject } from "../../../../packages/engine/src/test-fixtures";
-import { projectDuration } from "@panoptik/engine";
+import { projectDuration, sourceToTimeline } from "@panoptik/engine";
 import {
   migrateProject,
   type Project,
@@ -372,5 +372,68 @@ describe("segment split + selection", () => {
     const segs = useProjectStore.getState().project!.segments;
     expect(segs[0]!.facecam.size).toBe(0.2);
     expect(segs[1]!.facecam.size).toBe(0.5);
+  });
+
+  it("splitAt keeps segment B's annotations at absolute source time", () => {
+    useProjectStore.getState().setProject(
+      singleSegProject({
+        zoomPoints: [
+          {
+            id: "z-b",
+            t: 6,
+            to: { scale: 2, x: 0.5, y: 0.5 },
+            dur: 0.5,
+            ease: "linear",
+            staged: false,
+          },
+        ],
+        stagedZoomPoints: [
+          {
+            id: "zg-b",
+            t: 7,
+            to: { scale: 2, x: 0.5, y: 0.5 },
+            dur: 0.5,
+            ease: "linear",
+            staged: true,
+          },
+        ],
+        textOverlays: [
+          { id: "t-b", text: "hi", timestamp: 8, position: "top", staged: false },
+        ],
+        stagedTextOverlays: [
+          { id: "tg-b", text: "hey", timestamp: 9, position: "bottom", staged: true },
+        ],
+        captions: [{ text: "cap", start: 5, end: 9 }],
+      } as unknown as Partial<Segment>),
+    );
+    useProjectStore.getState().splitAt(4); // srcT 4 → b.srcStart = 4
+    const { project } = useProjectStore.getState();
+    const b = project!.segments[1]!;
+    expect(b.srcStart).toBe(4);
+    // Annotations keep their ABSOLUTE source time — no `- t` rebasing.
+    expect(b.zoomPoints[0]!.t).toBe(6);
+    expect(b.stagedZoomPoints[0]!.t).toBe(7);
+    expect(b.textOverlays[0]!.timestamp).toBe(8);
+    expect(b.stagedTextOverlays[0]!.timestamp).toBe(9);
+    expect(b.captions[0]!.start).toBe(5);
+    expect(b.captions[0]!.end).toBe(9);
+    // ...and stay inside b's source window so render/sourceToTimeline match them.
+    for (const t of [6, 7, 8, 9, 5]) {
+      expect(t).toBeGreaterThanOrEqual(b.srcStart);
+      expect(t).toBeLessThanOrEqual(b.srcEnd);
+    }
+    // The diamond is not dropped: sourceToTimeline resolves b's annotation.
+    expect(sourceToTimeline(project!, b.id, 6)).not.toBeNull();
+  });
+
+  it("updateSegment clamps speed to the 0.25–3 grid", () => {
+    useProjectStore.getState().setProject(singleSegProject());
+    const id = useProjectStore.getState().project!.segments[0]!.id;
+    useProjectStore.getState().updateSegment(id, { speed: 9 });
+    expect(useProjectStore.getState().project!.segments[0]!.speed).toBe(3);
+    useProjectStore.getState().updateSegment(id, { speed: 0.1 });
+    expect(useProjectStore.getState().project!.segments[0]!.speed).toBe(0.25);
+    useProjectStore.getState().updateSegment(id, { speed: 2.32 });
+    expect(useProjectStore.getState().project!.segments[0]!.speed).toBe(2.3);
   });
 });

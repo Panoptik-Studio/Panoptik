@@ -53,7 +53,13 @@ export function useVideoExport() {
       try {
         // Speed is per-segment (applied inside the engine's per-segment export),
         // so there is no global playbackRate override to spread in here.
-        const blob = await engine.exportProject(project, opts);
+        // The frame aspect follows the currently-selected segment (like the
+        // preview canvas does), so export is what-you-see-is-what-you-get.
+        const selectedSegmentId = useProjectStore.getState().selectedSegmentId;
+        const blob = await engine.exportProject(project, {
+          ...opts,
+          selectedSegmentId: selectedSegmentId ?? undefined,
+        });
         const url = URL.createObjectURL(blob);
         urlRef.current = url;
         const actualFormat: ExportOpts["format"] = blob.type.includes("webm") ? "webm" : blob.type.includes("mp4") ? "mp4" : opts.format;

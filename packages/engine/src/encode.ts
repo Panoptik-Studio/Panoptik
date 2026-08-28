@@ -56,20 +56,34 @@ function emitProgress(value: number): void {
 }
 
 /**
+ * Export options plus the editor's current selection. The preview sizes itself
+ * to the SELECTED segment's aspect preset, so export must resolve the frame to
+ * the same segment or what you see is not what you get.
+ */
+export type ExportFrameOpts = ExportOpts & { selectedSegmentId?: string };
+
+/**
  * Even dimensions at the requested height, preserving the clip's aspect.
  * Odd sizes are rejected outright by several encoders.
  */
-function exportSize(project: Project, resolution: ExportOpts["resolution"]) {
-  // The active segment's preset decides the frame's shape; the resolution
-  // decides its height. "source" defers to the media, so it never bars.
-  const seg = project.segments[0];
+function exportSize(
+  project: Project,
+  resolution: ExportOpts["resolution"],
+  selectedSegmentId?: string,
+) {
+  // The selected segment's preset decides the frame's shape (matching the
+  // preview canvas); no selection falls back to the first segment. "source"
+  // defers to the media, so it never bars.
+  const seg =
+    project.segments.find((s) => s.id === selectedSegmentId) ??
+    project.segments[0];
   const aspect = presetAspect(seg?.aspectPreset ?? "source", project.media);
   const height = RESOLUTION_HEIGHTS[resolution];
   const width = Math.round(height * aspect);
   return { width: width - (width % 2), height: height - (height % 2) };
 }
 
-export async function exportProject(project: Project, opts: ExportOpts): Promise<Blob> {
+export async function exportProject(project: Project, opts: ExportFrameOpts): Promise<Blob> {
   // Signal preview to pause its own prepareFrame — they share the global CanvasSink pump.
   // Also drives decode.ts's sequential exportIterator path that avoids the avc1
   // seek-storm at tail (130ms per seek) seen on Linux mp4. The flag was added in
@@ -83,7 +97,7 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
     await resetFacecamExportIterator();
   } catch { /* ignore */ }
   try {
-    const { width, height } = exportSize(project, opts.resolution);
+    const { width, height } = exportSize(project, opts.resolution, opts.selectedSegmentId);
     const requestedIsMp4 = opts.format === "mp4";
     console.log("[Export]", project.segments.map((s) => `seg ${s.id} ${s.srcStart}-${s.srcEnd} @${s.speed}x`).join(" | "));
 
