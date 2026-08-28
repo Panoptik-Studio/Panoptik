@@ -629,18 +629,25 @@ export function PreviewCanvas() {
 
   useEffect(() => {
     if (!project) return;
-    // Sized to the SELECTED segment's preset so the preview stays stable during
-    // playback; other segments letterbox inside it (matching the exporter).
-    const seg =
-      project.segments.find((s) => s.id === selectedSegmentId) ??
-      project.segments[0];
+    // Sized to the ACTIVE segment's preset
+    const active = resolveActive(project, currentTime);
     const size = outputSize(
       project.media,
-      seg?.aspectPreset ?? "source",
+      active.seg.aspectPreset ?? "source",
       MAX_CANVAS_WIDTH,
     );
     setCanvasSize({ w: size.width, h: size.height });
-  }, [project, selectedSegmentId]);
+  }, [project, currentTime, selectedSegmentId]);
+
+  // Ensure canvas draws immediately when canvas size or project changes
+  useEffect(() => {
+    if (canvasRef.current && project) {
+      const ctx = canvasRef.current.getContext("2d");
+      if (ctx) {
+        engine.renderFrame(ctx, project, currentTime);
+      }
+    }
+  }, [canvasSize, project, currentTime]);
 
   // ── Drop + click-to-import ──
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -756,6 +763,8 @@ export function PreviewCanvas() {
     return { background: "linear-gradient(135deg, #007cf0 0%, #7928ca 45%, #ff4d4d 100%)" };
   })();
 
+  const targetAspect = canvasSize.w / canvasSize.h;
+
   return (
     <div
       ref={containerRef}
@@ -766,9 +775,19 @@ export function PreviewCanvas() {
     >
       {/* Vercel mesh halo behind stage */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ background: "radial-gradient(700px 420px at 50% 38%, rgba(0,124,240,0.18) 0%, transparent 60%), radial-gradient(560px 360px at 82% 78%, rgba(255,0,128,0.12) 0%, transparent 62%)" }} />
-      {/* Stage frame stays constant — padding shrinks the video inside, not the frame; stage locks to clip aspect so no crop/letterbox drift across viewports */}
-      <div className="relative flex max-h-[56vh] max-w-[64vw] items-center justify-center overflow-hidden rounded-xl border bg-white shadow-vercel-4 lg:max-h-[62vh]" style={{ borderColor: "#ebebeb", padding: activeSeg.stagePadding, aspectRatio: project ? `${project.media.width} / ${project.media.height}` : undefined, width: project ? `min(64vw, calc(62vh * ${project.media.width / project.media.height}))` as unknown as string : undefined, ...stageStyle }}>
-        <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-black shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/10">
+      {/* Stage frame adapts to preset aspect ratio (16:9, 9:16, 1:1, 4:3) */}
+      <div
+        className="relative flex max-h-[56vh] max-w-[64vw] items-center justify-center overflow-hidden rounded-xl border shadow-vercel-4 lg:max-h-[62vh]"
+        style={{
+          borderColor: "#ebebeb",
+          aspectRatio: `${canvasSize.w} / ${canvasSize.h}`,
+          width: targetAspect >= 1 ? `min(64vw, calc(62vh * ${targetAspect}))` : `min(64vw, calc(62vh * ${targetAspect}))`,
+          height: targetAspect < 1 ? `min(62vh, calc(64vw / ${targetAspect}))` : undefined,
+          padding: activeSeg.stagePadding,
+          ...stageStyle,
+        }}
+      >
+        <div className="flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-lg shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
           <canvas
             ref={canvasRef}
             width={canvasSize.w}
