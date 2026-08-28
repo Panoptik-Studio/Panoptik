@@ -74,6 +74,7 @@ export function Timeline() {
   const play = useProjectStore((s) => s.play);
   const pause = useProjectStore((s) => s.pause);
   const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
+  const selectedSegmentIds = useProjectStore((s) => s.selectedSegmentIds);
   const selectSegment = useProjectStore((s) => s.selectSegment);
   const splitAt = useProjectStore((s) => s.splitAt);
   const deleteSegment = useProjectStore((s) => s.deleteSegment);
@@ -135,7 +136,6 @@ export function Timeline() {
 
     // Identify active segment under playhead
     const activeSegId = project ? resolveSegment(project, currentTime)?.segment.id : null;
-    const highlightId = isPlaying ? (activeSegId ?? selectedSegmentId) : (selectedSegmentId ?? activeSegId);
 
     // Ruler bg
     ctx.fillStyle = "#fafafa";
@@ -170,7 +170,9 @@ export function Timeline() {
       const x0 = timeToX(acc);
       const x1 = timeToX(acc + d);
       const segW = Math.max(1, x1 - x0);
-      const selected = seg.id === highlightId;
+      const selected = isPlaying
+        ? seg.id === activeSegId
+        : (selectedSegmentIds.length > 0 ? selectedSegmentIds.includes(seg.id) : seg.id === selectedSegmentId);
 
       // 1. Clip filmstrip to the rounded segment block so thumbnails stay neat
       ctx.save();
@@ -297,37 +299,43 @@ export function Timeline() {
         ctx.restore();
       }
     }
-  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying]);
+  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (isDraggingPlayhead || draggingDiamond) return;
     if (!scrollRef.current) return;
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
-    // Diamond hit first — select the segment the diamond belongs to, then the zoom
-    for (const seg of project?.segments ?? []) {
-      for (const zp of [...seg.zoomPoints, ...seg.stagedZoomPoints]) {
-        const st = sourceToTimeline(project!, seg.id, zp.t);
-        if (st == null) continue;
-        if (Math.abs(x - timeToX(st)) < 14) {
-          selectSegment(seg.id);
-          setSelectedZoom(zp.id);
-          return;
+    const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
+
+    if (!isMulti) {
+      // Diamond hit first — select the segment the diamond belongs to, then the zoom
+      for (const seg of project?.segments ?? []) {
+        for (const zp of [...seg.zoomPoints, ...seg.stagedZoomPoints]) {
+          const st = sourceToTimeline(project!, seg.id, zp.t);
+          if (st == null) continue;
+          if (Math.abs(x - timeToX(st)) < 14) {
+            selectSegment(seg.id);
+            setSelectedZoom(zp.id);
+            return;
+          }
         }
       }
+      setSelectedZoom(null);
     }
+
     // Segment selection: which filmstrip block does the x fall in?
     let acc = 0;
     for (const seg of project?.segments ?? []) {
       const d = segmentDuration(seg);
       if (x >= timeToX(acc) && x < timeToX(acc + d)) {
-        selectSegment(seg.id);
+        selectSegment(seg.id, isMulti);
         break;
       }
       acc += d;
     }
     seek(xToTime(x));
-  }, [project, selectSegment, seek, setSelectedZoom, timeToX, xToTime]);
+  }, [isDraggingPlayhead, draggingDiamond, project, selectSegment, seek, setSelectedZoom, timeToX, xToTime]);
 
   const handleDiamondDrag = useCallback((e: React.PointerEvent) => {
     if (!draggingDiamond || !scrollRef.current) return;
@@ -361,6 +369,23 @@ export function Timeline() {
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     const px = timeToX(currentTime);
+
+    const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
+    if (isMulti && project) {
+      let acc = 0;
+      for (const seg of project.segments) {
+        const d = segmentDuration(seg);
+        if (x >= timeToX(acc) && x < timeToX(acc + d)) {
+          selectSegment(seg.id, true);
+          break;
+        }
+        acc += d;
+      }
+      seek(xToTime(x));
+      e.preventDefault();
+      return;
+    }
+
     // If near playhead (20px), drag playhead; otherwise seek and start dragging
     if (Math.abs(x - px) < 20 || (e.target as HTMLElement).closest('.playhead, .timeline-canvas, .timeline-scroll-area')) {
       setIsDraggingPlayhead(true);
@@ -368,7 +393,7 @@ export function Timeline() {
       seek(xToTime(x));
       e.preventDefault();
     }
-  }, [contextMenu, currentTime, draggingDiamond, seek, timeToX, xToTime]);
+  }, [contextMenu, currentTime, draggingDiamond, project, selectSegment, seek, timeToX, xToTime]);
 
   const handleTimelinePointerMove = useCallback((e: React.PointerEvent) => {
     if (!isDraggingPlayhead || !scrollRef.current) return;

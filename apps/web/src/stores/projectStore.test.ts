@@ -543,4 +543,58 @@ describe("segment split + selection", () => {
     useProjectStore.getState().seek(3);
     expect(useProjectStore.getState().selectedSegmentId).toBe(seg1Id);
   });
+
+  it("supports multi-segment selection and applies grouped settings across all selected clips", () => {
+    useProjectStore.getState().setProject(singleSegProject());
+    // Split into 3 segments: [0..3], [3..6], [6..10]
+    useProjectStore.getState().splitAt(3);
+    useProjectStore.getState().splitAt(6);
+    const p = useProjectStore.getState().project!;
+    expect(p.segments).toHaveLength(3);
+
+    const [s1, s2, s3] = p.segments;
+
+    // Single select s1
+    useProjectStore.getState().selectSegment(s1!.id, false);
+    expect(useProjectStore.getState().selectedSegmentIds).toEqual([s1!.id]);
+
+    // Ctrl+Click s2 to multi-select [s1, s2]
+    useProjectStore.getState().selectSegment(s2!.id, true);
+    expect(useProjectStore.getState().selectedSegmentIds).toEqual([s1!.id, s2!.id]);
+
+    // Grouped padding update: apply 32px padding to both s1 and s2
+    useProjectStore.getState().setStagePadding(32);
+    let updated = useProjectStore.getState().project!;
+    expect(updated.segments[0]!.stagePadding).toBe(32);
+    expect(updated.segments[1]!.stagePadding).toBe(32);
+    expect(updated.segments[2]!.stagePadding).toBe(0); // s3 untouched
+
+    // Grouped speed update: set 2x speed on both s1 and s2
+    useProjectStore.getState().updateSelectedSegments({ speed: 2 });
+    updated = useProjectStore.getState().project!;
+    expect(updated.segments[0]!.speed).toBe(2);
+    expect(updated.segments[1]!.speed).toBe(2);
+    expect(updated.segments[2]!.speed).toBe(1); // s3 untouched
+
+    // Grouped aspect update
+    useProjectStore.getState().setAspectPreset("9:16");
+    updated = useProjectStore.getState().project!;
+    expect(updated.segments[0]!.aspectPreset).toBe("9:16");
+    expect(updated.segments[1]!.aspectPreset).toBe("9:16");
+    expect(updated.segments[2]!.aspectPreset).toBe("source");
+
+    // Grouped background update
+    useProjectStore.getState().setBackground({ kind: "solid", color: "#123456" });
+    updated = useProjectStore.getState().project!;
+    expect(updated.segments[0]!.background).toEqual({ kind: "solid", color: "#123456" });
+    expect(updated.segments[1]!.background).toEqual({ kind: "solid", color: "#123456" });
+
+    // Select all segments
+    useProjectStore.getState().selectAllSegments();
+    expect(useProjectStore.getState().selectedSegmentIds).toEqual([s1!.id, s2!.id, s3!.id]);
+
+    // Toggle off s2 from multi-selection
+    useProjectStore.getState().selectSegment(s2!.id, true);
+    expect(useProjectStore.getState().selectedSegmentIds).toEqual([s1!.id, s3!.id]);
+  });
 });

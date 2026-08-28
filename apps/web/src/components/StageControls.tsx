@@ -1,8 +1,7 @@
 /**
  * StageControls — padding resizer + beautiful themes + aspect.
  * Vercel card-soft style, pill controls black→blue hover.
- * Every setting edits the SELECTED segment (store actions all target it); a pill
- * strip switches which segment the panel edits.
+ * Supports single segment or grouped multi-segment editing (via Ctrl/Cmd+Click).
  */
 "use client";
 
@@ -111,12 +110,15 @@ function MatchClipButton({
 export function StageControls() {
   const project = useProjectStore((s) => s.project);
   const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
+  const selectedSegmentIds = useProjectStore((s) => s.selectedSegmentIds);
   const selectSegment = useProjectStore((s) => s.selectSegment);
+  const selectAllSegments = useProjectStore((s) => s.selectAllSegments);
   const setStagePadding = useProjectStore((s) => s.setStagePadding);
   const stageBackground = useProjectStore((s) => s.stageBackground);
   const setAspectPreset = useProjectStore((s) => s.setAspectPreset);
   const setFacecam = useProjectStore((s) => s.setFacecam);
   const updateSegment = useProjectStore((s) => s.updateSegment);
+  const updateSelectedSegments = useProjectStore((s) => s.updateSelectedSegments);
   const exportProgress = useProjectStore((s) => s.exportProgress);
 
   if (!project) {
@@ -128,7 +130,17 @@ export function StageControls() {
     );
   }
 
-  const seg = project.segments.find((s) => s.id === selectedSegmentId) ?? null;
+  // Determine all selected segments
+  const activeIds = selectedSegmentIds.length > 0
+    ? selectedSegmentIds
+    : selectedSegmentId
+      ? [selectedSegmentId]
+      : project.segments[0]
+        ? [project.segments[0].id]
+        : [];
+
+  const selectedSegs = project.segments.filter((s) => activeIds.includes(s.id));
+  const seg = selectedSegs[0] ?? project.segments[0] ?? null;
 
   if (!seg) {
     return (
@@ -139,42 +151,107 @@ export function StageControls() {
     );
   }
 
-  const segIndex = project.segments.findIndex((s) => s.id === seg.id);
-  const prevSeg = segIndex > 0 ? project.segments[segIndex - 1]! : null;
-  const nextSeg = segIndex < project.segments.length - 1 ? project.segments[segIndex + 1]! : null;
+  const isGrouped = selectedSegs.length > 1;
+
+  // Indices for matching prev/next
+  const indices = selectedSegs.map((s) => project.segments.findIndex((x) => x.id === s.id)).sort((a, b) => a - b);
+  const minIndex = indices[0] ?? 0;
+  const maxIndex = indices[indices.length - 1] ?? 0;
+  const prevSeg = minIndex > 0 ? project.segments[minIndex - 1]! : null;
+  const nextSeg = maxIndex < project.segments.length - 1 ? project.segments[maxIndex + 1]! : null;
+
+  // Check if properties match across grouped selection
+  const allSamePadding = selectedSegs.every((s) => s.stagePadding === seg.stagePadding);
+  const allSameSpeed = selectedSegs.every((s) => s.speed === seg.speed);
+  const allSameAspect = selectedSegs.every((s) => s.aspectPreset === seg.aspectPreset);
+  const allSameBg = selectedSegs.every((s) => isSameBackground(s.background, seg.background));
+  const allSameFacecam = selectedSegs.every((s) => isSameFacecam(s.facecam, seg.facecam));
 
   const camHeightFraction = (size: number) =>
     (size * (project.media.width / project.media.height)) / CAMERA_ASPECT;
 
   return (
     <div className="pk-panel">
-      <h3 className="pk-panel-title mb-3">Stage</h3>
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="pk-panel-title">Stage</h3>
+        {isGrouped && (
+          <span className="pk-chip pk-chip-blue font-bold">
+            {selectedSegs.length} clips grouped
+          </span>
+        )}
+      </div>
 
-      {/* Segment switcher — the panel edits the selected segment */}
+      {/* Grouped settings notice banner */}
+      {isGrouped && (
+        <div className="mb-4 rounded-xl border border-[#0070f3]/30 bg-[#f0f7ff] p-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-5 min-w-[20px] items-center justify-center rounded-md bg-[#0070f3] px-1 text-[11px] font-bold text-white">
+                {selectedSegs.length}
+              </span>
+              <span className="text-xs font-semibold text-[#0070f3]">
+                Grouped Settings ({indices.map((i) => `Seg ${i + 1}`).join(", ")})
+              </span>
+            </div>
+            <button
+              onClick={() => selectSegment(seg.id, false)}
+              className="rounded bg-white px-2 py-0.5 text-[10px] font-semibold text-[#0070f3] shadow-sm border border-[#b3d7ff] hover:bg-[#0070f3] hover:text-white transition-all"
+              title="Ungroup and edit only Seg 1"
+            >
+              Ungroup
+            </button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-[#444]">
+            Changes to padding, speed, aspect, and theme will apply simultaneously to all {selectedSegs.length} selected clips.
+          </p>
+        </div>
+      )}
+
+      {/* Segment switcher — supports single click or Ctrl/Cmd multi-selection */}
       <div className="mb-4">
         <div className="mb-1.5 flex items-center justify-between">
-          <span className="pk-label">Segment</span>
-          <span className="pk-value" style={{ color: "#888" }}>{seg.srcStart.toFixed(1)}–{seg.srcEnd.toFixed(1)}s · {seg.speed}x</span>
+          <span className="pk-label">
+            {isGrouped ? `Selected Segments (${selectedSegs.length})` : "Segment"}
+          </span>
+          <div className="flex items-center gap-1.5">
+            {project.segments.length > 1 && (
+              <button
+                onClick={selectAllSegments}
+                className="text-[10px] font-medium text-[#888] hover:text-[#0070f3] transition-colors"
+                title="Select all segments"
+              >
+                Select all
+              </button>
+            )}
+            <span className="pk-value" style={{ color: "#888" }}>
+              {isGrouped
+                ? `${selectedSegs.length} clips`
+                : `${seg.srcStart.toFixed(1)}–${seg.srcEnd.toFixed(1)}s · ${seg.speed}x`}
+            </span>
+          </div>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {project.segments.map((s, i) => (
-            <button
-              key={s.id}
-              onClick={() => selectSegment(s.id)}
-              className="pk-seg"
-              data-active={s.id === selectedSegmentId}
-              title={`Segment ${i + 1}: ${s.srcStart.toFixed(1)}–${s.srcEnd.toFixed(1)}s @${s.speed}x`}
-            >
-              Seg {i + 1}
-            </button>
-          ))}
+          {project.segments.map((s, i) => {
+            const isSelected = activeIds.includes(s.id);
+            return (
+              <button
+                key={s.id}
+                onClick={(e) => selectSegment(s.id, e.ctrlKey || e.metaKey || e.shiftKey)}
+                className="pk-seg"
+                data-active={isSelected}
+                title={`Segment ${i + 1}: ${s.srcStart.toFixed(1)}–${s.srcEnd.toFixed(1)}s @${s.speed}x (Ctrl+Click to multi-select)`}
+              >
+                Seg {i + 1}
+              </button>
+            );
+          })}
         </div>
         {(prevSeg || nextSeg) && (
           <div className="mt-2.5 flex gap-2">
             {prevSeg && (
               <button
                 onClick={() => {
-                  updateSegment(seg.id, {
+                  updateSelectedSegments({
                     stagePadding: prevSeg.stagePadding,
                     speed: prevSeg.speed,
                     aspectPreset: prevSeg.aspectPreset,
@@ -183,19 +260,19 @@ export function StageControls() {
                   });
                 }}
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-2.5 py-1.5 text-xs font-medium text-[#333] shadow-sm transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3]"
-                title={`Copy all stage settings from Segment ${segIndex} to Segment ${segIndex + 1}`}
+                title={`Copy all stage settings from Segment ${minIndex} to selected clips`}
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="9 14 4 9 9 4" />
                   <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
                 </svg>
-                <span>Match all from Seg {segIndex}</span>
+                <span>Match all from Seg {minIndex}</span>
               </button>
             )}
             {nextSeg && (
               <button
                 onClick={() => {
-                  updateSegment(seg.id, {
+                  updateSelectedSegments({
                     stagePadding: nextSeg.stagePadding,
                     speed: nextSeg.speed,
                     aspectPreset: nextSeg.aspectPreset,
@@ -204,18 +281,20 @@ export function StageControls() {
                   });
                 }}
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-2.5 py-1.5 text-xs font-medium text-[#333] shadow-sm transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3]"
-                title={`Copy all stage settings from Segment ${segIndex + 2} to Segment ${segIndex + 1}`}
+                title={`Copy all stage settings from Segment ${maxIndex + 2} to selected clips`}
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="15 14 20 9 15 4" />
                   <path d="M4 20v-7a4 4 0 0 1 4-4h12" />
                 </svg>
-                <span>Match all from Seg {segIndex + 2}</span>
+                <span>Match all from Seg {maxIndex + 2}</span>
               </button>
             )}
           </div>
         )}
-        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>Settings apply to the selected segment; others keep their own.</p>
+        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>
+          Ctrl / Cmd + Click to group multiple clips and edit together.
+        </p>
       </div>
 
       {/* Padding resizer */}
@@ -227,29 +306,41 @@ export function StageControls() {
               <MatchClipButton
                 direction="prev"
                 onClick={() => setStagePadding(prevSeg.stagePadding)}
-                title={`Apply padding from Seg ${segIndex} (${prevSeg.stagePadding}px)`}
+                title={`Apply padding from Seg ${minIndex} (${prevSeg.stagePadding}px)`}
                 label={`Prev (${prevSeg.stagePadding}px)`}
-                isSame={seg.stagePadding === prevSeg.stagePadding}
+                isSame={allSamePadding && seg.stagePadding === prevSeg.stagePadding}
               />
             )}
             {nextSeg && (
               <MatchClipButton
                 direction="next"
                 onClick={() => setStagePadding(nextSeg.stagePadding)}
-                title={`Apply padding from Seg ${segIndex + 2} (${nextSeg.stagePadding}px)`}
+                title={`Apply padding from Seg ${maxIndex + 2} (${nextSeg.stagePadding}px)`}
                 label={`Next (${nextSeg.stagePadding}px)`}
-                isSame={seg.stagePadding === nextSeg.stagePadding}
+                isSame={allSamePadding && seg.stagePadding === nextSeg.stagePadding}
               />
             )}
-            <span className="pk-value ml-1" style={{ color: "#0070f3" }}>{seg.stagePadding}px</span>
+            <span className="pk-value ml-1" style={{ color: "#0070f3" }}>
+              {allSamePadding ? `${seg.stagePadding}px` : "Mixed"}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setStagePadding(seg.stagePadding - 4)} className="pk-icon-btn h-7 w-7 text-xs">−</button>
-          <input type="range" min={0} max={48} step={4} value={seg.stagePadding} onChange={(e) => setStagePadding(Number(e.target.value))} className="pk-range flex-1" />
+          <input
+            type="range"
+            min={0}
+            max={48}
+            step={4}
+            value={seg.stagePadding}
+            onChange={(e) => setStagePadding(Number(e.target.value))}
+            className="pk-range flex-1"
+          />
           <button onClick={() => setStagePadding(seg.stagePadding + 4)} className="pk-icon-btn h-7 w-7 text-xs">+</button>
         </div>
-        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>White space around video. 0 = edge-to-edge.</p>
+        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>
+          {isGrouped ? `Applies to all ${selectedSegs.length} selected clips.` : "White space around video. 0 = edge-to-edge."}
+        </p>
       </div>
 
       {/* Speed */}
@@ -260,22 +351,24 @@ export function StageControls() {
             {prevSeg && (
               <MatchClipButton
                 direction="prev"
-                onClick={() => updateSegment(seg.id, { speed: prevSeg.speed })}
-                title={`Apply speed from Seg ${segIndex} (${prevSeg.speed}x)`}
+                onClick={() => updateSelectedSegments({ speed: prevSeg.speed })}
+                title={`Apply speed from Seg ${minIndex} (${prevSeg.speed}x)`}
                 label={`Prev (${prevSeg.speed}x)`}
-                isSame={seg.speed === prevSeg.speed}
+                isSame={allSameSpeed && seg.speed === prevSeg.speed}
               />
             )}
             {nextSeg && (
               <MatchClipButton
                 direction="next"
-                onClick={() => updateSegment(seg.id, { speed: nextSeg.speed })}
-                title={`Apply speed from Seg ${segIndex + 2} (${nextSeg.speed}x)`}
+                onClick={() => updateSelectedSegments({ speed: nextSeg.speed })}
+                title={`Apply speed from Seg ${maxIndex + 2} (${nextSeg.speed}x)`}
                 label={`Next (${nextSeg.speed}x)`}
-                isSame={seg.speed === nextSeg.speed}
+                isSame={allSameSpeed && seg.speed === nextSeg.speed}
               />
             )}
-            <span className="pk-value ml-1" style={{ color: seg.speed !== 1 ? "#0070f3" : "#888" }}>{seg.speed.toFixed(2)}x</span>
+            <span className="pk-value ml-1" style={{ color: (allSameSpeed && seg.speed !== 1) || !allSameSpeed ? "#0070f3" : "#888" }}>
+              {allSameSpeed ? `${seg.speed.toFixed(2)}x` : "Mixed"}
+            </span>
           </div>
         </div>
         <input
@@ -284,7 +377,7 @@ export function StageControls() {
           max={3}
           step={0.05}
           value={seg.speed}
-          onChange={(e) => updateSegment(seg.id, { speed: Number(e.target.value) })}
+          onChange={(e) => updateSelectedSegments({ speed: Number(e.target.value) })}
           className="pk-range flex-1"
           disabled={exportProgress !== null}
           aria-label="Video speed"
@@ -293,16 +386,18 @@ export function StageControls() {
           {[0.5, 1, 1.5, 2].map((v) => (
             <button
               key={v}
-              onClick={() => updateSegment(seg.id, { speed: v })}
+              onClick={() => updateSelectedSegments({ speed: v })}
               disabled={exportProgress !== null}
               className="pk-seg"
-              data-active={seg.speed === v}
+              data-active={allSameSpeed && seg.speed === v}
             >
               {v}x
             </button>
           ))}
         </div>
-        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>0.25x–3x · affects preview & export · cam+screen synced</p>
+        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>
+          {isGrouped ? `Sets playback speed for all ${selectedSegs.length} clips.` : "0.25x–3x · affects preview & export · cam+screen synced"}
+        </p>
       </div>
 
       {/* Aspect */}
@@ -314,18 +409,18 @@ export function StageControls() {
               <MatchClipButton
                 direction="prev"
                 onClick={() => setAspectPreset(prevSeg.aspectPreset)}
-                title={`Apply aspect from Seg ${segIndex} (${prevSeg.aspectPreset})`}
+                title={`Apply aspect from Seg ${minIndex} (${prevSeg.aspectPreset})`}
                 label={`Prev (${prevSeg.aspectPreset === "source" ? "Fit" : prevSeg.aspectPreset})`}
-                isSame={seg.aspectPreset === prevSeg.aspectPreset}
+                isSame={allSameAspect && seg.aspectPreset === prevSeg.aspectPreset}
               />
             )}
             {nextSeg && (
               <MatchClipButton
                 direction="next"
                 onClick={() => setAspectPreset(nextSeg.aspectPreset)}
-                title={`Apply aspect from Seg ${segIndex + 2} (${nextSeg.aspectPreset})`}
+                title={`Apply aspect from Seg ${maxIndex + 2} (${nextSeg.aspectPreset})`}
                 label={`Next (${nextSeg.aspectPreset === "source" ? "Fit" : nextSeg.aspectPreset})`}
-                isSame={seg.aspectPreset === nextSeg.aspectPreset}
+                isSame={allSameAspect && seg.aspectPreset === nextSeg.aspectPreset}
               />
             )}
           </div>
@@ -336,7 +431,7 @@ export function StageControls() {
               key={preset}
               onClick={() => setAspectPreset(preset)}
               className="pk-seg"
-              data-active={seg.aspectPreset === preset}
+              data-active={allSameAspect && seg.aspectPreset === preset}
             >
               {preset === "source" ? "Fit" : preset}
             </button>
@@ -361,9 +456,9 @@ export function StageControls() {
                       shape: prevSeg.facecam.shape,
                     })
                   }
-                  title={`Apply camera position & size from Seg ${segIndex}`}
+                  title={`Apply camera position & size from Seg ${minIndex}`}
                   label="Match prev"
-                  isSame={isSameFacecam(seg.facecam, prevSeg.facecam)}
+                  isSame={allSameFacecam && isSameFacecam(seg.facecam, prevSeg.facecam)}
                 />
               )}
               {nextSeg && nextSeg.facecam.src && (
@@ -377,9 +472,9 @@ export function StageControls() {
                       shape: nextSeg.facecam.shape,
                     })
                   }
-                  title={`Apply camera position & size from Seg ${segIndex + 2}`}
+                  title={`Apply camera position & size from Seg ${maxIndex + 2}`}
                   label="Match next"
-                  isSame={isSameFacecam(seg.facecam, nextSeg.facecam)}
+                  isSame={allSameFacecam && isSameFacecam(seg.facecam, nextSeg.facecam)}
                 />
               )}
               <span className="pk-help ml-1">
@@ -392,6 +487,7 @@ export function StageControls() {
               const size = seg.facecam.size;
               const target = c.at(size, camHeightFraction(size));
               const active =
+                allSameFacecam &&
                 Math.abs(seg.facecam.x - target.x) < 0.02 &&
                 Math.abs(seg.facecam.y - target.y) < 0.02;
               return (
@@ -418,7 +514,6 @@ export function StageControls() {
             value={seg.facecam.size}
             onChange={(e) => {
               const size = Number(e.target.value);
-              // Keep the bubble pinned to whichever edge it is nearest as it grows.
               const hFrac = camHeightFraction(size);
               setFacecam({
                 size,
@@ -431,7 +526,7 @@ export function StageControls() {
           />
           <div className="mt-2 flex gap-1.5">
             {(["circle", "square"] as const).map((s) => {
-              const active = (seg.facecam.shape ?? "square") === s;
+              const active = allSameFacecam && (seg.facecam.shape ?? "square") === s;
               return (
                 <button
                   key={s}
@@ -456,18 +551,18 @@ export function StageControls() {
               <MatchClipButton
                 direction="prev"
                 onClick={() => stageBackground(prevSeg.background)}
-                title={`Apply background theme from Seg ${segIndex}`}
+                title={`Apply background theme from Seg ${minIndex}`}
                 label="Match prev"
-                isSame={isSameBackground(seg.background, prevSeg.background)}
+                isSame={allSameBg && isSameBackground(seg.background, prevSeg.background)}
               />
             )}
             {nextSeg && (
               <MatchClipButton
                 direction="next"
                 onClick={() => stageBackground(nextSeg.background)}
-                title={`Apply background theme from Seg ${segIndex + 2}`}
+                title={`Apply background theme from Seg ${maxIndex + 2}`}
                 label="Match next"
-                isSame={isSameBackground(seg.background, nextSeg.background)}
+                isSame={allSameBg && isSameBackground(seg.background, nextSeg.background)}
               />
             )}
           </div>
@@ -475,12 +570,12 @@ export function StageControls() {
         <div className="grid grid-cols-3 gap-2">
           {THEMES.map((t) => {
             const isActive =
-              t.bg.kind === "gradient"
-                // Both stops must match: Vercel and Ocean share their first one.
+              allSameBg &&
+              (t.bg.kind === "gradient"
                 ? seg.background.kind === "gradient" &&
                   (seg.background as { stops: [string, string] }).stops[0] === t.bg.stops![0] &&
                   (seg.background as { stops: [string, string] }).stops[1] === t.bg.stops![1]
-                : seg.background.kind === "solid" && (seg.background as { color: string }).color === t.bg.color;
+                : seg.background.kind === "solid" && (seg.background as { color: string }).color === t.bg.color);
             return (
               <button
                 key={t.name}
@@ -498,7 +593,9 @@ export function StageControls() {
             );
           })}
         </div>
-        <p className="pk-help mt-2" style={{ fontSize: 11 }}>Applies to stage background behind video. Staged, commit to keep.</p>
+        <p className="pk-help mt-2" style={{ fontSize: 11 }}>
+          {isGrouped ? `Applies background to all ${selectedSegs.length} selected clips.` : "Applies to stage background behind video. Staged, commit to keep."}
+        </p>
       </div>
     </div>
   );

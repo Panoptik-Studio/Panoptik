@@ -96,6 +96,7 @@ interface ProjectStore {
   isPlaying: boolean;
   currentTime: number; // ON-TIMELINE time
   selectedSegmentId: string | null;
+  selectedSegmentIds: string[];
   selectedZoomId: string | null;
   pendingBackgroundBadge: boolean;
   whisperProgress: number | null; // null = idle, -1 = transcribing, 0-100 = model loading
@@ -109,12 +110,14 @@ interface ProjectStore {
   /** Drop the loaded video and every edit made on it. */
   clearProject: () => void;
   setPersistStatus: (s: "idle" | "saving" | "saved" | "restoring") => void;
-  selectSegment: (id: string) => void;
+  selectSegment: (id: string, multi?: boolean) => void;
+  selectAllSegments: () => void;
   /** Non-destructively divide the segment under timelineT into two. */
   splitAt: (timelineT: number) => void;
   /** Remove a segment from the timeline (when >1 segment exists). */
   deleteSegment: (id: string) => void;
   updateSegment: (id: string, updates: Partial<Segment>) => void;
+  updateSelectedSegments: (updates: Partial<Segment>) => void;
 
   // Playback
   play: () => void;
@@ -197,6 +200,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   isPlaying: false,
   currentTime: 0,
   selectedSegmentId: null,
+  selectedSegmentIds: [],
   selectedZoomId: null,
   pendingBackgroundBadge: false,
   whisperProgress: null,
@@ -241,6 +245,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       savedHistoryIndex < hist.length
         ? savedHistoryIndex
         : hist.length - 1;
+    const firstSegId = p.segments[0]?.id ?? null;
     set({
       project: p,
       history: hist,
@@ -249,7 +254,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       isPlaying: false,
       selectedZoomId: null,
       pendingBackgroundBadge: false,
-      selectedSegmentId: p.segments[0]?.id ?? null,
+      selectedSegmentId: firstSegId,
+      selectedSegmentIds: firstSegId ? [firstSegId] : [],
     });
   },
 
@@ -264,11 +270,41 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       isPlaying: false,
       selectedZoomId: null,
       selectedSegmentId: null,
+      selectedSegmentIds: [],
       pendingBackgroundBadge: false,
       exportProgress: null,
     }),
 
-  selectSegment: (id) => set({ selectedSegmentId: id }),
+  selectSegment: (id, multi = false) => {
+    const s = get();
+    if (!multi) {
+      set({ selectedSegmentId: id, selectedSegmentIds: [id] });
+      return;
+    }
+    const current = s.selectedSegmentIds;
+    let next: string[];
+    if (current.includes(id)) {
+      next = current.length > 1 ? current.filter((x) => x !== id) : current;
+    } else {
+      next = [...current, id];
+    }
+    set({
+      selectedSegmentIds: next,
+      selectedSegmentId: next.includes(s.selectedSegmentId ?? "")
+        ? s.selectedSegmentId
+        : (next[0] ?? null),
+    });
+  },
+
+  selectAllSegments: () => {
+    const s = get();
+    if (!s.project) return;
+    const allIds = s.project.segments.map((seg) => seg.id);
+    set({
+      selectedSegmentIds: allIds,
+      selectedSegmentId: allIds[0] ?? null,
+    });
+  },
 
   splitAt: (timelineT) => {
     const s = get();
@@ -340,41 +376,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const segments = s.project.segments;
     if (segments.length <= 1) return; // Cannot delete the only remaining segment
 
+    const isMultiDelete =
+      s.selectedSegmentIds.includes(id) &&
+      s.selectedSegmentIds.length > 1 &&
+      s.selectedSegmentIds.length < segments.length;
+    const toDeleteIds = new Set(isMultiDelete ? s.selectedSegmentIds : [id]);
+
+    const remainingSegments = segments.filter((seg) => !toDeleteIds.has(seg.id));
+    if (remainingSegments.length === 0) return;
+
     const targetIndex = segments.findIndex((seg) => seg.id === id);
-    if (targetIndex === -1) return;
-
-    const remainingSegments = segments.filter((seg) => seg.id !== id);
-    const newProject = { ...s.project, segments: remainingSegments };
-
-    // Select adjacent segment (prefer previous, otherwise next)
     const nextSelectedIndex = Math.max(0, Math.min(targetIndex - 1, remainingSegments.length - 1));
     const nextSelectedId = remainingSegments[nextSelectedIndex]?.id ?? remainingSegments[0]?.id ?? null;
 
-    // Adjust currentTime if it fell inside the deleted segment
-    let acc = 0;
-    let deletedStart = 0;
-    let deletedEnd = 0;
-    for (let i = 0; i < segments.length; i++) {
-      const d = segmentDuration(segments[i]!);
-      if (i === targetIndex) {
-        deletedStart = acc;
-        deletedEnd = acc + d;
-        break;
-      }
-      acc += d;
-    }
-
+    const newProject = { ...s.project, segments: remainingSegments };
     const newDur = projectDuration(newProject);
-    let newCurrentTime = s.currentTime;
-    if (s.currentTime >= deletedStart && s.currentTime <= deletedEnd) {
-      newCurrentTime = Math.min(newDur, deletedStart);
-    } else if (s.currentTime > deletedEnd) {
-      newCurrentTime = Math.max(0, s.currentTime - (deletedEnd - deletedStart));
-    }
-    newCurrentTime = Math.max(0, Math.min(newDur, newCurrentTime));
+    const newCurrentTime = Math.min(newDur, s.currentTime);
 
     pushHistoryAndSet(newProject, s, set, {
       selectedSegmentId: nextSelectedId,
+      selectedSegmentIds: nextSelectedId ? [nextSelectedId] : [],
       currentTime: newCurrentTime,
     });
   },
@@ -392,6 +413,23 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       ...s.project,
       segments: s.project.segments.map((seg) =>
         seg.id === id ? { ...seg, ...applied } : seg,
+      ),
+    };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  updateSelectedSegments: (updates) => {
+    const s = get();
+    if (!s.project || s.selectedSegmentIds.length === 0) return;
+    const applied =
+      updates.speed === undefined
+        ? updates
+        : { ...updates, speed: clampSpeed(updates.speed) };
+    const idSet = new Set(s.selectedSegmentIds);
+    const project = {
+      ...s.project,
+      segments: s.project.segments.map((seg) =>
+        idSet.has(seg.id) ? { ...seg, ...applied } : seg,
       ),
     };
     pushHistoryAndSet(project, s, set);
@@ -418,14 +456,23 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       const segId = s.project
         ? (resolveSegment(s.project, t)?.segment.id ?? s.selectedSegmentId)
         : s.selectedSegmentId;
-      return { currentTime: t, isPlaying: false, selectedSegmentId: segId };
+      return {
+        currentTime: t,
+        isPlaying: false,
+        selectedSegmentId: segId,
+        selectedSegmentIds: segId ? (s.selectedSegmentIds.includes(segId) ? s.selectedSegmentIds : [segId]) : [],
+      };
     }),
   setCurrentTime: (t) => {
     const s = get();
     if (s.isPlaying && s.project) {
       const r = resolveSegment(s.project, t);
       if (r && r.segment.id !== s.selectedSegmentId) {
-        set({ currentTime: t, selectedSegmentId: r.segment.id });
+        set({
+          currentTime: t,
+          selectedSegmentId: r.segment.id,
+          selectedSegmentIds: [r.segment.id],
+        });
         return;
       }
     }
@@ -618,21 +665,27 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setBackground: (bg) => {
     const state = get();
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      background: bg,
-    }));
-    if (!project) return;
+    if (!state.project || state.selectedSegmentIds.length === 0) return;
+    const idSet = new Set(state.selectedSegmentIds);
+    const project = {
+      ...state.project,
+      segments: state.project.segments.map((seg) =>
+        idSet.has(seg.id) ? { ...seg, background: bg } : seg,
+      ),
+    };
     pushHistoryAndSet(project, state, set, { pendingBackgroundBadge: false });
   },
 
   stageBackground: (bg) => {
     const state = get();
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      background: bg,
-    }));
-    if (!project) return;
+    if (!state.project || state.selectedSegmentIds.length === 0) return;
+    const idSet = new Set(state.selectedSegmentIds);
+    const project = {
+      ...state.project,
+      segments: state.project.segments.map((seg) =>
+        idSet.has(seg.id) ? { ...seg, background: bg } : seg,
+      ),
+    };
     // Staged background applies immediately to visual + sets badge
     set({ project, pendingBackgroundBadge: true });
   },
@@ -736,9 +789,16 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     if (state.historyIndex <= 0 || !state.project) return;
     const newIndex = state.historyIndex - 1;
     const snap = state.history[newIndex]!;
-    const stillSelected =
-      state.selectedSegmentId &&
-      snap.segments.some((seg) => seg.id === state.selectedSegmentId);
+    const validSelected = (state.selectedSegmentIds || []).filter((id) =>
+      snap.segments.some((seg) => seg.id === id),
+    );
+    const nextSelectedIds =
+      validSelected.length > 0
+        ? validSelected
+        : snap.segments[0]
+          ? [snap.segments[0].id]
+          : [];
+    const nextSelectedId = nextSelectedIds[0] ?? null;
 
     const currentMediaSrc = state.project.media.src;
     const currentAudioSrc = state.project.audioSrc;
@@ -758,9 +818,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({
       project: restoredProject,
       historyIndex: newIndex,
-      selectedSegmentId: stillSelected
-        ? state.selectedSegmentId
-        : (restoredProject.segments[0]?.id ?? null),
+      selectedSegmentId: nextSelectedId,
+      selectedSegmentIds: nextSelectedIds,
     });
   },
 
@@ -773,9 +832,16 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       return;
     const newIndex = state.historyIndex + 1;
     const snap = state.history[newIndex]!;
-    const stillSelected =
-      state.selectedSegmentId &&
-      snap.segments.some((seg) => seg.id === state.selectedSegmentId);
+    const validSelected = (state.selectedSegmentIds || []).filter((id) =>
+      snap.segments.some((seg) => seg.id === id),
+    );
+    const nextSelectedIds =
+      validSelected.length > 0
+        ? validSelected
+        : snap.segments[0]
+          ? [snap.segments[0].id]
+          : [];
+    const nextSelectedId = nextSelectedIds[0] ?? null;
 
     const currentMediaSrc = state.project.media.src;
     const currentAudioSrc = state.project.audioSrc;
@@ -795,9 +861,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({
       project: restoredProject,
       historyIndex: newIndex,
-      selectedSegmentId: stillSelected
-        ? state.selectedSegmentId
-        : (restoredProject.segments[0]?.id ?? null),
+      selectedSegmentId: nextSelectedId,
+      selectedSegmentIds: nextSelectedIds,
     });
   },
 
@@ -829,25 +894,27 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setStagePadding: (n) => {
     const s = get();
-    if (!s.selectedSegmentId) return;
-    s.updateSegment(s.selectedSegmentId, {
-      stagePadding: Math.max(0, Math.min(48, n)),
-    });
+    if (s.selectedSegmentIds.length === 0) return;
+    const clamped = Math.max(0, Math.min(48, n));
+    s.updateSelectedSegments({ stagePadding: clamped });
   },
 
   setAspectPreset: (preset) => {
     const s = get();
-    if (!s.selectedSegmentId) return;
-    s.updateSegment(s.selectedSegmentId, { aspectPreset: preset });
+    if (s.selectedSegmentIds.length === 0) return;
+    s.updateSelectedSegments({ aspectPreset: preset });
   },
 
   setFacecam: (updates) => {
     const s = get();
-    if (!s.selectedSegmentId) return;
-    const seg = selectedSegment(s);
-    if (!seg) return;
-    s.updateSegment(s.selectedSegmentId, {
-      facecam: { ...seg.facecam, ...updates },
-    });
+    if (!s.project || s.selectedSegmentIds.length === 0) return;
+    const idSet = new Set(s.selectedSegmentIds);
+    const project = {
+      ...s.project,
+      segments: s.project.segments.map((seg) =>
+        idSet.has(seg.id) ? { ...seg, facecam: { ...seg.facecam, ...updates } } : seg,
+      ),
+    };
+    pushHistoryAndSet(project, s, set);
   },
 }));
