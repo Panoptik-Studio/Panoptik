@@ -19,13 +19,16 @@ import {
 import { TRANSITION_ICONS } from "./CameraControls";
 
 const RULER_HEIGHT = 26;
-const TRACK_HEIGHT = 34;
-const FACECAM_TRACK_Y = 72;
+const VIDEO_TRACK_Y = 32;
+const VIDEO_TRACK_HEIGHT = 34;
+const ZOOM_TRACK_Y = 70;
+const ZOOM_TRACK_HEIGHT = 26;
+const FACECAM_TRACK_Y = 100;
 const FACECAM_TRACK_HEIGHT = 28;
 const DIAMOND_SIZE = 10;
-const SHELL_MIN_H = 150;
-const SHELL_MAX_H = 420;
-const SHELL_DEFAULT_H = 230;
+const SHELL_MIN_H = 160;
+const SHELL_MAX_H = 440;
+const SHELL_DEFAULT_H = 250;
 
 function drawRoundRect(
   ctx: CanvasRenderingContext2D,
@@ -138,7 +141,7 @@ export function Timeline() {
   // Canvas width scales with zoom: 0→0.5×, 1→2× base — ruler uses on-timeline duration
   const baseW = 1387;
   const canvasW = Math.round(baseW * (0.5 + zoom * 1.5));
-  const canvasH = 114;
+  const canvasH = 136;
   const timeToX = useCallback((t: number) => (t / duration) * canvasW, [duration, canvasW]);
   const xToTime = useCallback((x: number) => Math.max(0, Math.min(duration, (x / canvasW) * duration)), [duration, canvasW]);
 
@@ -194,15 +197,14 @@ export function Timeline() {
       }
     }
 
-    const TRACK_Y = 32;
     const segments = project?.segments ?? [];
 
-    // ── 2. Video Filmstrip Blocks ──
-    let acc = 0;
+    // ── 2. Video Filmstrip Blocks (Track 1) ──
+    let vidAcc = 0;
     for (const seg of segments) {
       const d = segmentDuration(seg);
-      const x0 = timeToX(acc);
-      const x1 = timeToX(acc + d);
+      const x0 = timeToX(vidAcc);
+      const x1 = timeToX(vidAcc + d);
       const segW = Math.max(1, x1 - x0);
       const selected = isPlaying
         ? seg.id === activeSegId
@@ -210,15 +212,15 @@ export function Timeline() {
 
       // Clip filmstrip to the rounded segment block
       ctx.save();
-      drawRoundRect(ctx, x0, TRACK_Y, segW, TRACK_HEIGHT, 4);
+      drawRoundRect(ctx, x0, VIDEO_TRACK_Y, segW, VIDEO_TRACK_HEIGHT, 4);
       ctx.clip();
 
       // Base background
       ctx.fillStyle = "#f0f2f5";
-      ctx.fillRect(x0, TRACK_Y, segW, TRACK_HEIGHT);
+      ctx.fillRect(x0, VIDEO_TRACK_Y, segW, VIDEO_TRACK_HEIGHT);
 
       // Tile thumbnails across the segment
-      const tileH = TRACK_HEIGHT;
+      const tileH = VIDEO_TRACK_HEIGHT;
       const tileW = 54;
       const numTiles = Math.max(1, Math.ceil(segW / tileW));
 
@@ -232,13 +234,13 @@ export function Timeline() {
 
         const thumb = getThumbnail(srcT);
         if (thumb) {
-          ctx.drawImage(thumb, 0, 0, thumb.width, thumb.height, tx, TRACK_Y, currentTileW, tileH);
+          ctx.drawImage(thumb, 0, 0, thumb.width, thumb.height, tx, VIDEO_TRACK_Y, currentTileW, tileH);
         } else {
           ctx.fillStyle = i % 2 === 0 ? "#f0f2f5" : "#e8ebed";
-          ctx.fillRect(tx, TRACK_Y, currentTileW, tileH);
+          ctx.fillRect(tx, VIDEO_TRACK_Y, currentTileW, tileH);
           if (currentTileW >= 20) {
             ctx.fillStyle = "rgba(0, 0, 0, 0.03)";
-            ctx.fillRect(tx + 4, TRACK_Y + 4, currentTileW - 8, tileH - 8);
+            ctx.fillRect(tx + 4, VIDEO_TRACK_Y + 4, currentTileW - 8, tileH - 8);
           }
         }
 
@@ -246,15 +248,15 @@ export function Timeline() {
           ctx.strokeStyle = "rgba(0, 0, 0, 0.08)";
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(tx + 0.5, TRACK_Y);
-          ctx.lineTo(tx + 0.5, TRACK_Y + tileH);
+          ctx.moveTo(tx + 0.5, VIDEO_TRACK_Y);
+          ctx.lineTo(tx + 0.5, VIDEO_TRACK_Y + tileH);
           ctx.stroke();
         }
       }
 
       if (selected) {
         ctx.fillStyle = "rgba(0, 112, 243, 0.10)";
-        ctx.fillRect(x0, TRACK_Y, segW, TRACK_HEIGHT);
+        ctx.fillRect(x0, VIDEO_TRACK_Y, segW, VIDEO_TRACK_HEIGHT);
       }
 
       ctx.restore();
@@ -263,12 +265,12 @@ export function Timeline() {
       if (selected) {
         ctx.strokeStyle = "#0070f3";
         ctx.lineWidth = 2;
-        drawRoundRect(ctx, x0 + 1, TRACK_Y + 1, Math.max(1, segW - 2), TRACK_HEIGHT - 2, 4);
+        drawRoundRect(ctx, x0 + 1, VIDEO_TRACK_Y + 1, Math.max(1, segW - 2), VIDEO_TRACK_HEIGHT - 2, 4);
         ctx.stroke();
       } else {
         ctx.strokeStyle = "#d4d4d4";
         ctx.lineWidth = 1;
-        drawRoundRect(ctx, x0 + 0.5, TRACK_Y + 0.5, Math.max(1, segW - 1), TRACK_HEIGHT - 1, 4);
+        drawRoundRect(ctx, x0 + 0.5, VIDEO_TRACK_Y + 0.5, Math.max(1, segW - 1), VIDEO_TRACK_HEIGHT - 1, 4);
         ctx.stroke();
       }
 
@@ -280,7 +282,7 @@ export function Timeline() {
         const badgeW = textMetrics.width + 8;
         const badgeH = 14;
         const badgeX = x0 + 4;
-        const badgeY = TRACK_Y + 4;
+        const badgeY = VIDEO_TRACK_Y + 4;
 
         ctx.fillStyle = selected ? "#0070f3" : "rgba(30, 30, 30, 0.85)";
         drawRoundRect(ctx, badgeX, badgeY, badgeW, badgeH, 3);
@@ -291,43 +293,166 @@ export function Timeline() {
       }
 
       // Split boundary line
-      if (acc + d < duration) {
+      if (vidAcc + d < duration) {
         ctx.strokeStyle = "#94a3b8";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.moveTo(x1 + 0.5, TRACK_Y - 2);
-        ctx.lineTo(x1 + 0.5, TRACK_Y + TRACK_HEIGHT + 2);
+        ctx.moveTo(x1 + 0.5, VIDEO_TRACK_Y - 2);
+        ctx.lineTo(x1 + 0.5, VIDEO_TRACK_Y + VIDEO_TRACK_HEIGHT + 2);
         ctx.stroke();
       }
 
-      acc += d;
+      vidAcc += d;
     }
 
-    // ── 3. Zoom Diamonds ──
+    // ── 3. Dedicated Zoom Track (Track 2) ──
+    let zoomAcc = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]!;
+      const d = segmentDuration(seg);
+      const x0 = timeToX(zoomAcc);
+      const x1 = timeToX(zoomAcc + d);
+      const segW = Math.max(1, x1 - x0);
+      const selected = isPlaying
+        ? seg.id === activeSegId
+        : (selectedSegmentIds.length > 0 ? selectedSegmentIds.includes(seg.id) : seg.id === selectedSegmentId);
+
+      const allZps = [...seg.zoomPoints, ...seg.stagedZoomPoints];
+      const hasZoom = allZps.length > 0;
+
+      ctx.save();
+      drawRoundRect(ctx, x0, ZOOM_TRACK_Y, segW, ZOOM_TRACK_HEIGHT, 4);
+      ctx.clip();
+
+      if (hasZoom) {
+        ctx.fillStyle = selected ? "#eff6ff" : "#f8fafc";
+        ctx.fillRect(x0, ZOOM_TRACK_Y, segW, ZOOM_TRACK_HEIGHT);
+
+        // Track label
+        ctx.fillStyle = selected ? "#0070f3" : "#64748b";
+        ctx.font = "bold 9px monospace";
+        if (segW > 70) {
+          ctx.fillText(`ZOOM (${allZps.length})`, x0 + 6, ZOOM_TRACK_Y + 17);
+        } else if (segW > 35) {
+          ctx.fillText("ZOOM", x0 + 4, ZOOM_TRACK_Y + 17);
+        }
+      } else {
+        ctx.fillStyle = "#fafafa";
+        ctx.fillRect(x0, ZOOM_TRACK_Y, segW, ZOOM_TRACK_HEIGHT);
+        if (segW > 45) {
+          ctx.fillStyle = "#94a3b8";
+          ctx.font = "9px monospace";
+          ctx.fillText("ZOOM", x0 + 6, ZOOM_TRACK_Y + 17);
+        }
+      }
+
+      ctx.restore();
+
+      // Outer stroke for zoom track segment
+      if (selected) {
+        ctx.strokeStyle = "#0070f3";
+        ctx.lineWidth = 1.5;
+        drawRoundRect(ctx, x0 + 1, ZOOM_TRACK_Y + 1, Math.max(1, segW - 2), ZOOM_TRACK_HEIGHT - 2, 4);
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = "#e2e8f0";
+        ctx.lineWidth = 1;
+        drawRoundRect(ctx, x0 + 0.5, ZOOM_TRACK_Y + 0.5, Math.max(1, segW - 1), ZOOM_TRACK_HEIGHT - 1, 4);
+        ctx.stroke();
+      }
+
+      // Group split line extending down
+      if (zoomAcc + d < duration) {
+        ctx.strokeStyle = "#94a3b8";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x1 + 0.5, ZOOM_TRACK_Y - 2);
+        ctx.lineTo(x1 + 0.5, ZOOM_TRACK_Y + ZOOM_TRACK_HEIGHT + 2);
+        ctx.stroke();
+      }
+
+      zoomAcc += d;
+    }
+
+    // ── 3b. Zoom Diamonds & Subtle Purple Affected Zone on Zoom Track ──
     for (const seg of segments) {
       for (const zp of [...seg.zoomPoints, ...seg.stagedZoomPoints]) {
         const st = sourceToTimeline(project!, seg.id, zp.t);
         if (st == null) continue;
         const x = timeToX(st);
-        const y = TRACK_Y + TRACK_HEIGHT / 2;
+        const y = ZOOM_TRACK_Y + ZOOM_TRACK_HEIGHT / 2;
         const staged = !!seg.stagedZoomPoints.find((s) => s.id === zp.id);
         const selected = zp.id === selectedZoomId;
+
+        // Calculate total affected window (zoom in + hold + zoom out)
+        const dur = Math.max(zp.dur ?? 0.45, 0.05);
+        const hold = zp.hold ?? 2.0;
+        const totalDur = (dur * 2 + hold) / Math.max(0.1, seg.speed);
+        const endHoldT = Math.min(duration, st + totalDur);
+        const endHoldX = timeToX(endHoldT);
+        const spanW = Math.max(14, endHoldX - x);
+
+        // 1. Draw subtle purple affected zone background capsule
+        ctx.save();
+        if (staged) {
+          ctx.fillStyle = "rgba(245, 166, 35, 0.18)";
+          ctx.strokeStyle = "rgba(245, 166, 35, 0.6)";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 2]);
+        } else if (selected) {
+          const grad = ctx.createLinearGradient(x, ZOOM_TRACK_Y + 3, x, ZOOM_TRACK_Y + ZOOM_TRACK_HEIGHT - 3);
+          grad.addColorStop(0, "rgba(168, 85, 247, 0.32)");
+          grad.addColorStop(1, "rgba(147, 51, 234, 0.20)");
+          ctx.fillStyle = grad;
+          ctx.strokeStyle = "#9333ea";
+          ctx.lineWidth = 1.5;
+        } else {
+          const grad = ctx.createLinearGradient(x, ZOOM_TRACK_Y + 3, x, ZOOM_TRACK_Y + ZOOM_TRACK_HEIGHT - 3);
+          grad.addColorStop(0, "rgba(168, 85, 247, 0.18)");
+          grad.addColorStop(1, "rgba(147, 51, 234, 0.10)");
+          ctx.fillStyle = grad;
+          ctx.strokeStyle = "rgba(168, 85, 247, 0.42)";
+          ctx.lineWidth = 1;
+        }
+
+        drawRoundRect(ctx, x, ZOOM_TRACK_Y + 3, spanW, ZOOM_TRACK_HEIGHT - 6, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        // 2. Draw zoom factor badge inside affected zone if wide enough
+        if (spanW >= 36) {
+          const scaleVal = zp.to?.scale ?? 2;
+          const scaleText = `${scaleVal.toFixed(1)}×`;
+          ctx.font = "bold 8.5px monospace";
+          ctx.fillStyle = staged ? "#b45309" : selected ? "#6b21a8" : "#7e22ce";
+          ctx.fillText(scaleText, x + DIAMOND_SIZE / 2 + 4, ZOOM_TRACK_Y + 16);
+        }
+        ctx.restore();
+
+        // 3. Zoom Diamond Marker
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(Math.PI / 4);
-        ctx.fillStyle = staged ? "#ffefcf" : "#0070f3";
-        ctx.strokeStyle = staged ? "#f5a623" : selected ? "#004299" : "#0761d1";
-        ctx.lineWidth = selected ? 2 : 1;
+        ctx.fillStyle = staged ? "#ffefcf" : selected ? "#9333ea" : "#a855f7";
+        ctx.strokeStyle = staged ? "#f5a623" : selected ? "#581c87" : "#7e22ce";
+        ctx.lineWidth = selected ? 2 : 1.2;
         if (staged) ctx.setLineDash([3, 2]);
         ctx.beginPath();
         ctx.rect(-DIAMOND_SIZE / 2, -DIAMOND_SIZE / 2, DIAMOND_SIZE, DIAMOND_SIZE);
         ctx.fill();
         ctx.stroke();
+
+        // Inner white dot for selected diamond
+        if (selected) {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(-1.5, -1.5, 3, 3);
+        }
+
         ctx.restore();
       }
     }
 
-    // ── 4. Dedicated Facecam Track (Grouped with Video) ──
+    // ── 4. Dedicated Facecam Track (Track 3, Grouped with Video & Zoom) ──
     let fcAcc = 0;
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i]!;
@@ -787,7 +912,7 @@ export function Timeline() {
           </div>
           {/* End line */}
           <div className="end-line pointer-events-none absolute top-0 h-full w-px" style={{ transform: `translateX(${endX}px)`, borderLeft: "1px solid rgba(0,0,0,0.08)" }} />
-          {/* Diamond hit areas (transparent, for dragging) — per segment, on-timeline */}
+          {/* Diamond hit areas on Dedicated Zoom Track (transparent, for dragging) */}
           {project.segments.flatMap((seg) =>
             [...seg.zoomPoints, ...seg.stagedZoomPoints].map((zp) => {
               const st = sourceToTimeline(project, seg.id, zp.t);
@@ -796,8 +921,8 @@ export function Timeline() {
               return (
                 <div
                   key={zp.id}
-                  className="absolute top-[32px] z-10 h-9 w-6 -translate-x-1/2 cursor-grab"
-                  style={{ left: timeToX(st) }}
+                  className="absolute z-10 flex h-[26px] w-6 -translate-x-1/2 cursor-grab items-center justify-center"
+                  style={{ top: ZOOM_TRACK_Y, left: timeToX(st) }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -810,7 +935,8 @@ export function Timeline() {
                 >
                   {hoveredDiamond === zp.id && (
                     <button
-                      className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#ee0000] text-[8px] font-bold text-white shadow-sm"
+                      className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#ee0000] text-[8px] font-bold text-white shadow-sm hover:scale-110 active:scale-95 transition-all"
+                      title="Delete zoom keyframe"
                       onClick={(e) => {
                         e.stopPropagation();
                         isStaged ? removeStagedZoom(zp.id) : removeZoomPoint(zp.id);
