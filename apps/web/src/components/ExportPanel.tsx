@@ -23,9 +23,9 @@ export function ExportPanel() {
 
   if (!project) {
     return (
-      <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
-        <h3 className="mb-1 text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>Export</h3>
-        <p className="font-mono text-[11px]" style={{ color: "#888" }}>Load a clip to export.</p>
+      <div className="pk-panel">
+        <h3 className="pk-panel-title mb-1">Export</h3>
+        <p className="pk-help">Load a clip to export.</p>
       </div>
     );
   }
@@ -33,48 +33,40 @@ export function ExportPanel() {
   const busy = isExporting;
 
   return (
-    <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
-      <h3 className="mb-3 text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>Export</h3>
+    <div className="pk-panel">
+      <h3 className="pk-panel-title mb-3">Export</h3>
 
-      <p className="mb-1.5 text-xs font-medium" style={{ color: "#4d4d4d" }}>Resolution</p>
+      <p className="pk-label mb-1.5">Resolution</p>
       <div className="mb-3 grid grid-cols-3 gap-1.5">
         {RESOLUTIONS.map((r) => (
           <button
             key={r}
             onClick={() => setResolution(r)}
             disabled={busy}
-            className="rounded-full border px-2 py-1.5 text-[11px] font-medium uppercase transition-colors disabled:opacity-40"
-            style={{
-              background: resolution === r ? "#171717" : "#ffffff",
-              borderColor: resolution === r ? "#171717" : "#ebebeb",
-              color: resolution === r ? "#ffffff" : "#4d4d4d",
-            }}
+            className="pk-seg uppercase"
+            data-active={resolution === r}
           >
             {r}
           </button>
         ))}
       </div>
 
-      <p className="mb-1.5 text-xs font-medium" style={{ color: "#4d4d4d" }}>Format</p>
+      <p className="pk-label mb-1.5">Format</p>
       <div className="mb-3 grid grid-cols-2 gap-1.5">
         {FORMATS.map((f) => (
           <button
             key={f}
             onClick={() => setFormat(f)}
             disabled={busy}
-            className="rounded-full border px-2 py-1.5 text-[11px] font-medium uppercase transition-colors disabled:opacity-40"
-            style={{
-              background: format === f ? "#171717" : "#ffffff",
-              borderColor: format === f ? "#171717" : "#ebebeb",
-              color: format === f ? "#ffffff" : "#4d4d4d",
-            }}
+            className="pk-seg uppercase"
+            data-active={format === f}
           >
             {f}
           </button>
         ))}
       </div>
 
-      <label className="mb-3 flex items-center gap-2 text-[11px]" style={{ color: "#4d4d4d" }}>
+      <label className="pk-label mb-3 flex items-center gap-2">
         <input
           type="checkbox"
           checked={burnCaptions}
@@ -88,10 +80,7 @@ export function ExportPanel() {
       <button
         onClick={handleExport}
         disabled={busy}
-        className="flex w-full items-center justify-center gap-1.5 rounded-full px-4 py-2 text-xs font-medium text-white transition-colors disabled:opacity-60"
-        style={{ background: "#171717" }}
-        onMouseEnter={(e) => { if (!busy) e.currentTarget.style.background = "#0070f3"; }}
-        onMouseLeave={(e) => { if (!busy) e.currentTarget.style.background = "#171717"; }}
+        className="pk-btn pk-btn-primary pk-btn-md w-full"
       >
         {busy ? `Exporting… ${Math.round((progress ?? 0) * 100)}%` : "Export video"}
       </button>
@@ -109,8 +98,7 @@ export function ExportPanel() {
         <a
           href={result.url}
           download={`panoptik-${resolution}.${result.format}`}
-          className="mt-2 flex items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-medium transition-colors hover:border-[#0070f3] hover:text-[#0070f3]"
-          style={{ borderColor: "#ebebeb", color: "#171717" }}
+          className="pk-btn pk-btn-ghost pk-btn-md mt-2 w-full"
         >
           Download · {(result.size / 1_000_000).toFixed(1)} MB
         </a>
@@ -122,7 +110,7 @@ export function ExportPanel() {
         </p>
       )}
 
-      <p className="mt-2 font-mono text-[10px]" style={{ color: "#888" }}>
+      <p className="pk-help mt-2" style={{ fontSize: 11 }}>
         Renders every frame through the same pipeline as the preview.
       </p>
     </div>

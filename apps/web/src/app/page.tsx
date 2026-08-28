@@ -41,11 +41,10 @@ export default function Home() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Poppins:wght@300;400;500;600&family=Lato:ital,wght@0,700;0,900;1,700;1,900&family=Alkatra:wght@700&display=swap');
-        :root { --font-nunito: 'Nunito', sans-serif; --font-poppins: 'Poppins', sans-serif; --font-lato: 'Lato', sans-serif; --font-alkatra: 'Alkatra', cursive; }
+        /* Fonts, base typography and the --font-* aliases live in globals.css
+           so the editor shares them. */
         * { box-sizing: border-box; }
-        html { scroll-behavior: smooth; }
-        body { font-family: var(--font-nunito); background: #F8F8F8; color: #1A1A1A; -webkit-font-smoothing: antialiased; overflow-x: clip; }
+        body { overflow-x: clip; }
         .page-bg { background: #F8F8F8; min-height: 100vh; }
         .container { max-width: 1300px; margin: 0 auto; padding: 0 40px; }
         @media (max-width: 768px) { .container { padding: 0 24px; } }

@@ -48,8 +48,8 @@ export function ProjectBrowser() {
   }, [loading, setProject]);
 
   return (
-    <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
-      <h3 className="mb-2 text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>Projects</h3>
+    <div className="pk-panel">
+      <h3 className="pk-panel-title mb-2">Projects</h3>
       <div className="flex gap-2">
         <button
           onClick={handleSave}

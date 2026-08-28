@@ -519,8 +519,8 @@ export function RecordModal() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
             </div>
             <div>
-              <h2 className="text-[13px] font-semibold leading-none" style={{ color: "#171717" }}>Record</h2>
-              <p className="text-[11px]" style={{ color: "#888" }}>Screen + camera · Local only · No upload</p>
+              <h2 className="pk-panel-title leading-none" style={{ fontSize: 14 }}>Record</h2>
+              <p className="pk-help" style={{ fontSize: 11 }}>Screen + camera · Local only · No upload</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -738,7 +738,7 @@ export function RecordModal() {
                     <button
                       key={v}
                       onClick={() => setLayout(v)}
-                      className="grid justify-items-center gap-[10px] rounded-[16px] border-0 px-4 pb-3 pt-[18px] text-[12px] font-medium leading-4 transition-colors"
+                      className="pk-ui grid justify-items-center gap-[10px] rounded-[13px] border-0 px-4 pb-3 pt-[18px] text-[12px] font-medium leading-4 transition-colors"
                       style={{ background: isActive ? "transparent" : "transparent", color: isActive ? "#171717" : "#888" }}
                     >
                       <span
@@ -875,8 +875,8 @@ export function RecordModal() {
               {/* Teleprompter toggle */}
               <button
                 onClick={() => setTeleOpen((v) => !v)}
-                className={`hidden sm:inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${teleOpen ? "text-white" : "hover:bg-white/10"}`}
-                style={{ background: teleOpen ? "#171717" : "#fafafa", borderColor: teleOpen ? "#0070f3" : "#ebebeb", color: teleOpen ? "white" : "#4d4d4d" }}
+                className="pk-seg hidden sm:inline-flex items-center gap-1.5"
+                data-active={teleOpen}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>
                 Teleprompter
@@ -887,10 +887,10 @@ export function RecordModal() {
             <div className="flex items-center gap-2">
               {state === "idle" && (
                 <>
-                  <button onClick={handleClose} className="rounded-full border px-4 py-2 text-xs font-medium hover:bg-white/[0.06]" style={{ borderColor: "#ebebeb", color: "#4d4d4d" }}>
+                  <button onClick={handleClose} className="pk-btn pk-btn-ghost pk-btn-md">
                     Cancel
                   </button>
-                  <button onClick={handleStart} className="inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-bold tracking-wide text-white shadow-lg transition hover:brightness-[1.07] active:scale-[0.98]" style={{ background: "#E11D48", boxShadow: "0 6px 20px rgba(225,29,72,0.35), inset 0 1px 0 rgba(255,255,255,0.18)" }}>
+                  <button onClick={handleStart} className="pk-btn pk-btn-record pk-btn-md" style={{ boxShadow: "0 6px 20px rgba(225,29,72,0.28)" }}>
                     <span className="h-2.5 w-2.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.9)]" />
                     Record
                   </button>
@@ -900,7 +900,7 @@ export function RecordModal() {
                 <div className="rounded-full bg-white/10 px-5 py-2 text-xs font-medium tracking-widest text-white">COUNTDOWN…</div>
               )}
               {state === "recording" && (
-                <button onClick={handleStop} className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-2.5 text-sm font-bold tracking-wide text-gray-900 shadow-lg transition hover:bg-gray-100 active:scale-[0.98]">
+                <button onClick={handleStop} className="pk-btn pk-btn-ghost pk-btn-md">
                   <span className="h-3 w-3 rounded-[3px] bg-red-600" />
                   Stop & Import
                 </button>
@@ -911,7 +911,7 @@ export function RecordModal() {
             </div>
 
             {/* Right: hint */}
-            <div className="hidden lg:flex items-center gap-2 text-[11px]" style={{ color: "#888" }}>
+            <div className="pk-ui hidden lg:flex items-center gap-2 text-[11px]" style={{ color: "#888" }}>
               {layout !== "screenOnly" && cameraEnabled ? (
                 pipSupported ? (
                   <span>Camera floats above other apps · share a window, not the whole screen</span>
@@ -946,7 +946,7 @@ export function RecordModal() {
             </div>
           )}
 
-          <div className="shrink-0 border-t px-4 py-2 text-center text-[10px] tracking-wide" style={{ borderColor: "#ebebeb", color: "#888" }}>
+          <div className="pk-ui shrink-0 border-t px-4 py-2 text-center text-[11px]" style={{ borderColor: "#ebebeb", color: "#888" }}>
             Press <span className="rounded border px-1 py-px font-mono text-[10px]" style={{ borderColor: "#ebebeb", background: "#fafafa" }}>E</span> camera · <span className="rounded border px-1 py-px font-mono text-[10px]" style={{ borderColor: "#ebebeb", background: "#fafafa" }}>D</span> mic · <span className="rounded border px-1 py-px font-mono text-[10px]" style={{ borderColor: "#ebebeb", background: "#fafafa" }}>Esc</span> close
           </div>
         </div>

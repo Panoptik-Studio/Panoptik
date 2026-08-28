@@ -19,10 +19,10 @@ export function ToolTrace() {
   }, []);
 
   return (
-    <div className="flex flex-col bg-white p-4">
-      <h3 className="mb-3 text-[11px] font-semibold tracking-[0.08em]" style={{ color: "#888", fontFamily: "var(--font-mono)" }}>AGENT TOOL TRACE</h3>
+    <div className="flex flex-col bg-white p-5">
+      <h3 className="pk-eyebrow mb-3">Agent tool trace</h3>
       {entries.length === 0 ? (
-        <div className="flex items-center justify-center rounded-lg border bg-[#fafafa] px-4 py-8" style={{ borderColor: "#ebebeb" }}>
+        <div className="flex items-center justify-center rounded-[12px] border px-4 py-8" style={{ borderColor: "#ebebeb", background: "#f8f8f8" }}>
           <p className="max-w-[200px] text-center text-xs leading-5" style={{ color: "#888" }}>No agent calls yet. Open in ChatGPT browser and ask the agent to edit your project.</p>
         </div>
       ) : (

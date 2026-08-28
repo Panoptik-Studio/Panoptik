@@ -43,47 +43,41 @@ export function StageControls() {
 
   if (!project) {
     return (
-      <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
-        <h3 className="mb-1 text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>Stage</h3>
-        <p className="font-mono text-[11px]" style={{ color: "#888" }}>Load a clip to style the stage.</p>
+      <div className="pk-panel">
+        <h3 className="pk-panel-title mb-1">Stage</h3>
+        <p className="pk-help">Load a clip to style the stage.</p>
       </div>
     );
   }
 
   return (
-    <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
-      <h3 className="mb-3 text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>Stage</h3>
+    <div className="pk-panel">
+      <h3 className="pk-panel-title mb-3">Stage</h3>
 
       {/* Padding resizer — reduces white space around black video container, and black letterboxing is via aspect */}
       <div className="mb-4">
         <div className="mb-1.5 flex items-center justify-between">
-          <span className="text-xs font-medium" style={{ color: "#4d4d4d" }}>Padding</span>
-          <span className="font-mono text-[11px]" style={{ color: "#0070f3" }}>{stagePadding}px</span>
+          <span className="pk-label">Padding</span>
+          <span className="pk-value" style={{ color: "#0070f3" }}>{stagePadding}px</span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setStagePadding(stagePadding - 4)} className="flex h-7 w-7 items-center justify-center rounded-full border bg-white text-xs transition-colors" style={{ borderColor: "#ebebeb", color: "#171717" }} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#0070f3"; e.currentTarget.style.color = "#0070f3"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#ebebeb"; e.currentTarget.style.color = "#171717"; }}>−</button>
-          <input type="range" min={0} max={48} step={4} value={stagePadding} onChange={(e) => setStagePadding(Number(e.target.value))} className="h-1 flex-1 appearance-none rounded-full accent-[#171717]" style={{ background: "#ebebeb" }} />
-          <button onClick={() => setStagePadding(stagePadding + 4)} className="flex h-7 w-7 items-center justify-center rounded-full border bg-white text-xs transition-colors" style={{ borderColor: "#ebebeb", color: "#171717" }} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#0070f3"; e.currentTarget.style.color = "#0070f3"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#ebebeb"; e.currentTarget.style.color = "#171717"; }}>+</button>
+          <button onClick={() => setStagePadding(stagePadding - 4)} className="pk-icon-btn h-7 w-7 text-xs">−</button>
+          <input type="range" min={0} max={48} step={4} value={stagePadding} onChange={(e) => setStagePadding(Number(e.target.value))} className="pk-range flex-1" />
+          <button onClick={() => setStagePadding(stagePadding + 4)} className="pk-icon-btn h-7 w-7 text-xs">+</button>
         </div>
-        <p className="mt-1 font-mono text-[10px]" style={{ color: "#888" }}>White space around video. 0 = edge-to-edge.</p>
+        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>White space around video. 0 = edge-to-edge.</p>
       </div>
 
       {/* Aspect — controls black letterboxing */}
       <div className="mb-4">
-        <p className="mb-1.5 text-xs font-medium" style={{ color: "#4d4d4d" }}>Aspect</p>
+        <p className="pk-label mb-1.5">Aspect</p>
         <div className="grid grid-cols-4 gap-1.5">
           {(["16:9", "9:16", "1:1", "4:3"] as const).map((preset) => (
             <button
               key={preset}
               onClick={() => setAspectPreset(preset)}
-              className={`rounded-full border px-2 py-1.5 text-[11px] font-medium transition-colors ${project.aspectPreset === preset ? "text-white" : "bg-white"}`}
-              style={{
-                background: project.aspectPreset === preset ? "#171717" : "#ffffff",
-                borderColor: project.aspectPreset === preset ? "#171717" : "#ebebeb",
-                color: project.aspectPreset === preset ? "#ffffff" : "#4d4d4d",
-              }}
-              onMouseEnter={(e) => { if (project.aspectPreset !== preset) { e.currentTarget.style.borderColor = "#0070f3"; e.currentTarget.style.color = "#0070f3"; } else e.currentTarget.style.background = "#0070f3"; }}
-              onMouseLeave={(e) => { if (project.aspectPreset !== preset) { e.currentTarget.style.borderColor = "#ebebeb"; e.currentTarget.style.color = "#4d4d4d"; } else e.currentTarget.style.background = "#171717"; }}
+              className="pk-seg"
+              data-active={project.aspectPreset === preset}
             >
               {preset}
             </button>
@@ -95,8 +89,8 @@ export function StageControls() {
       {project.facecam.src && (
         <div className="mb-4">
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-medium" style={{ color: "#4d4d4d" }}>Camera</span>
-            <span className="font-mono text-[11px]" style={{ color: "#888" }}>
+            <span className="pk-label">Camera</span>
+            <span className="pk-help">
               {Math.round(project.facecam.size * 100)}%
             </span>
           </div>
@@ -114,12 +108,8 @@ export function StageControls() {
                   title={c.label}
                   aria-label={c.label}
                   aria-pressed={active}
-                  className="rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors"
-                  style={{
-                    background: active ? "#171717" : "#ffffff",
-                    borderColor: active ? "#171717" : "#ebebeb",
-                    color: active ? "#ffffff" : "#4d4d4d",
-                  }}
+                  className="pk-seg"
+                  data-active={active}
                 >
                   {c.label.split(" ")[0]![0]}
                   {c.label.split(" ")[1]![0]}
@@ -143,8 +133,7 @@ export function StageControls() {
                 y: project.facecam.y > 0.5 ? 0.97 - hFrac : project.facecam.y,
               });
             }}
-            className="h-1 w-full appearance-none rounded-full accent-[#171717]"
-            style={{ background: "#ebebeb" }}
+            className="pk-range"
             aria-label="Camera size"
           />
           <div className="mt-2 flex gap-1.5">
@@ -154,12 +143,8 @@ export function StageControls() {
                 <button
                   key={s}
                   onClick={() => setFacecam({ shape: s })}
-                  className="flex-1 rounded-full border px-2 py-1 text-[11px] font-medium capitalize transition-colors"
-                  style={{
-                    background: active ? "#171717" : "#ffffff",
-                    borderColor: active ? "#171717" : "#ebebeb",
-                    color: active ? "#ffffff" : "#4d4d4d",
-                  }}
+                  className="pk-seg flex-1 capitalize"
+                  data-active={active}
                 >
                   {s}
                 </button>
@@ -171,7 +156,7 @@ export function StageControls() {
 
       {/* Themes — beautiful presets for stage background (gradient/solid) */}
       <div>
-        <p className="mb-1.5 text-xs font-medium" style={{ color: "#4d4d4d" }}>Theme</p>
+        <p className="pk-label mb-1.5">Theme</p>
         <div className="grid grid-cols-3 gap-2">
           {THEMES.map((t) => {
             const isActive =
@@ -198,7 +183,7 @@ export function StageControls() {
             );
           })}
         </div>
-        <p className="mt-2 font-mono text-[10px]" style={{ color: "#888" }}>Applies to stage background behind video. Staged, commit to keep.</p>
+        <p className="pk-help mt-2" style={{ fontSize: 11 }}>Applies to stage background behind video. Staged, commit to keep.</p>
       </div>
     </div>
   );

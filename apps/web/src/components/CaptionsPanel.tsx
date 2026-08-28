@@ -86,9 +86,9 @@ export function CaptionsPanel() {
 
   if (!project)
     return (
-      <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
-        <h3 className="mb-1 text-sm font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>Captions</h3>
-        <p className="text-xs" style={{ color: "#888" }}>Import a clip to generate captions from its audio.</p>
+      <div className="pk-panel">
+        <h3 className="pk-panel-title mb-1">Captions</h3>
+        <p className="pk-help">Import a clip to generate captions from its audio.</p>
       </div>
     );
 
@@ -96,16 +96,13 @@ export function CaptionsPanel() {
   const committedCaptions = project.captions;
 
   return (
-    <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
-      <h3 className="mb-2 text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>Captions</h3>
+    <div className="pk-panel">
+      <h3 className="pk-panel-title mb-2">Captions</h3>
       <div className="flex gap-2">
         <button
           onClick={handleGenerate}
           disabled={progress !== null}
-          className="rounded-full px-4 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-40"
-          style={{ background: "#171717" }}
-          onMouseEnter={(e) => { if (progress === null) e.currentTarget.style.background = "#0070f3"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "#171717"; }}
+          className="pk-btn pk-btn-primary pk-btn-sm"
         >
           {progress !== null ? (progress === -1 ? "Transcribing…" : `Loading ${Math.round(progress)}%`) : "Generate Captions"}
         </button>

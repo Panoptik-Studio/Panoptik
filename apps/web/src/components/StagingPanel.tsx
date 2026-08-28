@@ -25,7 +25,7 @@ function Row({
     >
       <div className="flex min-w-0 items-center gap-2">
         <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "#f5a623" }} />
-        <span className="truncate text-[11px]" style={{ color: "#171717" }}>{label}</span>
+        <span className="pk-ui truncate text-[12px]" style={{ color: "#1a1a1a" }}>{label}</span>
         <span className="shrink-0 font-mono text-[10px]" style={{ color: "#ab570a" }}>{detail}</span>
       </div>
       <button
@@ -64,15 +64,10 @@ export function StagingPanel() {
   return (
     <div className="border-b p-4" style={{ borderColor: "#ebebeb", background: "#fffdf8" }}>
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>
+        <h3 className="pk-panel-title">
           Proposed changes
         </h3>
-        <span
-          className="rounded-full px-2 py-0.5 font-mono text-[10px] font-medium"
-          style={{ background: "#ffefcf", color: "#ab570a", border: "1px solid #ffe8c2" }}
-        >
-          {total} pending
-        </span>
+        <span className="pk-chip pk-chip-amber">{total} pending</span>
       </div>
 
       <div className="space-y-1.5">
@@ -107,23 +102,19 @@ export function StagingPanel() {
       <div className="mt-3 flex gap-2">
         <button
           onClick={commitAll}
-          className="flex-1 rounded-full px-3 py-2 text-[11px] font-medium text-white transition-colors"
-          style={{ background: "#171717" }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "#0070f3")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "#171717")}
+          className="pk-btn pk-btn-primary pk-btn-sm flex-1"
         >
           Apply all
         </button>
         <button
           onClick={clearStaged}
-          className="rounded-full border px-3 py-2 text-[11px] font-medium transition-colors hover:bg-white"
-          style={{ borderColor: "#ebebeb", color: "#4d4d4d" }}
+          className="pk-btn pk-btn-ghost pk-btn-sm"
         >
           Discard
         </button>
       </div>
 
-      <p className="mt-2 font-mono text-[10px]" style={{ color: "#ab570a" }}>
+      <p className="pk-help mt-2" style={{ color: "#ab570a", fontSize: 11 }}>
         Proposals are drawn amber and do not affect the video until applied.
       </p>
     </div>

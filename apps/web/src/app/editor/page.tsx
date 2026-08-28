@@ -24,12 +24,12 @@ type LeftTab = "media" | "zoom" | "text" | "captions" | "camera" | "stage";
 export default function EditorPage() {
   const [activeTab, setActiveTab] = React.useState<LeftTab>("zoom");
   return (
-    <div className="flex h-screen flex-col" style={{ background: "#fafafa" }}>
+    <div className="flex h-screen flex-col" style={{ background: "#f8f8f8" }}>
       <Toolbar />
 
       <div className="flex min-h-0 flex-1">
         {/* Left — 6 tabs grouped by job: Media / Zoom / Text / Captions / Camera / Stage */}
-        <aside className="flex w-[56px] shrink-0 flex-col items-center gap-1.5 border-r bg-white py-4" style={{ borderColor: "#ebebeb" }}>
+        <aside className="flex w-[64px] shrink-0 flex-col items-center gap-2 border-r bg-white py-5" style={{ borderColor: "#ebebeb" }}>
           <ToolBtn icon="media" label="Media" active={activeTab === "media"} onClick={() => setActiveTab("media")} />
           <ToolBtn icon="zoom" label="Zoom" kbd="Z" active={activeTab === "zoom"} onClick={() => setActiveTab("zoom")} />
           <ToolBtn icon="text" label="Text" kbd="T" active={activeTab === "text"} onClick={() => setActiveTab("text")} />
@@ -38,13 +38,13 @@ export default function EditorPage() {
           <ToolBtn icon="stage" label="Stage" active={activeTab === "stage"} onClick={() => setActiveTab("stage")} />
           <div className="mt-auto flex flex-col items-center gap-2 pb-2">
             <div className="h-px w-6 rounded-full" style={{ background: "#ebebeb" }} />
-            <div className="flex h-7 w-7 items-center justify-center rounded-full border bg-[#fafafa] text-[10px] font-bold tracking-widest" style={{ borderColor: "#ebebeb", color: "#888" }} title="Local · No upload">●</div>
+            <div className="flex h-7 w-7 items-center justify-center rounded-full border text-[10px] font-bold tracking-widest" style={{ borderColor: "#ebebeb", background: "#f8f8f8", color: "#10b981" }} title="Local · No upload">●</div>
           </div>
         </aside>
 
         {/* Center */}
-        <main className="flex min-w-0 flex-1 flex-col bg-[#fafafa]">
-          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#fafafa]">
+        <main className="flex min-w-0 flex-1 flex-col" style={{ background: "#f8f8f8" }}>
+          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
             <PreviewCanvas />
           </div>
           <Timeline />
@@ -69,7 +69,7 @@ export default function EditorPage() {
           <div className="border-t" style={{ borderColor: "#ebebeb" }}>
             <ToolTrace />
           </div>
-          <div className="shrink-0 border-t bg-[#fafafa] px-4 py-3 text-center text-[10px] leading-relaxed tracking-wide" style={{ borderColor: "#ebebeb", color: "#888" }}>
+          <div className="pk-ui mt-auto shrink-0 border-t px-4 py-3 text-center text-[11px] leading-relaxed" style={{ borderColor: "#ebebeb", background: "#f8f8f8", color: "#888" }}>
             <span className="inline-flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3] shadow-[0_0_6px_rgba(0,112,243,0.5)]" /> Local · No upload · 100% in browser
             </span>
@@ -127,21 +127,15 @@ function ToolBtn({ icon, label, kbd, active, onClick }: { icon: string; label: s
     <div className="group relative">
       <button
         onClick={onClick}
-        className="relative flex h-9 w-9 items-center justify-center rounded-[8px] transition-colors"
-        style={{
-          color: active ? "#171717" : "#888",
-          background: active ? "#fafafa" : "transparent",
-          border: active ? "1px solid #ebebeb" : "1px solid transparent",
-        }}
-        onMouseEnter={(e) => { if (!active) { e.currentTarget.style.color = "#0070f3"; e.currentTarget.style.background = "#f5f5f5"; } }}
-        onMouseLeave={(e) => { if (!active) { e.currentTarget.style.color = "#888"; e.currentTarget.style.background = "transparent"; } }}
+        className="pk-icon-btn relative h-10 w-10"
+        data-active={!!active}
+        aria-pressed={!!active}
       >
-        {active && <div className="absolute -left-[14px] h-[18px] w-[3px] rounded-r-full" style={{ background: "#171717" }} />}
         {icons[icon]}
       </button>
-      <div className="pointer-events-none absolute left-[46px] top-1/2 z-50 hidden -translate-y-1/2 items-center gap-2 rounded-lg border bg-white px-2.5 py-1.5 text-xs font-medium whitespace-nowrap shadow-vercel-5 group-hover:flex" style={{ borderColor: "#ebebeb", color: "#171717" }}>
+      <div className="pk-ui pointer-events-none absolute left-[52px] top-1/2 z-50 hidden -translate-y-1/2 items-center gap-2 whitespace-nowrap rounded-[11px] border bg-white px-3 py-1.5 text-[12px] font-medium pk-shadow-md group-hover:flex" style={{ borderColor: "#ebebeb", color: "#1a1a1a" }}>
         {label}
-        {kbd && <span className="rounded border bg-[#fafafa] px-1 py-px text-[10px] font-mono" style={{ borderColor: "#ebebeb", color: "#888" }}>{kbd}</span>}
+        {kbd && <span className="rounded-md border bg-[#f1f1f1] px-1.5 py-px font-mono text-[10px]" style={{ borderColor: "#ebebeb", color: "#666" }}>{kbd}</span>}
       </div>
     </div>
   );

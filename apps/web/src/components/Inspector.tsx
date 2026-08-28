@@ -18,8 +18,8 @@ function Row({ label, value, children }: { label: string; value: string; childre
   return (
     <div className="mb-3 last:mb-0">
       <div className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[11px] font-medium" style={{ color: "#4d4d4d" }}>{label}</span>
-        <span className="font-mono text-[11px]" style={{ color: "#888" }}>{value}</span>
+        <span className="pk-label">{label}</span>
+        <span className="pk-help">{value}</span>
       </div>
       {children}
     </div>
@@ -44,11 +44,11 @@ export function Inspector() {
 
   if (!zoom) {
     return (
-      <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
-        <h3 className="mb-1 text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>
+      <div className="pk-panel">
+        <h3 className="pk-panel-title mb-1">
           Zoom settings
         </h3>
-        <p className="font-mono text-[11px]" style={{ color: "#888" }}>
+        <p className="pk-help">
           Select a zoom — click its handle on the canvas, its diamond on the timeline, or a row above.
         </p>
       </div>
@@ -60,21 +60,20 @@ export function Inspector() {
   const patchTo = (to: Partial<ZoomPoint["to"]>) => patch({ to: { ...zoom.to, ...to } });
 
   return (
-    <div className="border-b bg-white p-4" style={{ borderColor: "#ebebeb" }}>
+    <div className="pk-panel">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-[13px] font-semibold" style={{ color: "#171717", letterSpacing: "-0.02em" }}>
+        <h3 className="pk-panel-title">
           Zoom settings
         </h3>
         <div className="flex items-center gap-1.5">
           {zoom.staged && (
-            <span className="rounded-full bg-[#ffefcf] px-1.5 py-px font-mono text-[9px] font-medium" style={{ color: "#ab570a" }}>
+            <span className="pk-chip pk-chip-amber">
               staged
             </span>
           )}
           <button
             onClick={() => seek(zoom.t)}
-            className="rounded-full border px-2 py-0.5 font-mono text-[10px] transition-colors hover:border-[#0070f3] hover:text-[#0070f3]"
-            style={{ borderColor: "#ebebeb", color: "#888" }}
+            className="pk-chip"
             title="Move the playhead to this zoom"
           >
             {zoom.t.toFixed(2)}s
@@ -92,7 +91,7 @@ export function Inspector() {
           onChange={(e) => patchTo({ scale: Number(e.target.value) })}
           onPointerUp={commitDrag}
           onKeyUp={commitDrag}
-          className="w-full accent-[#0070f3]"
+          className="pk-range"
         />
       </Row>
 
@@ -106,7 +105,7 @@ export function Inspector() {
           onChange={(e) => patch({ dur: Number(e.target.value) })}
           onPointerUp={commitDrag}
           onKeyUp={commitDrag}
-          className="w-full accent-[#0070f3]"
+          className="pk-range"
         />
       </Row>
 
@@ -120,7 +119,7 @@ export function Inspector() {
           onChange={(e) => patch({ hold: Number(e.target.value) })}
           onPointerUp={commitDrag}
           onKeyUp={commitDrag}
-          className="w-full accent-[#0070f3]"
+          className="pk-range"
         />
       </Row>
 
@@ -135,7 +134,7 @@ export function Inspector() {
             onChange={(e) => patchTo({ x: Number(e.target.value) })}
             onPointerUp={commitDrag}
             onKeyUp={commitDrag}
-            className="w-full accent-[#0070f3]"
+            className="pk-range"
             aria-label="Focal X"
           />
           <input
@@ -147,7 +146,7 @@ export function Inspector() {
             onChange={(e) => patchTo({ y: Number(e.target.value) })}
             onPointerUp={commitDrag}
             onKeyUp={commitDrag}
-            className="w-full accent-[#0070f3]"
+            className="pk-range"
             aria-label="Focal Y"
           />
         </div>
@@ -164,12 +163,8 @@ export function Inspector() {
                   patch({ ease: o.value });
                   commitDrag();
                 }}
-                className="flex-1 rounded-full border px-2 py-1 text-[11px] font-medium transition-colors"
-                style={{
-                  background: active ? "#171717" : "#fafafa",
-                  borderColor: active ? "#171717" : "#ebebeb",
-                  color: active ? "#ffffff" : "#4d4d4d",
-                }}
+                className="pk-seg flex-1"
+                data-active={active}
               >
                 {o.label}
               </button>
@@ -184,8 +179,7 @@ export function Inspector() {
             patchTo({ scale: 1, x: 0.5, y: 0.5 });
             commitDrag();
           }}
-          className="flex-1 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors hover:border-[#0070f3] hover:text-[#0070f3]"
-          style={{ borderColor: "#ebebeb", color: "#4d4d4d" }}
+          className="pk-btn pk-btn-ghost pk-btn-sm flex-1"
           title="Make this keyframe pull the camera back out"
         >
           Reset to full frame
@@ -196,8 +190,7 @@ export function Inspector() {
             else removeZoomPoint(zoom.id);
             setSelectedZoom(null);
           }}
-          className="rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors hover:bg-[#fff0f0]"
-          style={{ borderColor: "#ebebeb", color: "#e11d48" }}
+          className="pk-btn pk-btn-danger pk-btn-sm"
         >
           Delete
         </button>
