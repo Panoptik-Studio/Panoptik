@@ -268,7 +268,7 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
         // window's video as a solid black rectangle in the capture.
         displaySurface: "window",
       } as unknown as MediaTrackConstraints,
-      audio: false,
+      audio: true,
       // Keep this tab out of the picker: capturing it would recurse the
       // recorder UI into its own recording.
       selfBrowserSurface: "exclude",

@@ -129,6 +129,7 @@ function facecam(v: unknown, fallback: Segment["facecam"]): Segment["facecam"] {
       typeof fc.transitionDuration === "number" && Number.isFinite(fc.transitionDuration)
         ? num(fc.transitionDuration, fallback.transitionDuration ?? 0.6, 0.05, 5)
         : fallback.transitionDuration,
+    audioVolume: num(fc.audioVolume, fallback.audioVolume ?? 1, 0, 2),
   };
 }
 
@@ -191,6 +192,7 @@ function sanitizeSegment(
     aspectPreset: aspectPreset(saved?.aspectPreset, base.aspectPreset),
     background: background(saved?.background, base.background),
     facecam: facecam(saved?.facecam, { ...base.facecam, src: savedFacecamSrc }),
+    audioVolume: num(saved?.audioVolume, base.audioVolume ?? 1, 0, 2),
     zoomPoints: arr<unknown>(saved?.zoomPoints, MAX_ZOOMS)
       .map((z) => zoomPoint(z, lo, hi))
       .filter((z): z is ZoomPoint => z !== null),

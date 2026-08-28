@@ -22,7 +22,7 @@ import type { ExportOpts, Project } from "@panoptik/schema";
 import { presetAspect } from "./layout";
 import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator } from "./decode";
 import { renderFrame } from "./render";
-import { concatAudio, sliceAndStretchAudio } from "./timeStretch";
+import { applyVolume, concatAudio, mixAudio, sliceAndStretchAudio } from "./timeStretch";
 import { projectDuration, segmentDuration } from "./timeline";
 
 // Register WASM AAC encoder fallback so all platforms/browsers (including Linux Chrome/Chromium)
@@ -217,34 +217,63 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         audioBufferCache.set("default", audioBuffer);
         const { decodeViaAudioContext } = await import("./audio");
 
-        const parts: AudioBuffer[] = [];
-        for (const seg of project.segments) {
-          const segSrc = seg.facecam?.src || project.audioSrc || project.media.src;
-          let buf = audioBuffer;
-          if (segSrc && audioBufferCache.has(segSrc)) {
-            buf = audioBufferCache.get(segSrc) || audioBuffer;
-          } else if (segSrc && segSrc.startsWith("blob:")) {
+        const getBufferForSrc = async (src: string | null | undefined): Promise<AudioBuffer | null> => {
+          if (!src) return null;
+          if (audioBufferCache.has(src)) return audioBufferCache.get(src) || null;
+          if (src.startsWith("blob:")) {
             try {
-              const res = await fetch(segSrc);
+              const res = await fetch(src);
               const blob = await res.blob();
               const decoded = await decodeViaAudioContext(blob);
-              audioBufferCache.set(segSrc, decoded || audioBuffer);
-              buf = decoded || audioBuffer;
+              audioBufferCache.set(src, decoded);
+              return decoded;
             } catch {
-              audioBufferCache.set(segSrc, audioBuffer);
+              audioBufferCache.set(src, null);
+              return null;
+            }
+          }
+          return null;
+        };
+
+        const screenSrc = project.media.src;
+        const defaultScreenBuf = (await getBufferForSrc(screenSrc)) || audioBuffer;
+
+        const parts: AudioBuffer[] = [];
+        for (const seg of project.segments) {
+          const screenVol = seg.audioVolume ?? 1;
+          const fcVol = seg.facecam?.audioVolume ?? 1;
+
+          // 1. Process Screen Audio
+          const screenPart = sliceAndStretchAudio(defaultScreenBuf, seg);
+
+          // 2. Process Facecam / Mic Audio
+          const fcSrc = seg.facecam?.src;
+          let fcPart: AudioBuffer | null = null;
+          if (fcSrc) {
+            const fcBuf = await getBufferForSrc(fcSrc);
+            if (fcBuf) {
+              const fcStartT = seg.facecam?.startT ?? 0;
+              const fcSliceSeg =
+                fcStartT > 0
+                  ? {
+                      ...seg,
+                      srcStart: Math.max(0, seg.srcStart - fcStartT),
+                      srcEnd: Math.max(0, seg.srcEnd - fcStartT),
+                    }
+                  : seg;
+              fcPart = sliceAndStretchAudio(fcBuf, fcSliceSeg);
             }
           }
 
-          const fcStartT = seg.facecam?.startT ?? 0;
-          const sliceSeg =
-            fcStartT > 0
-              ? {
-                  ...seg,
-                  srcStart: Math.max(0, seg.srcStart - fcStartT),
-                  srcEnd: Math.max(0, seg.srcEnd - fcStartT),
-                }
-              : seg;
-          parts.push(sliceAndStretchAudio(buf, sliceSeg));
+          // 3. Dual-track mixing with volume scaling
+          let mixedSegAudio: AudioBuffer;
+          if (fcPart) {
+            mixedSegAudio = mixAudio(screenPart, screenVol, fcPart, fcVol);
+          } else {
+            mixedSegAudio = applyVolume(screenPart, screenVol);
+          }
+
+          parts.push(mixedSegAudio);
         }
 
         if (parts.length > 0) {

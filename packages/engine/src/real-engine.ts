@@ -44,10 +44,16 @@ export function createRealEngine(): MediaEngine {
       // After loadClip: it tears down first, which revokes the previous take's
       // facecam URL and drops its cached <video>.
       const facecamSrc = await setFacecamBlob(facecam);
-      if (facecamSrc) proj.segments[0]!.facecam.src = facecamSrc;
-      // The screen track is captured silently; the microphone rides along with
-      // the camera recording, so the audio has to be read from there.
-      if (audio) proj.audioSrc = await setAudioBlob(audio);
+      if (facecamSrc) {
+        proj.segments[0]!.facecam.src = facecamSrc;
+        proj.audioSrc = null;
+        if (audio) await setAudioBlob(audio);
+      } else if (audio) {
+        // Screen-only recording with narration
+        proj.audioSrc = await setAudioBlob(audio);
+      } else {
+        proj.audioSrc = null;
+      }
       await decodePrepareFrame(0);
       return proj;
     },

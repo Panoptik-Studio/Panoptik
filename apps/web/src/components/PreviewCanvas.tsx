@@ -429,8 +429,9 @@ function drawFacecamGridGuides(
 
 export function PreviewCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const facecamAudioRef = useRef<HTMLAudioElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
 
@@ -532,23 +533,45 @@ export function PreviewCanvas() {
       const active = resolveActive(state.project, tEff);
       const tSrc = active.srcT;
 
-      // the audio element runs its own clock — keep its rate glued to the
-      // active segment's speed and source so it crosses boundaries with the playhead.
+      // Audio elements run their own clock — keep rate and volume glued to the
+      // active segment's speed, volume, and sources so they cross boundaries in sync.
       if (state.isPlaying) {
         const audio = audioRef.current;
+        const fcAudio = facecamAudioRef.current;
+        const screenSrc = state.project.media.src;
+        const fcSrc = active.seg.facecam?.src;
+
+        // Screen audio
         if (audio) {
-          if (audio.playbackRate !== active.seg.speed) {
-            audio.playbackRate = active.seg.speed;
+          if (audio.playbackRate !== active.seg.speed) audio.playbackRate = active.seg.speed;
+          const targetVol = Math.max(0, Math.min(1, active.seg.audioVolume ?? 1));
+          if (audio.volume !== targetVol) audio.volume = targetVol;
+          if (screenSrc && audio.src !== screenSrc) {
+            audio.src = screenSrc;
+            audio.currentTime = tSrc;
+            if (targetVol > 0) audio.play().catch(() => {});
+          } else if (audio.paused && targetVol > 0) {
+            audio.play().catch(() => {});
           }
-          const segSrc = active.seg.facecam?.src || state.project.audioSrc || state.project.media.src;
-          if (segSrc && audio.src !== segSrc) {
-            audio.src = segSrc;
+        }
+
+        // Facecam mic audio
+        if (fcAudio) {
+          if (fcAudio.playbackRate !== active.seg.speed) fcAudio.playbackRate = active.seg.speed;
+          const targetFcVol = Math.max(0, Math.min(1, active.seg.facecam?.audioVolume ?? 1));
+          if (fcAudio.volume !== targetFcVol) fcAudio.volume = targetFcVol;
+          if (fcSrc) {
             const fcStartT = active.seg.facecam?.startT ?? 0;
-            const target = fcStartT > 0 ? Math.max(0, tEff - fcStartT) : tSrc;
-            audio.currentTime = target;
-            audio.play().catch(() => {});
-          } else if (audio.paused) {
-            audio.play().catch(() => {});
+            const targetFc = fcStartT > 0 ? Math.max(0, tEff - fcStartT) : tSrc;
+            if (fcAudio.src !== fcSrc) {
+              fcAudio.src = fcSrc;
+              fcAudio.currentTime = targetFc;
+              if (targetFcVol > 0) fcAudio.play().catch(() => {});
+            } else if (fcAudio.paused && targetFcVol > 0) {
+              fcAudio.play().catch(() => {});
+            }
+          } else if (!fcAudio.paused) {
+            fcAudio.pause();
           }
         }
       }
@@ -608,90 +631,158 @@ export function PreviewCanvas() {
     };
   }, [hasProject]);
 
-  // ── Preview audio — sync HTMLAudioElement to canvas time (hidden, no controls) ──
+  // ── Preview audio — sync HTMLAudioElements to canvas time and volume ──
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !project) return;
+    const fcAudio = facecamAudioRef.current;
+    if (!project) return;
     const active = resolveActive(project, currentTime);
-    const src = active.seg.facecam?.src || project.audioSrc || project.media.src;
-    if (src && audio.src !== src) {
-      audio.src = src;
-      const fcStartT = active.seg.facecam?.startT ?? 0;
-      const target = fcStartT > 0 ? Math.max(0, currentTime - fcStartT) : active.srcT;
-      audio.currentTime = target;
-      if (isPlaying) {
+    const screenSrc = project.media.src;
+    const fcSrc = active.seg.facecam?.src;
+
+    if (audio && screenSrc) {
+      if (audio.src !== screenSrc) {
+        audio.src = screenSrc;
+        audio.currentTime = active.srcT;
+      }
+      audio.volume = Math.max(0, Math.min(1, active.seg.audioVolume ?? 1));
+      if (isPlaying && audio.paused && audio.volume > 0) {
         audio.play().catch(() => {});
       }
     }
-  }, [project?.audioSrc, project?.media.src, currentTime, isPlaying]);
 
-  // Keep the audio element pitch-preserved. The playbackRate itself follows the
-  // active segment's per-frame speed (set in the rAF loop and on play/scrub).
+    if (fcAudio) {
+      if (fcSrc) {
+        const fcStartT = active.seg.facecam?.startT ?? 0;
+        const targetFc = fcStartT > 0 ? Math.max(0, currentTime - fcStartT) : active.srcT;
+        if (fcAudio.src !== fcSrc) {
+          fcAudio.src = fcSrc;
+          fcAudio.currentTime = targetFc;
+        }
+        fcAudio.volume = Math.max(0, Math.min(1, active.seg.facecam?.audioVolume ?? 1));
+        if (isPlaying && fcAudio.paused && fcAudio.volume > 0) {
+          fcAudio.play().catch(() => {});
+        }
+      } else if (!fcAudio.paused) {
+        fcAudio.pause();
+      }
+    }
+  }, [project?.media.src, currentTime, isPlaying]);
+
+  // Keep audio elements pitch-preserved
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !project) return;
+    const fcAudio = facecamAudioRef.current;
+    if (!project) return;
     const active = resolveActive(project, currentTime);
-    audio.playbackRate = active.seg.speed;
-    try { (audio as unknown as { preservesPitch: boolean }).preservesPitch = true; } catch { /* ignore */ }
-    try { (audio as unknown as { mozPreservesPitch: boolean }).mozPreservesPitch = true; } catch { /* ignore */ }
-    try { (audio as unknown as { webkitPreservesPitch: boolean }).webkitPreservesPitch = true; } catch { /* ignore */ }
+    [audio, fcAudio].forEach((el) => {
+      if (!el) return;
+      el.playbackRate = active.seg.speed;
+      try { (el as unknown as { preservesPitch: boolean }).preservesPitch = true; } catch { /* ignore */ }
+      try { (el as unknown as { mozPreservesPitch: boolean }).mozPreservesPitch = true; } catch { /* ignore */ }
+      try { (el as unknown as { webkitPreservesPitch: boolean }).webkitPreservesPitch = true; } catch { /* ignore */ }
+    });
   }, [project?.id]);
 
-  // Scrubbing while paused: follow the playhead (on-timeline -> active srcT)
+  // Scrubbing while paused: follow the playhead
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !project || isPlaying) return;
+    const fcAudio = facecamAudioRef.current;
+    if (!project || isPlaying) return;
     const { seg, srcT } = resolveActive(project, currentTime);
-    const src = seg.facecam?.src || project.audioSrc || project.media.src;
-    if (src && audio.src !== src) {
-      audio.src = src;
+    const screenSrc = project.media.src;
+    const fcSrc = seg.facecam?.src;
+
+    if (audio && screenSrc) {
+      if (audio.src !== screenSrc) audio.src = screenSrc;
+      if (Math.abs(audio.currentTime - srcT) > 0.15) audio.currentTime = srcT;
+      audio.volume = Math.max(0, Math.min(1, seg.audioVolume ?? 1));
     }
-    const fcStartT = seg.facecam?.startT ?? 0;
-    const target = fcStartT > 0 ? Math.max(0, currentTime - fcStartT) : srcT;
-    if (Math.abs(audio.currentTime - target) > 0.15) audio.currentTime = target;
+
+    if (fcAudio) {
+      if (fcSrc) {
+        if (fcAudio.src !== fcSrc) fcAudio.src = fcSrc;
+        const fcStartT = seg.facecam?.startT ?? 0;
+        const targetFc = fcStartT > 0 ? Math.max(0, currentTime - fcStartT) : srcT;
+        if (Math.abs(fcAudio.currentTime - targetFc) > 0.15) fcAudio.currentTime = targetFc;
+        fcAudio.volume = Math.max(0, Math.min(1, seg.facecam?.audioVolume ?? 1));
+      } else if (!fcAudio.paused) {
+        fcAudio.pause();
+      }
+    }
   }, [currentTime, isPlaying, project]);
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio) return;
+    const fcAudio = facecamAudioRef.current;
     if (!isPlaying) {
-      audio.pause();
+      audio?.pause();
+      fcAudio?.pause();
       return;
     }
 
-    // Line the element up with the playhead *before* starting.
+    // Line the elements up with the playhead before starting
     const state = useProjectStore.getState();
     if (!state.project) return;
     const active = resolveActive(state.project, state.currentTime);
-    const src = active.seg.facecam?.src || state.project.audioSrc || state.project.media.src;
-    if (src && audio.src !== src) {
-      audio.src = src;
-    }
-    audio.playbackRate = active.seg.speed;
-    const fcStartT = active.seg.facecam?.startT ?? 0;
-    const target = fcStartT > 0 ? Math.max(0, state.currentTime - fcStartT) : active.srcT;
-    if (Math.abs(audio.currentTime - target) > 0.15) audio.currentTime = target;
-    audio.play().catch(() => {});
+    const screenSrc = state.project.media.src;
+    const fcSrc = active.seg.facecam?.src;
 
-    // The canvas runs off rAF and the audio off its own clock, so they drift
-    // apart over a long clip unless they are pulled back together.
+    if (audio && screenSrc) {
+      if (audio.src !== screenSrc) audio.src = screenSrc;
+      audio.playbackRate = active.seg.speed;
+      audio.volume = Math.max(0, Math.min(1, active.seg.audioVolume ?? 1));
+      if (Math.abs(audio.currentTime - active.srcT) > 0.15) audio.currentTime = active.srcT;
+      if (audio.volume > 0) audio.play().catch(() => {});
+    }
+
+    if (fcAudio && fcSrc) {
+      if (fcAudio.src !== fcSrc) fcAudio.src = fcSrc;
+      fcAudio.playbackRate = active.seg.speed;
+      fcAudio.volume = Math.max(0, Math.min(1, active.seg.facecam?.audioVolume ?? 1));
+      const fcStartT = active.seg.facecam?.startT ?? 0;
+      const targetFc = fcStartT > 0 ? Math.max(0, state.currentTime - fcStartT) : active.srcT;
+      if (Math.abs(fcAudio.currentTime - targetFc) > 0.15) fcAudio.currentTime = targetFc;
+      if (fcAudio.volume > 0) fcAudio.play().catch(() => {});
+    }
+
+    // Keep clocks aligned
     const id = window.setInterval(() => {
       const st = useProjectStore.getState();
       if (!st.project || !st.isPlaying) return;
       const r = resolveActive(st.project, st.currentTime);
-      const rSrc = r.seg.facecam?.src || st.project.audioSrc || st.project.media.src;
-      const rFcStartT = r.seg.facecam?.startT ?? 0;
-      const rTarget = rFcStartT > 0 ? Math.max(0, st.currentTime - rFcStartT) : r.srcT;
-      if (rSrc && audio.src !== rSrc) {
-        audio.src = rSrc;
-        audio.currentTime = rTarget;
-        audio.play().catch(() => {});
-      } else if (audio.paused) {
-        audio.play().catch(() => {});
-      } else if (Math.abs(audio.currentTime - rTarget) > 0.3) {
-        audio.currentTime = rTarget;
+      const curScreenSrc = st.project.media.src;
+      const curFcSrc = r.seg.facecam?.src;
+
+      if (audio && curScreenSrc) {
+        if (audio.src !== curScreenSrc) {
+          audio.src = curScreenSrc;
+          audio.currentTime = r.srcT;
+          if (audio.volume > 0) audio.play().catch(() => {});
+        } else if (audio.paused && (r.seg.audioVolume ?? 1) > 0) {
+          audio.play().catch(() => {});
+        } else if (Math.abs(audio.currentTime - r.srcT) > 0.3) {
+          audio.currentTime = r.srcT;
+        }
+        audio.playbackRate = r.seg.speed;
+        audio.volume = Math.max(0, Math.min(1, r.seg.audioVolume ?? 1));
       }
-      audio.playbackRate = r.seg.speed;
+
+      if (fcAudio && curFcSrc) {
+        const fcStartT = r.seg.facecam?.startT ?? 0;
+        const targetFc = fcStartT > 0 ? Math.max(0, st.currentTime - fcStartT) : r.srcT;
+        if (fcAudio.src !== curFcSrc) {
+          fcAudio.src = curFcSrc;
+          fcAudio.currentTime = targetFc;
+          if (fcAudio.volume > 0) fcAudio.play().catch(() => {});
+        } else if (fcAudio.paused && (r.seg.facecam?.audioVolume ?? 1) > 0) {
+          fcAudio.play().catch(() => {});
+        } else if (Math.abs(fcAudio.currentTime - targetFc) > 0.3) {
+          fcAudio.currentTime = targetFc;
+        }
+        fcAudio.playbackRate = r.seg.speed;
+        fcAudio.volume = Math.max(0, Math.min(1, r.seg.facecam?.audioVolume ?? 1));
+      }
     }, 500);
     return () => clearInterval(id);
   }, [isPlaying]);
@@ -1206,9 +1297,11 @@ export function PreviewCanvas() {
           onPointerUp={handlePointerUp}
         />
       </div>
-      {/* Hidden audio for preview — same blob URL as video, synced to canvas time */}
+      {/* Hidden audio elements for preview — screen audio + camera mic audio */}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <audio ref={audioRef} preload="auto" className="hidden" crossOrigin="anonymous" />
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <audio ref={facecamAudioRef} preload="auto" className="hidden" crossOrigin="anonymous" />
       {toast && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border bg-[#171717] px-3.5 py-1.5 text-xs font-medium text-white shadow-vercel-5" style={{ borderColor: "#2a2a2a" }}>
           {toast}

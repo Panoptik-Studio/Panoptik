@@ -196,6 +196,9 @@ interface ProjectStore {
   setAspectPreset: (preset: AspectPreset) => void;
 
   setFacecam: (updates: Partial<Facecam>) => void;
+  setSegmentAudioVolume: (segmentId: string, volume: number) => void;
+  setFacecamAudioVolume: (segmentId: string, volume: number) => void;
+  setAllSegmentsAudioVolume: (type: "screen" | "facecam", volume: number) => void;
   replaceFacecamMedia: (
     facecamSrc: string | null,
     audioSrc?: string | null,
@@ -1052,6 +1055,49 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const project = {
       ...proj,
       segments: finalSegments,
+    };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  setSegmentAudioVolume: (segmentId, volume) => {
+    const s = get();
+    if (!s.project) return;
+    const vol = Math.max(0, Math.min(2, Number(volume.toFixed(2))));
+    const project = {
+      ...s.project,
+      segments: s.project.segments.map((seg) =>
+        seg.id === segmentId ? { ...seg, audioVolume: vol } : seg,
+      ),
+    };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  setFacecamAudioVolume: (segmentId, volume) => {
+    const s = get();
+    if (!s.project) return;
+    const vol = Math.max(0, Math.min(2, Number(volume.toFixed(2))));
+    const project = {
+      ...s.project,
+      segments: s.project.segments.map((seg) =>
+        seg.id === segmentId
+          ? { ...seg, facecam: { ...seg.facecam, audioVolume: vol } }
+          : seg,
+      ),
+    };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  setAllSegmentsAudioVolume: (type, volume) => {
+    const s = get();
+    if (!s.project) return;
+    const vol = Math.max(0, Math.min(2, Number(volume.toFixed(2))));
+    const project = {
+      ...s.project,
+      segments: s.project.segments.map((seg) =>
+        type === "screen"
+          ? { ...seg, audioVolume: vol }
+          : { ...seg, facecam: { ...seg.facecam, audioVolume: vol } },
+      ),
     };
     pushHistoryAndSet(project, s, set);
   },

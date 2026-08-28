@@ -241,3 +241,60 @@ export function concatAudio(parts: AudioBuffer[]): AudioBuffer {
 export function concatDurations(parts: AudioBuffer[]): number {
   return concatAudio(parts).duration;
 }
+
+/** Scale channel samples by volume multiplier (with soft-knee limiting for boost > 1.0). */
+export function applyVolume(buffer: AudioBuffer, volume: number): AudioBuffer {
+  if (volume === 1) return buffer;
+  const nCh = buffer.numberOfChannels;
+  const len = buffer.length;
+  const sr = buffer.sampleRate;
+  const channels: Float32Array[] = [];
+  for (let ch = 0; ch < nCh; ch++) {
+    const src = buffer.getChannelData(ch)!;
+    const dst = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      let sample = (src[i] ?? 0) * volume;
+      if (sample === 0) sample = 0;
+      // Soft-knee limiting if sample exceeds [-1, 1]
+      else if (sample > 1.0) sample = 1.0 - Math.exp(-(sample - 1.0)) * 0.2;
+      else if (sample < -1.0) sample = -1.0 + Math.exp(sample + 1.0) * 0.2;
+      dst[i] = sample;
+    }
+    channels.push(dst);
+  }
+  return makeBuffer(nCh, len, sr, channels);
+}
+
+/** Mix two AudioBuffers of the same target length together with per-stream volume weighting. */
+export function mixAudio(
+  bufA: AudioBuffer | null,
+  volA: number,
+  bufB: AudioBuffer | null,
+  volB: number,
+): AudioBuffer {
+  if (!bufA && !bufB) return makeMock(1);
+  if (!bufA) return applyVolume(bufB!, volB);
+  if (!bufB) return applyVolume(bufA, volA);
+
+  const sampleRate = bufA.sampleRate;
+  const nCh = Math.max(bufA.numberOfChannels, bufB.numberOfChannels);
+  const len = Math.max(bufA.length, bufB.length);
+  const channels: Float32Array[] = [];
+
+  for (let ch = 0; ch < nCh; ch++) {
+    const dst = new Float32Array(len);
+    const dataA = ch < bufA.numberOfChannels ? bufA.getChannelData(ch) : null;
+    const dataB = ch < bufB.numberOfChannels ? bufB.getChannelData(ch) : null;
+    for (let i = 0; i < len; i++) {
+      const sA = (dataA && i < dataA.length ? dataA[i]! : 0) * volA;
+      const sB = (dataB && i < dataB.length ? dataB[i]! : 0) * volB;
+      let mixed = sA + sB;
+      if (mixed === 0) mixed = 0;
+      else if (mixed > 1.0) mixed = 1.0 - Math.exp(-(mixed - 1.0)) * 0.2;
+      else if (mixed < -1.0) mixed = -1.0 + Math.exp(mixed + 1.0) * 0.2;
+      dst[i] = mixed;
+    }
+    channels.push(dst);
+  }
+  return makeBuffer(nCh, len, sampleRate, channels);
+}

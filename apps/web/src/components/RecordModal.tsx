@@ -498,11 +498,8 @@ export function RecordModal() {
         layout === "cameraOnly" ? facecamBlob : screenBlob,
         // Only a screen+camera take gets a picture-in-picture.
         layout === "screenAndCamera" && hasFacecamMedia ? facecamBlob : null,
-        // The mic is muxed into the camera recording for every layout, so that
-        // is where the narration lives — including a screen-only take, whose
-        // "facecam" blob is audio with no video. cameraOnly already has it in
-        // the clip itself.
-        layout !== "cameraOnly" && hasFacecamMedia ? facecamBlob : null,
+        // The mic is narration only when there is no facecam video (screen-only layout)
+        layout === "screenOnly" && hasFacecamMedia ? facecamBlob : null,
       );
       // Carry the chosen shape and corner through to the composed frame, so the
       // exported video puts the camera where the recorder UI said it would.

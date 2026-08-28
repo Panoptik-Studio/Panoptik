@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { concatAudio, makeBuffer, makeMock, sliceAndStretchAudio, timeStretch } from "./timeStretch";
+import { applyVolume, concatAudio, makeBuffer, makeMock, mixAudio, sliceAndStretchAudio, timeStretch } from "./timeStretch";
 import type { Segment } from "@panoptik/schema";
 
 function mockAudioBuffer(sampleRate: number, channels: Float32Array[]) {
@@ -115,5 +115,34 @@ describe("segment-windowed audio (sliceAndStretchAudio / concatAudio)", () => {
   it("concatAudio returns a single part untouched", () => {
     const p = makeMock(100, 48000);
     expect(concatAudio([p])).toBe(p);
+  });
+});
+
+describe("applyVolume & mixAudio", () => {
+  it("scales channel samples by volume multiplier", () => {
+    const data = new Float32Array([0.2, 0.4, -0.6]);
+    const buf = mockAudioBuffer(48000, [data]);
+    const out = applyVolume(buf, 0.5);
+    expect(out.getChannelData(0)[0]).toBeCloseTo(0.1);
+    expect(out.getChannelData(0)[1]).toBeCloseTo(0.2);
+    expect(out.getChannelData(0)[2]).toBeCloseTo(-0.3);
+  });
+
+  it("mutes channel samples when volume is 0", () => {
+    const data = new Float32Array([0.5, -0.5]);
+    const buf = mockAudioBuffer(48000, [data]);
+    const out = applyVolume(buf, 0);
+    expect(out.getChannelData(0)[0]).toBe(0);
+    expect(out.getChannelData(0)[1]).toBe(0);
+  });
+
+  it("mixes two audio streams with respective volume multipliers", () => {
+    const dataA = new Float32Array([0.2, 0.4]);
+    const dataB = new Float32Array([0.1, 0.2]);
+    const bufA = mockAudioBuffer(48000, [dataA]);
+    const bufB = mockAudioBuffer(48000, [dataB]);
+    const mixed = mixAudio(bufA, 1.0, bufB, 0.5);
+    expect(mixed.getChannelData(0)[0]).toBeCloseTo(0.25);
+    expect(mixed.getChannelData(0)[1]).toBeCloseTo(0.5);
   });
 });

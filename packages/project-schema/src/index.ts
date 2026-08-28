@@ -40,6 +40,7 @@ export type Facecam = {
   transition?: "smooth" | "spring" | "fade" | "slide" | "cut";
   transitionDuration?: number;
   startT?: number;
+  audioVolume?: number; // 0.0 - 2.0 (1.0 = 100%)
 }; // all normalized 0-1, shape for PiP
 
 export type ClickEvent = {
@@ -63,6 +64,7 @@ export type Segment = {
   aspectPreset: AspectPreset;
   background: Background;
   facecam: Facecam;
+  audioVolume?: number; // 0.0 - 2.0 (1.0 = 100%)
   zoomPoints: ZoomPoint[];
   stagedZoomPoints: ZoomPoint[];
   textOverlays: TextOverlay[];
@@ -107,7 +109,9 @@ export function migrateProject(raw: unknown): Project {
       y: num(fc.y, 0.8, 0, 1),
       size: num(fc.size, 0.2, 0.02, 1),
       shape: fc.shape === "circle" || fc.shape === "square" ? (fc.shape as Facecam["shape"]) : "square",
+      audioVolume: num(fc.audioVolume, 1, 0, 2),
     },
+    audioVolume: num(r.audioVolume, 1, 0, 2),
     zoomPoints: baseZoom.map((z) => ({ ...z })),
     stagedZoomPoints: ((r.stagedZoomPoints ?? []) as ZoomPoint[]).map((z) => ({ ...z })),
     textOverlays: ((r.textOverlays ?? []) as TextOverlay[]).map((o) => ({ ...o })),
