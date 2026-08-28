@@ -433,7 +433,14 @@ function drawFacecam(
   t: number,
   canvasW: number,
   canvasH: number,
-  resolved?: { x: number; y: number; size: number; shape: "circle" | "square"; opacity: number },
+  resolved?: {
+    x: number;
+    y: number;
+    size: number;
+    shape: "circle" | "square";
+    shapeProgress?: number;
+    opacity: number;
+  },
 ): void {
   if (!fc.src) return;
   const effectiveSize = resolved ? resolved.size : fc.size;
@@ -474,49 +481,56 @@ function drawFacecam(
   const clampedX = clamp(x, 0, Math.max(0, canvasW - pipW));
   const clampedY = clamp(y, 0, Math.max(0, canvasH - pipH));
 
-  const shape = (resolved?.shape ?? fc.shape ?? "square") === "circle" ? "circle" : "square";
-  const radius = shape === "circle" ? Math.min(pipW, pipH) / 2 : 12;
+  const shapeProgress = resolved?.shapeProgress ?? (fc.shape === "circle" ? 1 : 0);
+  const minDim = Math.min(pipW, pipH);
+  const curW = pipW + (minDim - pipW) * shapeProgress;
+  const curH = pipH + (minDim - pipH) * shapeProgress;
+  const rSquare = 12;
+  const rCircle = minDim / 2;
+  const curR = Math.min(Math.min(curW, curH) / 2, rSquare + (rCircle - rSquare) * shapeProgress);
+
+  const cX = clampedX + pipW / 2;
+  const cY = clampedY + pipH / 2;
+  const bX = cX - curW / 2;
+  const bY = cY - curH / 2;
+
+  const buildPath = () => {
+    ctx.beginPath();
+    if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
+      (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void }).roundRect(
+        bX,
+        bY,
+        curW,
+        curH,
+        curR,
+      );
+    } else {
+      const r = Math.min(curR, curW / 2, curH / 2);
+      ctx.moveTo(bX + r, bY);
+      ctx.arcTo(bX + curW, bY, bX + curW, bY + curH, r);
+      ctx.arcTo(bX + curW, bY + curH, bX, bY + curH, r);
+      ctx.arcTo(bX, bY + curH, bX, bY, r);
+      ctx.arcTo(bX, bY, bX + curW, bY, r);
+      ctx.closePath();
+    }
+  };
+
   ctx.save();
   ctx.globalAlpha = opacity;
-  // Rounded rect / circle clip — matches preview PiP (circle 50% vs square 12px)
-  ctx.beginPath();
-  if (shape === "circle") {
-    ctx.arc(clampedX + pipW / 2, clampedY + pipH / 2, Math.min(pipW, pipH) / 2, 0, Math.PI * 2);
-  } else if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
-    (ctx as unknown as { roundRect: (x:number,y:number,w:number,h:number,r:number)=>void }).roundRect(clampedX, clampedY, pipW, pipH, radius);
-  } else {
-    const r = Math.min(radius, pipW / 2, pipH / 2);
-    ctx.moveTo(clampedX + r, clampedY);
-    ctx.arcTo(clampedX + pipW, clampedY, clampedX + pipW, clampedY + pipH, r);
-    ctx.arcTo(clampedX + pipW, clampedY + pipH, clampedX, clampedY + pipH, r);
-    ctx.arcTo(clampedX, clampedY + pipH, clampedX, clampedY, r);
-    ctx.arcTo(clampedX, clampedY, clampedX + pipW, clampedY, r);
-    ctx.closePath();
-  }
+  // Smoothly morphed rounded rect / circle clip
+  buildPath();
   ctx.clip();
   try {
     ctx.drawImage(source, clampedX, clampedY, pipW, pipH);
   } catch { /* video frame not ready */ }
   ctx.restore();
-  // Subtle border — matches clip shape
+
+  // Subtle border — matches smoothly morphed clip shape
   ctx.save();
   ctx.globalAlpha = opacity;
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  if (shape === "circle") {
-    ctx.arc(clampedX + pipW / 2, clampedY + pipH / 2, Math.min(pipW, pipH) / 2, 0, Math.PI * 2);
-  } else if (typeof (ctx as unknown as { roundRect?: unknown }).roundRect === "function") {
-    (ctx as unknown as { roundRect: (x:number,y:number,w:number,h:number,r:number)=>void }).roundRect(clampedX, clampedY, pipW, pipH, radius);
-  } else {
-    const r = Math.min(radius, pipW / 2, pipH / 2);
-    ctx.moveTo(clampedX + r, clampedY);
-    ctx.arcTo(clampedX + pipW, clampedY, clampedX + pipW, clampedY + pipH, r);
-    ctx.arcTo(clampedX + pipW, clampedY + pipH, clampedX, clampedY + pipH, r);
-    ctx.arcTo(clampedX, clampedY + pipH, clampedX, clampedY, r);
-    ctx.arcTo(clampedX, clampedY, clampedX + pipW, clampedY, r);
-    ctx.closePath();
-  }
+  buildPath();
   ctx.stroke();
   ctx.restore();
 }

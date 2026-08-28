@@ -575,4 +575,76 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
     expect(atStart.size).toBeCloseTo(0.38, 2);
     expect(atStart.x).toBeCloseTo(0.60, 2);
   });
+
+  it("smoothly morphs shape from square to circle across transition duration", () => {
+    const pSquareToCircle: Project = {
+      ...baseProject,
+      segments: [
+        {
+          ...baseProject.segments[0]!,
+          facecam: { ...baseProject.segments[0]!.facecam, shape: "square" },
+        },
+        {
+          ...baseProject.segments[1]!,
+          facecam: {
+            ...baseProject.segments[1]!.facecam,
+            shape: "circle",
+            transition: "smooth",
+            transitionDuration: 0.5,
+          },
+        },
+      ],
+    };
+    const seg2 = pSquareToCircle.segments[1]!;
+
+    // At t = 5.0s (start): shapeProgress = 0 (square)
+    const atStart = resolveInterpolatedFacecam(pSquareToCircle, 5.0, seg2);
+    expect(atStart.shapeProgress).toBeCloseTo(0, 2);
+
+    // At t = 5.25s (halfway): shapeProgress is smoothly ~0.5
+    const atMid = resolveInterpolatedFacecam(pSquareToCircle, 5.25, seg2);
+    expect(atMid.shapeProgress).toBeGreaterThan(0.3);
+    expect(atMid.shapeProgress).toBeLessThan(0.7);
+    expect(atMid.shapeProgress).toBeCloseTo(0.5, 1);
+
+    // At t = 5.5s (end): shapeProgress = 1.0 (circle)
+    const atEnd = resolveInterpolatedFacecam(pSquareToCircle, 5.5, seg2);
+    expect(atEnd.shapeProgress).toBeCloseTo(1.0, 2);
+  });
+
+  it("smoothly morphs shape from circle to square in reverse across transition duration", () => {
+    const pCircleToSquare: Project = {
+      ...baseProject,
+      segments: [
+        {
+          ...baseProject.segments[0]!,
+          facecam: { ...baseProject.segments[0]!.facecam, shape: "circle" },
+        },
+        {
+          ...baseProject.segments[1]!,
+          facecam: {
+            ...baseProject.segments[1]!.facecam,
+            shape: "square",
+            transition: "smooth",
+            transitionDuration: 0.5,
+          },
+        },
+      ],
+    };
+    const seg2 = pCircleToSquare.segments[1]!;
+
+    // At t = 5.0s (start): shapeProgress = 1 (circle)
+    const atStart = resolveInterpolatedFacecam(pCircleToSquare, 5.0, seg2);
+    expect(atStart.shapeProgress).toBeCloseTo(1.0, 2);
+
+    // At t = 5.25s (halfway): shapeProgress is smoothly ~0.5
+    const atMid = resolveInterpolatedFacecam(pCircleToSquare, 5.25, seg2);
+    expect(atMid.shapeProgress).toBeGreaterThan(0.3);
+    expect(atMid.shapeProgress).toBeLessThan(0.7);
+    expect(atMid.shapeProgress).toBeCloseTo(0.5, 1);
+
+    // At t = 5.5s (end): shapeProgress = 0.0 (square)
+    const atEnd = resolveInterpolatedFacecam(pCircleToSquare, 5.5, seg2);
+    expect(atEnd.shapeProgress).toBeCloseTo(0.0, 2);
+  });
 });
