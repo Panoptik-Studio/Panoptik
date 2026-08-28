@@ -34,9 +34,28 @@ export function outputSize(
   maxWidth = 1920,
 ): { width: number; height: number } {
   const aspect = presetAspect(preset, media);
-  // Cover the media's extent so nothing is upscaled needlessly, then cap.
-  const width = Math.min(maxWidth, Math.max(media.width, Math.round(media.height * aspect)));
-  const height = Math.round(width / aspect);
+  let width: number;
+  let height: number;
+
+  if (aspect < 1) {
+    // Portrait (e.g. 9:16 vertical video) — max dimension is height
+    height = Math.min(maxWidth, Math.max(media.width, media.height, 1080));
+    width = Math.round(height * aspect);
+  } else if (preset === "source") {
+    width = Math.min(maxWidth, media.width);
+    height = Math.round(width / aspect);
+  } else {
+    // Landscape or square (16:9, 4:3, 1:1)
+    const baseH = Math.min(media.height, 1080);
+    const candidateW = Math.round(baseH * aspect);
+    width = Math.min(maxWidth, Math.max(candidateW, media.width <= maxWidth ? media.width : maxWidth));
+    height = Math.round(width / aspect);
+    if (height > 1080 && aspect >= 1) {
+      height = 1080;
+      width = Math.round(height * aspect);
+    }
+  }
+
   // Odd dimensions are rejected by several encoders.
   return { width: width - (width % 2), height: height - (height % 2) };
 }

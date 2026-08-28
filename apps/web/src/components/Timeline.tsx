@@ -115,12 +115,10 @@ export function Timeline() {
 
   // Track and highlight the active segment under the playhead slider during playback
   useEffect(() => {
-    if (!project) return;
-    if (isPlaying || !selectedSegmentId || !project.segments.some((s) => s.id === selectedSegmentId)) {
-      const r = resolveSegment(project, currentTime);
-      if (r && r.segment.id !== selectedSegmentId) {
-        selectSegment(r.segment.id);
-      }
+    if (!project || !isPlaying) return;
+    const r = resolveSegment(project, currentTime);
+    if (r && r.segment.id !== selectedSegmentId) {
+      selectSegment(r.segment.id, false);
     }
   }, [project, selectedSegmentId, currentTime, isPlaying, selectSegment]);
 
@@ -303,33 +301,34 @@ export function Timeline() {
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (isDraggingPlayhead || draggingDiamond) return;
+    const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
+    // Multi-select is handled on pointerdown; avoid double-toggling
+    if (isMulti) return;
+
     if (!scrollRef.current) return;
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
-    const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
 
-    if (!isMulti) {
-      // Diamond hit first — select the segment the diamond belongs to, then the zoom
-      for (const seg of project?.segments ?? []) {
-        for (const zp of [...seg.zoomPoints, ...seg.stagedZoomPoints]) {
-          const st = sourceToTimeline(project!, seg.id, zp.t);
-          if (st == null) continue;
-          if (Math.abs(x - timeToX(st)) < 14) {
-            selectSegment(seg.id);
-            setSelectedZoom(zp.id);
-            return;
-          }
+    // Diamond hit first — select the segment the diamond belongs to, then the zoom
+    for (const seg of project?.segments ?? []) {
+      for (const zp of [...seg.zoomPoints, ...seg.stagedZoomPoints]) {
+        const st = sourceToTimeline(project!, seg.id, zp.t);
+        if (st == null) continue;
+        if (Math.abs(x - timeToX(st)) < 14) {
+          selectSegment(seg.id, false);
+          setSelectedZoom(zp.id);
+          return;
         }
       }
-      setSelectedZoom(null);
     }
+    setSelectedZoom(null);
 
     // Segment selection: which filmstrip block does the x fall in?
     let acc = 0;
     for (const seg of project?.segments ?? []) {
       const d = segmentDuration(seg);
       if (x >= timeToX(acc) && x < timeToX(acc + d)) {
-        selectSegment(seg.id, isMulti);
+        selectSegment(seg.id, false);
         break;
       }
       acc += d;

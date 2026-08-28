@@ -367,7 +367,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const segments = [...s.project.segments];
     segments.splice(idx, 1, a, b);
     const project = { ...s.project, segments };
-    pushHistoryAndSet(project, s, set);
+    pushHistoryAndSet(project, s, set, {
+      selectedSegmentId: a.id,
+      selectedSegmentIds: [a.id],
+    });
   },
 
   deleteSegment: (id) => {
@@ -456,11 +459,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       const segId = s.project
         ? (resolveSegment(s.project, t)?.segment.id ?? s.selectedSegmentId)
         : s.selectedSegmentId;
+      const nextIds =
+        s.selectedSegmentIds.length > 1
+          ? s.selectedSegmentIds
+          : segId
+            ? [segId]
+            : [];
       return {
         currentTime: t,
         isPlaying: false,
         selectedSegmentId: segId,
-        selectedSegmentIds: segId ? (s.selectedSegmentIds.includes(segId) ? s.selectedSegmentIds : [segId]) : [],
+        selectedSegmentIds: nextIds,
       };
     }),
   setCurrentTime: (t) => {
