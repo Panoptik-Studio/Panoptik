@@ -273,15 +273,26 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
       // timeline cursor. Frames decode at source time (srcT) which changes with
       // segment speed; present times are timeline time.
       let timelineCursor = 0;
+      let activeFacecamSrc: string | null = null;
       for (const seg of project.segments) {
+        const segFcSrc = seg.facecam?.src ?? null;
+        if (segFcSrc && segFcSrc !== activeFacecamSrc && segFcSrc.startsWith("blob:")) {
+          try {
+            const resp = await fetch(segFcSrc);
+            const blob = await resp.blob();
+            const { setFacecamBlob, resetFacecamExportIterator } = await import("./decode");
+            await setFacecamBlob(blob);
+            await resetFacecamExportIterator();
+            activeFacecamSrc = segFcSrc;
+          } catch (e) {
+            console.warn("[Export] Failed to switch facecam take for segment:", e);
+          }
+        }
         const dur = segmentDuration(seg);
         const totalFrames = Math.max(1, Math.ceil(dur * EXPORT_FPS));
         for (let i = 0; i < totalFrames; i++) {
           const tEff = i / EXPORT_FPS;
           const srcT = seg.srcStart + tEff * seg.speed;
-          // Decode before composing: renderFrame draws whatever frame is current,
-          // so without awaiting here every output frame would be the same picture.
-          // Use prepareAllFrames so cam+screen stay synced at speed (facecam pump now fixed for holes, no more scan-to-EOF stall at 2.7s)
           if (i % 60 === 0) console.log("[Export] frame", i, "/", totalFrames, "seg", seg.id, "tEff", tEff.toFixed(2), "srcT", srcT.toFixed(2));
           const fcStartT = seg.facecam?.startT ?? 0;
           const fcT = Math.max(0, (timelineCursor + tEff) - fcStartT);
