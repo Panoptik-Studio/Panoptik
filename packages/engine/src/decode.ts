@@ -55,6 +55,7 @@ let surfaceCtx:
 let desiredTime = 0;
 let pump: Promise<void> | null = null;
 let facecamUrl: string | null = null;
+let exportIterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
 
 let audioInput: Input | null = null;
 let audioUrl: string | null = null;
@@ -323,6 +324,19 @@ export async function loadClip(file: File): Promise<Project> {
  */
 export async function prepareFrame(t: number): Promise<void> {
   if (!sink) return;
+  const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
+  const qt = Math.max(0, t);
+  if (isExporting) {
+    if (!exportIterator) exportIterator = sink.canvases(0);
+    while (true) {
+      if (presented && qt >= presented.start && qt < presented.end) return;
+      const { value, done } = await exportIterator.next();
+      if (done || !value) return;
+      const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
+      present(value, end);
+      if (qt >= value.timestamp && qt < end) return;
+    }
+  }
   screenDebugFrames++;
   if (presented && t >= presented.start && t < presented.end) {
     screenLog("prepareFrame cache hit", { t: t.toFixed(3), window: `${presented.start.toFixed(3)}-${presented.end.toFixed(3)}`, pending: !!pump });
@@ -442,6 +456,10 @@ async function teardown(): Promise<void> {
   sink = null;
   const inflight = pump;
   await closeIterator();
+  if (exportIterator) {
+    try { await exportIterator.return(); } catch { /* already done */ }
+    exportIterator = null;
+  }
   if (inflight) {
     try {
       await inflight;
