@@ -45,6 +45,7 @@ export function Timeline() {
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
   const playbackRate = useProjectStore((s) => s.playbackRate);
   const setPlaybackRate = useProjectStore((s) => s.setPlaybackRate);
+  const exportProgress = useProjectStore((s) => s.exportProgress);
   const [showSpeed, setShowSpeed] = useState(false);
 
   const duration = project?.clip.duration ?? 28;
@@ -214,9 +215,9 @@ export function Timeline() {
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Volume"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Split"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg></button>
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Mosaic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></button>
-          <div className="relative" onMouseEnter={() => setShowSpeed(true)} onMouseLeave={() => setShowSpeed(false)}>
-            <button className="pk-icon-btn ctrl-btn h-8 w-8 relative" title={`Speed ${playbackRate}x`}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{playbackRate !== 1 && <span className="absolute -right-1 -top-1 rounded-full bg-[#0070f3] px-1 py-0.5 text-[9px] font-bold leading-none text-white">{playbackRate}x</span>}</button>
-            {showSpeed && (
+          <div className="relative" onMouseEnter={() => exportProgress === null && setShowSpeed(true)} onMouseLeave={() => setShowSpeed(false)}>
+            <button className="pk-icon-btn ctrl-btn h-8 w-8 relative" title={`Speed ${playbackRate}x`} disabled={exportProgress !== null}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{playbackRate !== 1 && <span className="absolute -right-1 -top-1 rounded-full bg-[#0070f3] px-1 py-0.5 text-[9px] font-bold leading-none text-white">{playbackRate}x</span>}</button>
+            {showSpeed && exportProgress === null && (
               <div className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 gap-1 rounded-xl border bg-white p-1.5 shadow-vercel-3" style={{ borderColor: "#ebebeb", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
                 {[0.5, 1, 1.5, 2, 3].map((v) => (
                   <button key={v} onClick={() => setPlaybackRate(v)} className="pk-seg min-w-[48px] text-xs" data-active={playbackRate === v}>{v}x</button>
