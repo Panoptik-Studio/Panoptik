@@ -66,11 +66,13 @@ function canvasGeometry(
   t: number,
 ) {
   const { seg, srcT } = resolveActive(project, t);
+  const paddingPx = (seg.stagePadding ?? 0) * (canvas.height / 1080) * 1.5;
   const rect = frameRect(
     canvas.width,
     canvas.height,
     project.media,
     seg.aspectPreset,
+    paddingPx,
   );
   const view = cameraViewport(rect, getCameraTransform(seg.zoomPoints, srcT));
   return { rect, view, srcT, radius: Math.max(10, rect.w * 0.014) };
@@ -627,27 +629,33 @@ export function PreviewCanvas() {
     h: 1080,
   });
 
+  const activePreset =
+    project?.segments.find((s) => s.id === selectedSegmentId)?.aspectPreset ??
+    project?.segments[0]?.aspectPreset ??
+    "source";
+
   useEffect(() => {
     if (!project) return;
-    // Sized to the ACTIVE segment's preset
-    const active = resolveActive(project, currentTime);
     const size = outputSize(
       project.media,
-      active.seg.aspectPreset ?? "source",
+      activePreset,
       MAX_CANVAS_WIDTH,
     );
-    setCanvasSize({ w: size.width, h: size.height });
-  }, [project, currentTime, selectedSegmentId]);
+    setCanvasSize((prev) => {
+      if (prev.w === size.width && prev.h === size.height) return prev;
+      return { w: size.width, h: size.height };
+    });
+  }, [project?.media.width, project?.media.height, activePreset]);
 
-  // Ensure canvas draws immediately when canvas size or project changes
+  // Redraw when canvas dimensions change
   useEffect(() => {
     if (canvasRef.current && project) {
       const ctx = canvasRef.current.getContext("2d");
       if (ctx) {
-        engine.renderFrame(ctx, project, currentTime);
+        engine.renderFrame(ctx, project, useProjectStore.getState().currentTime);
       }
     }
-  }, [canvasSize, project, currentTime]);
+  }, [canvasSize.w, canvasSize.h, project?.id]);
 
   // ── Drop + click-to-import ──
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -775,30 +783,27 @@ export function PreviewCanvas() {
     >
       {/* Vercel mesh halo behind stage */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ background: "radial-gradient(700px 420px at 50% 38%, rgba(0,124,240,0.18) 0%, transparent 60%), radial-gradient(560px 360px at 82% 78%, rgba(255,0,128,0.12) 0%, transparent 62%)" }} />
-      {/* Stage frame adapts to preset aspect ratio (16:9, 9:16, 1:1, 4:3) */}
+      {/* Stage canvas wrapper — WYSIWYG preview matching exported video */}
       <div
-        className="relative flex max-h-[56vh] max-w-[64vw] items-center justify-center overflow-hidden rounded-xl border shadow-vercel-4 lg:max-h-[62vh]"
+        className="relative flex max-h-[58vh] max-w-[66vw] items-center justify-center overflow-hidden rounded-2xl border shadow-vercel-4 transition-all lg:max-h-[64vh]"
         style={{
-          borderColor: "#ebebeb",
+          borderColor: "rgba(0,0,0,0.08)",
           aspectRatio: `${canvasSize.w} / ${canvasSize.h}`,
-          width: targetAspect >= 1 ? `min(64vw, calc(62vh * ${targetAspect}))` : `min(64vw, calc(62vh * ${targetAspect}))`,
-          height: targetAspect < 1 ? `min(62vh, calc(64vw / ${targetAspect}))` : undefined,
-          padding: activeSeg.stagePadding,
-          ...stageStyle,
+          width: targetAspect >= 1 ? `min(66vw, calc(64vh * ${targetAspect}))` : `calc(64vh * ${targetAspect})`,
+          maxHeight: targetAspect < 1 ? "64vh" : undefined,
+          boxShadow: "0 20px 48px rgba(0,0,0,0.14)",
         }}
       >
-        <div className="flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-lg shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
-          <canvas
-            ref={canvasRef}
-            width={canvasSize.w}
-            height={canvasSize.h}
-            className="block h-full w-full cursor-crosshair object-contain"
-            onClick={handleCanvasClick}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-          />
-        </div>
+        <canvas
+          ref={canvasRef}
+          width={canvasSize.w}
+          height={canvasSize.h}
+          className="block h-full w-full cursor-crosshair object-contain"
+          onClick={handleCanvasClick}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+        />
       </div>
       {/* Hidden audio for preview — same blob URL as video, synced to canvas time */}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}

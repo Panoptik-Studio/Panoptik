@@ -172,14 +172,19 @@ export function renderFrame(
 
   // ── Layer 2: Letterboxed frame with camera zoom (virtual camera, clamped, aspect-aware) ──
   const media = project.media;
-  const rect = frameRect(w, h, media, seg.aspectPreset);
+  const paddingPx = (seg.stagePadding ?? 0) * (h / 1080) * 1.5;
+  const rect = frameRect(w, h, media, seg.aspectPreset, paddingPx);
   if (currentFrame) {
     const view = cameraViewport(rect, getCameraTransform(seg.zoomPoints, srcT));
     ctx.save();
-    // Clip first: at a non-native aspect preset the magnified frame would
-    // otherwise spill out of the letterbox and cover the background.
+    // Clip with rounded corners when padded, or standard rect
     ctx.beginPath();
-    ctx.rect(rect.x, rect.y, rect.w, rect.h);
+    const cornerRadius = seg.stagePadding > 0 ? Math.min(24, Math.max(8, rect.w * 0.015)) : 0;
+    if (cornerRadius > 0 && typeof ctx.roundRect === "function") {
+      ctx.roundRect(rect.x, rect.y, rect.w, rect.h, cornerRadius);
+    } else {
+      ctx.rect(rect.x, rect.y, rect.w, rect.h);
+    }
     ctx.clip();
     // Put the focal point at the centre of the frame, magnified by scale.
     ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);

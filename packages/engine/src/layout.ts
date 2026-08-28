@@ -62,7 +62,7 @@ export function outputSize(
 
 /**
  * Compute the letterboxed frame rect inside a canvas of (canvasW × canvasH)
- * for media of (media.width × media.height) at the given aspect preset.
+ * for media of (media.width × media.height) at the given aspect preset and optional padding.
  * Returns { x, y, w, h } where x/y is the top-left offset of the frame.
  */
 export function frameRect(
@@ -70,9 +70,14 @@ export function frameRect(
   canvasH: number,
   media: Media,
   preset: AspectPreset,
+  padding = 0,
 ): Rect {
+  const pad = Math.max(0, padding);
+  const availW = Math.max(10, canvasW - pad * 2);
+  const availH = Math.max(10, canvasH - pad * 2);
+
   const target = presetAspect(preset, media);
-  const boxW = Math.min(canvasW, canvasH * target);
+  const boxW = Math.min(availW, availH * target);
   const boxH = boxW / target;
   const s = Math.min(boxW / media.width, boxH / media.height);
   const w = media.width * s;
