@@ -274,6 +274,19 @@ function drawCaptions(
 // currentTime = t % duration pre-draw; rounded-corner PiP at facecam.x/y/size
 // in screen space (never zoomed). Spec.md: x/y = top-left 0-1, size = 0-1 of canvas width.
 const facecamCache = new Map<string, HTMLVideoElement>();
+
+// Injected by decode.ts. Kept as callbacks because decode.ts already imports
+// this module, and importing it back would be circular.
+let decodedFacecam: (() => CanvasImageSource | null) | null = null;
+let decodedFacecamAspect: (() => number) | null = null;
+
+export function setFacecamFrameSource(
+  frame: (() => CanvasImageSource | null) | null,
+  aspect: (() => number) | null,
+): void {
+  decodedFacecam = frame;
+  decodedFacecamAspect = aspect;
+}
 let lastFacecamT = 0;
 
 function getFacecamVideo(src: string): HTMLVideoElement | null {
@@ -325,46 +338,31 @@ function drawFacecam(
 ): void {
   const fc = project.facecam;
   if (!fc.src) return;
-  const video = getFacecamVideo(fc.src);
-  if (!video) return;
-  const isExport = typeof OffscreenCanvas !== "undefined" && ctx.canvas instanceof OffscreenCanvas;
-  if (isExport) {
-    // Export: precise, synchronous seek — OffscreenCanvas has no real-time playback.
-    // Don't gate on playing/paused, just seek to t and draw if we have data.
+
+  // Prefer the decoded camera frame. It is stepped in lockstep with the clip,
+  // so it stays in sync; the <video> fallback below only exists for projects
+  // reloaded from storage, where we hold a URL but never saw the blob.
+  let source: CanvasImageSource | null = decodedFacecam?.() ?? null;
+  let aspect = source ? decodedFacecamAspect?.() ?? 16 / 9 : 16 / 9;
+
+  if (!source) {
+    const video = getFacecamVideo(fc.src);
+    if (!video) return;
     try {
       const dur = video.duration;
       const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
-      if (Math.abs(video.currentTime - target) > 0.02) video.currentTime = target;
-    } catch { /* ignore */ }
-    if (video.readyState < 1) return;
-  } else {
-    const dt = t - lastFacecamT;
-    const isPlaying = Math.abs(dt) > 0.001 && Math.abs(dt) < 0.3;
-    lastFacecamT = t;
-    if (isPlaying) {
-      if (video.paused) video.play().catch(() => {});
-      if (!video.seeking && Math.abs(video.currentTime - t) > 0.5) {
-        try {
-          const dur = video.duration;
-          const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
-          video.currentTime = target;
-        } catch { /* ignore */ }
+      // Assigning currentTime starts an async seek, so this frame may be a
+      // little behind. Acceptable for the fallback; the decoded path is exact.
+      if (!video.seeking && Math.abs(video.currentTime - target) > 0.05) {
+        video.currentTime = target;
       }
-    } else {
-      if (!video.paused) video.pause();
-      try {
-        const dur = video.duration;
-        const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
-        if (Math.abs(video.currentTime - target) > 0.05) video.currentTime = target;
-      } catch { /* ignore */ }
-      if (video.readyState < 2) return;
-    }
-    if (video.readyState < 1) return;
+    } catch { /* ignore seek errors */ }
+    if (video.readyState < 2) return;
+    source = video;
+    aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
   }
 
   const pipW = Math.round(canvasW * fc.size);
-  // Preserve ~16:9; fallback to square if no video dimensions yet
-  const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
   const pipH = Math.round(pipW / aspect);
   const x = Math.round(canvasW * fc.x);
   const y = Math.round(canvasH * fc.y);
@@ -392,7 +390,7 @@ function drawFacecam(
   }
   ctx.clip();
   try {
-    ctx.drawImage(video, clampedX, clampedY, pipW, pipH);
+    ctx.drawImage(source, clampedX, clampedY, pipW, pipH);
   } catch { /* video frame not ready */ }
   ctx.restore();
   // Subtle border — matches clip shape

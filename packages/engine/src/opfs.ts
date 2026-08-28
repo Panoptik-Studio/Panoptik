@@ -15,8 +15,13 @@ function isSecureContext(): boolean {
   );
 }
 
+/**
+ * Persist a project. `includeMedia` copies the recordings themselves, which is
+ * expensive — edits only need the JSON rewritten, so autosave passes false.
+ */
 export async function saveProject(
   project: Project,
+  includeMedia = true,
 ): Promise<void> {
   if (!isSecureContext()) return;
 
@@ -34,6 +39,8 @@ export async function saveProject(
   const jsonWritable = await jsonFile.createWritable();
   await jsonWritable.write(JSON.stringify(project));
   await jsonWritable.close();
+
+  if (!includeMedia) return;
 
   // Save clip blob if it's a blob URL
   if (project.clip.src.startsWith("blob:")) {
@@ -63,6 +70,59 @@ export async function saveProject(
       await facecamFile.createWritable();
     await facecamWritable.write(blob);
     await facecamWritable.close();
+  }
+
+  // A recording's narration lives in its own file, so it has to be saved too —
+  // otherwise a reloaded project comes back silent.
+  if (project.audioSrc && project.audioSrc.startsWith("blob:")) {
+    const blob = await (await fetch(project.audioSrc)).blob();
+    const audioFile = await projectDir.getFileHandle("audio.webm", { create: true });
+    const audioWritable = await audioFile.createWritable();
+    await audioWritable.write(blob);
+    await audioWritable.close();
+  }
+}
+
+/** Read a saved project back as blobs, so the decoder can be re-opened on them. */
+export async function loadProjectRecord(id: string): Promise<{
+  project: Project;
+  clip: Blob | null;
+  facecam: Blob | null;
+  audio: Blob | null;
+} | null> {
+  if (!isSecureContext()) return null;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(id);
+    const json = await (await (await dir.getFileHandle("project.json")).getFile()).text();
+    const project = JSON.parse(json) as Project;
+
+    const read = async (name: string): Promise<Blob | null> => {
+      try {
+        return await (await dir.getFileHandle(name)).getFile();
+      } catch {
+        return null;
+      }
+    };
+    return {
+      project,
+      clip: await read("clip.webm"),
+      facecam: await read("facecam.webm"),
+      audio: await read("audio.webm"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Remove a saved project and everything under it. */
+export async function deleteProject(id: string): Promise<void> {
+  if (!isSecureContext()) return;
+  try {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry(id, { recursive: true });
+  } catch {
+    /* already gone */
   }
 }
 

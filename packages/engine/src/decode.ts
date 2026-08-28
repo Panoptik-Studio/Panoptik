@@ -11,11 +11,13 @@
  */
 import { ALL_FORMATS, BlobSource, CanvasSink, Input, type WrappedCanvas } from "mediabunny";
 import type { Project } from "@panoptik/schema";
-import { clearFacecamCache, getCurrentFrame, setCurrentFrame } from "./render";
+import { clearFacecamCache, getCurrentFrame, setCurrentFrame, setFacecamFrameSource } from "./render";
 import { setAudioSink } from "./audio";
 
 /** Keep 1920 everywhere on canvas per request — export and preview share res. */
 const MAX_DECODE_WIDTH = 1920;
+/** The camera is drawn small; decoding it larger is wasted work. */
+const MAX_FACECAM_WIDTH = 640;
 /** Larger pool reduces backpressure when the rAF loop is 60fps and decode is ~30fps. */
 const POOL_SIZE = 8;
 /** One iterator should cover the whole clip — 1s caused a seek every ~2s → 140-720ms stall → 17fps. */
@@ -91,17 +93,172 @@ export async function setAudioBlob(blob: Blob | null): Promise<string | null> {
   return audioUrl;
 }
 
+
+// ── Facecam decode pipeline ──────────────────────────────────────────────────
+// The camera used to be drawn from an <video> whose currentTime was assigned
+// and then drawn in the same tick. Seeking a media element is asynchronous, so
+// that drew the *previous* frame — during an export, where frames are stepped
+// as fast as they encode, the camera lagged and stuttered. Decoding it the same
+// way as the clip makes each frame deterministic and awaitable.
+let fcInput: Input | null = null;
+let fcSink: CanvasSink | null = null;
+let fcIterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
+let fcIteratorTime = -1;
+let fcPresented: { start: number; end: number } | null = null;
+let fcSurface: HTMLCanvasElement | OffscreenCanvas | null = null;
+let fcSurfaceCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
+let fcAspect = 16 / 9;
+let fcDesired = 0;
+let fcPump: Promise<void> | null = null;
+
+/** The decoded camera frame, or null when there is no camera track. */
+export function getFacecamSurface(): CanvasImageSource | null {
+  return fcPresented ? fcSurface : null;
+}
+
+setFacecamFrameSource(getFacecamSurface, getFacecamAspect);
+
+/** Aspect of the camera track, for sizing the PiP. */
+export function getFacecamAspect(): number {
+  return fcAspect;
+}
+
+async function closeFacecamIterator(): Promise<void> {
+  const it = fcIterator;
+  fcIterator = null;
+  fcIteratorTime = -1;
+  if (it) {
+    try {
+      await it.return();
+    } catch {
+      /* already finished */
+    }
+  }
+}
+
+async function openFacecamSink(blob: Blob): Promise<void> {
+  try {
+    fcInput = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
+    const track = await fcInput.getPrimaryVideoTrack();
+    if (!track || !(await track.canDecode())) return;
+    const w = await track.getDisplayWidth();
+    const h = await track.getDisplayHeight();
+    fcAspect = h > 0 ? w / h : 16 / 9;
+    // The PiP is small on screen; decoding the camera at full size would cost
+    // far more than it shows.
+    const dw = Math.max(2, Math.min(w, MAX_FACECAM_WIDTH));
+    const dh = Math.max(2, Math.round(dw / fcAspect));
+    fcSink = new CanvasSink(track, { width: dw, height: dh, fit: "fill", poolSize: 4 });
+    if (typeof OffscreenCanvas !== "undefined") {
+      const c = new OffscreenCanvas(dw, dh);
+      fcSurface = c;
+      fcSurfaceCtx = c.getContext("2d");
+    } else if (typeof document !== "undefined") {
+      const c = document.createElement("canvas");
+      c.width = dw;
+      c.height = dh;
+      fcSurface = c;
+      fcSurfaceCtx = c.getContext("2d");
+    }
+    if (!fcSurfaceCtx) fcSurface = null;
+  } catch {
+    fcSink = null;
+  }
+}
+
+/** Decode the camera frame covering `t`. Coalesces like the clip's pump. */
+export async function prepareFacecamFrame(t: number): Promise<void> {
+  if (!fcSink) return;
+  fcDesired = Math.max(0, t);
+  if (!fcPump) {
+    fcPump = runFacecamPump().finally(() => {
+      fcPump = null;
+    });
+  }
+  return fcPump;
+}
+
+async function runFacecamPump(): Promise<void> {
+  while (fcSink) {
+    const target = fcDesired;
+    if (fcPresented && target >= fcPresented.start && target < fcPresented.end) return;
+
+    const continuable =
+      fcIterator !== null && target >= fcIteratorTime && target - fcIteratorTime <= SEEK_AHEAD_LIMIT;
+    if (!continuable) {
+      await closeFacecamIterator();
+      if (!fcSink) return;
+      fcIterator = fcSink.canvases(target);
+      fcIteratorTime = target;
+    }
+
+    const active = fcIterator!;
+    const { value, done } = await active.next();
+    if (active !== fcIterator) continue;
+
+    if (done || !value) {
+      await closeFacecamIterator();
+      // Past the camera's end, hold its last frame rather than re-seeking.
+      if (fcPresented) fcPresented = { start: fcPresented.start, end: Infinity };
+      return;
+    }
+
+    fcIteratorTime = value.timestamp;
+    const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
+    if (!fcPresented || end > target) {
+      if (fcSurface && fcSurfaceCtx) {
+        fcSurfaceCtx.drawImage(value.canvas as CanvasImageSource, 0, 0, fcSurface.width, fcSurface.height);
+      }
+      fcPresented = { start: value.timestamp, end };
+    }
+  }
+}
+
+async function teardownFacecam(): Promise<void> {
+  fcSink = null;
+  const inflight = fcPump;
+  await closeFacecamIterator();
+  if (inflight) {
+    try {
+      await inflight;
+    } catch {
+      /* aborted */
+    }
+  }
+  fcPresented = null;
+  fcDesired = 0;
+  fcSurface = null;
+  fcSurfaceCtx = null;
+  fcAspect = 16 / 9;
+  if (fcInput) {
+    try {
+      fcInput.dispose();
+    } catch {
+      /* already disposed */
+    }
+    fcInput = null;
+  }
+}
+
+/** Decode the clip and the camera together, so a frame is complete. */
+export async function prepareAllFrames(t: number): Promise<void> {
+  await Promise.all([prepareFrame(t), prepareFacecamFrame(t)]);
+}
+
 /**
  * Mint the facecam's object URL here so teardown can revoke it alongside the
  * clip's — otherwise every re-import pins another full recording in memory.
  */
-export function setFacecamBlob(blob: Blob | null): string | null {
+export async function setFacecamBlob(blob: Blob | null): Promise<string | null> {
   if (facecamUrl) {
     URL.revokeObjectURL(facecamUrl);
     facecamUrl = null;
   }
   clearFacecamCache();
-  if (blob && blob.size > 0) facecamUrl = URL.createObjectURL(blob);
+  await teardownFacecam();
+  if (!blob || blob.size === 0) return null;
+  facecamUrl = URL.createObjectURL(blob);
+  await openFacecamSink(blob);
   return facecamUrl;
 }
 
@@ -299,7 +456,7 @@ async function teardown(): Promise<void> {
   surfaceCtx = null;
   setCurrentFrame(null);
   setAudioSink(null);
-  setFacecamBlob(null);
+  await setFacecamBlob(null);
   await setAudioBlob(null);
   if (audioInput) {
     try {

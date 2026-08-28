@@ -15,6 +15,8 @@ export interface MediaEngine {
   renderFrame(ctx: CanvasRenderingContext2D, project: Project, t: number): void;
   loadClip(file: File): Promise<Project>;
   loadRecording(screen: Blob, facecam: Blob | null, audio: Blob | null): Promise<Project>;
+  /** Re-open a saved project's media and reapply its edits. */
+  restoreProject(id: string): Promise<Project | null>;
   /** Full-clip mono AudioBuffer for transcription/export. null when no decodable audio. */
   getAudioBuffer(project: Project): Promise<AudioBuffer | null>;
   exportProject(project: Project, opts: ExportOpts): Promise<Blob>;
@@ -37,5 +39,5 @@ export type { Transform, Viewport } from "./render";
 
 // ── #region B-modules (DEV B adds re-export lines here; DEV A do not edit) ──
 export { startRecording, openCameraTrack, openMicrophoneTrack } from "./record";
-export { saveProject, loadProject, listProjects } from "./opfs";
+export { saveProject, loadProject, loadProjectRecord, listProjects, deleteProject } from "./opfs";
 // ── #endregion ──

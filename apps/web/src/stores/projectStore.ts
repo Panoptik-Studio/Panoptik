@@ -70,10 +70,15 @@ interface ProjectStore {
   whisperProgress: number | null; // null = idle, -1 = transcribing, 0-100 = model loading
   /** 0..1 while an export runs, null when idle. Non-null locks the editor. */
   exportProgress: number | null;
+  /** Where the on-device save/restore has got to. */
+  persistStatus: "idle" | "saving" | "saved" | "restoring";
   stagePadding: number; // p-4 = 16, p-2 = 8, p-8 = 32 etc — white space around black video container
 
   // Project lifecycle
   setProject: (project: Project) => void;
+  /** Drop the loaded video and every edit made on it. */
+  clearProject: () => void;
+  setPersistStatus: (s: "idle" | "saving" | "saved" | "restoring") => void;
 
   // Playback
   play: () => void;
@@ -159,6 +164,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   pendingBackgroundBadge: false,
   whisperProgress: null,
   exportProgress: null,
+  persistStatus: "idle",
   stagePadding: 0,
 
   // ── Project lifecycle ──
@@ -175,6 +181,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       pendingBackgroundBadge: false,
     });
   },
+
+  setPersistStatus: (persistStatus) => set({ persistStatus }),
+
+  clearProject: () =>
+    set({
+      project: null,
+      history: [],
+      historyIndex: -1,
+      currentTime: 0,
+      isPlaying: false,
+      selectedZoomId: null,
+      pendingBackgroundBadge: false,
+      exportProgress: null,
+    }),
 
   // ── Playback ──
 

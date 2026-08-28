@@ -19,7 +19,7 @@ import {
 } from "mediabunny";
 import type { ExportOpts, Project } from "@panoptik/schema";
 import { presetAspect } from "./layout";
-import { prepareFrame } from "./decode";
+import { prepareAllFrames } from "./decode";
 import { renderFrame } from "./render";
 
 /** Long-edge pixel height for each preset; width follows the clip's aspect. */
@@ -111,7 +111,7 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
       const t = i / EXPORT_FPS;
       // Decode before composing: renderFrame draws whatever frame is current,
       // so without awaiting here every output frame would be the same picture.
-      await prepareFrame(t);
+      await prepareAllFrames(t);
       renderFrame(ctx as unknown as CanvasRenderingContext2D, project, t);
       // Awaited so encoder backpressure actually throttles us rather than
       // queueing the whole clip into memory.

@@ -20,10 +20,14 @@ import { Timeline } from "@/components/Timeline";
 import { ToolTrace } from "@/components/ToolTrace";
 import { Toolbar } from "@/components/Toolbar";
 import { ZoomPanel } from "@/components/ZoomPanel";
+import { useProjectPersistence } from "@/lib/useProjectPersistence";
 
 type LeftTab = "media" | "zoom" | "text" | "captions" | "camera" | "stage";
 export default function EditorPage() {
   const [activeTab, setActiveTab] = React.useState<LeftTab>("zoom");
+  // Above the tabs: the clip must come back on reload regardless of which
+  // panel happens to be open.
+  useProjectPersistence();
   return (
     <div className="flex h-screen flex-col" style={{ background: "#f8f8f8" }}>
       <Toolbar />
