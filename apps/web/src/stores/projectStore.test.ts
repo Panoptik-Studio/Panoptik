@@ -302,4 +302,41 @@ describe("projectStore", () => {
       useProjectStore.getState().project!.stagedCaptions,
     ).toHaveLength(0);
   });
+
+  it("playbackRate defaults to 1 and clamps 0.25–3", () => {
+    const s = useProjectStore.getState();
+    expect(s.playbackRate).toBe(1);
+    s.setPlaybackRate(10);
+    expect(useProjectStore.getState().playbackRate).toBe(3);
+    s.setPlaybackRate(0);
+    expect(useProjectStore.getState().playbackRate).toBe(0.25);
+    s.setPlaybackRate(1.33);
+    expect(useProjectStore.getState().playbackRate).toBeCloseTo(1.35, 1);
+  });
+
+  it("effectiveDuration divides clip duration", () => {
+    useProjectStore.getState().setProject(structuredClone(mockProject()));
+    const dur = useProjectStore.getState().project!.clip.duration; // 15 from mock
+    useProjectStore.getState().setPlaybackRate(2);
+    expect(useProjectStore.getState().project!.clip.duration / useProjectStore.getState().playbackRate).toBe(dur / 2);
+    useProjectStore.getState().setPlaybackRate(0.5);
+    expect(useProjectStore.getState().project!.clip.duration / useProjectStore.getState().playbackRate).toBe(dur / 0.5);
+  });
+
+  it("persists playbackRate across reload", () => {
+    const s = useProjectStore.getState();
+    // Mock localStorage for node environment
+    const store: Record<string, string> = {};
+    const mockLS = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v; },
+      removeItem: (k: string) => { delete store[k]; },
+      clear: () => { for (const k in store) delete store[k]; },
+    } as unknown as Storage;
+    (globalThis as unknown as { localStorage: Storage }).localStorage = mockLS;
+    // Also ensure window.localStorage if exists
+    if (typeof window !== "undefined") (window as unknown as { localStorage: Storage }).localStorage = mockLS;
+    s.setPlaybackRate(2.5);
+    expect(mockLS.getItem("panoptik:playbackRate")).toBe("2.5");
+  });
 });

@@ -73,6 +73,7 @@ interface ProjectStore {
   /** Where the on-device save/restore has got to. */
   persistStatus: "idle" | "saving" | "saved" | "restoring";
   stagePadding: number; // p-4 = 16, p-2 = 8, p-8 = 32 etc — white space around black video container
+  playbackRate: number; // 0.25–3, affects preview & export, cam+screen synced
 
   // Project lifecycle
   setProject: (project: Project) => void;
@@ -152,6 +153,30 @@ interface ProjectStore {
 
   // Facecam PiP placement (position / size / shape in the composed frame)
   setFacecam: (updates: Partial<Facecam>) => void;
+
+  // Playback speed — global, affects cam+screen together, preview & export
+  setPlaybackRate: (n: number) => void;
+}
+
+function clampRate(n: number): number {
+  return Math.min(3, Math.max(0.25, Math.round(n * 20) / 20));
+}
+function getLS(): Storage | null {
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+    if (typeof window !== "undefined" && (window as unknown as { localStorage?: Storage }).localStorage) return (window as unknown as { localStorage: Storage }).localStorage;
+    const g = globalThis as unknown as { localStorage?: Storage };
+    if (g.localStorage) return g.localStorage;
+  } catch { /* no storage */ }
+  return null;
+}
+function initialRate(): number {
+  try {
+    const ls = getLS();
+    const v = Number(ls?.getItem("panoptik:playbackRate"));
+    if (Number.isFinite(v) && v >= 0.25 && v <= 3) return clampRate(v);
+  } catch { /* no localStorage */ }
+  return 1;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -166,6 +191,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   exportProgress: null,
   persistStatus: "idle",
   stagePadding: 0,
+  playbackRate: initialRate(),
 
   // ── Project lifecycle ──
 
@@ -179,7 +205,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       isPlaying: false,
       selectedZoomId: null,
       pendingBackgroundBadge: false,
+      playbackRate: 1,
     });
+    try { getLS()?.setItem("panoptik:playbackRate", "1"); } catch { /* ignore */ }
   },
 
   setPersistStatus: (persistStatus) => set({ persistStatus }),
@@ -194,6 +222,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       selectedZoomId: null,
       pendingBackgroundBadge: false,
       exportProgress: null,
+      playbackRate: 1,
     }),
 
   // ── Playback ──
@@ -636,5 +665,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const s = get();
     if (!s.project) return;
     set({ project: { ...s.project, facecam: { ...s.project.facecam, ...updates } } });
+  },
+
+  setPlaybackRate: (n) => {
+    const s = get();
+    if (s.exportProgress !== null) return;
+    const v = clampRate(n);
+    try { getLS()?.setItem("panoptik:playbackRate", String(v)); } catch { /* ignore */ }
+    set({ playbackRate: v });
   },
 }));
