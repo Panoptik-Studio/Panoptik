@@ -90,14 +90,14 @@ export function ProjectBrowser() {
           >
             <div className="flex items-baseline justify-between gap-2">
               <span className="pk-ui truncate text-[13px] font-medium" style={{ color: "#1a1a1a" }}>
-                {project.facecam.src ? "Recording" : "Imported clip"}
+                {project.segments[0]?.facecam.src ? "Recording" : "Imported clip"}
               </span>
               <span className="pk-value shrink-0">
-                {project.clip.width}×{project.clip.height}
+                {project.media.width}×{project.media.height}
               </span>
             </div>
             <p className="pk-help mt-1" style={{ fontSize: 11 }}>
-              {project.clip.duration.toFixed(1)}s · kept on this device · reopens automatically
+              {project.media.duration.toFixed(1)}s · kept on this device · reopens automatically
             </p>
           </div>
 

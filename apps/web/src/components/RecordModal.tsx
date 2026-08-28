@@ -473,11 +473,15 @@ export function RecordModal() {
       );
       // Carry the chosen shape and corner through to the composed frame, so the
       // exported video puts the camera where the recorder UI said it would.
-      project.facecam = {
-        ...project.facecam,
-        ...facecamPlacement(corner, camSize, project.clip.width / project.clip.height),
-        shape,
-      };
+      // The facecam lives on the (single) segment in the v1.2 model.
+      const seg = project.segments[0];
+      if (seg) {
+        seg.facecam = {
+          ...seg.facecam,
+          ...facecamPlacement(corner, camSize, project.media.width / project.media.height),
+          shape,
+        };
+      }
       setProject(project);
       setIsOpen(false);
     } catch (err) {

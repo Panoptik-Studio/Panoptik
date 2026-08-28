@@ -51,8 +51,9 @@ export function useVideoExport() {
       }
       setResult(null);
       try {
-        const playbackRate = useProjectStore.getState().playbackRate ?? 1;
-        const blob = await engine.exportProject(project, { ...opts, playbackRate });
+        // Speed is per-segment (applied inside the engine's per-segment export),
+        // so there is no global playbackRate override to spread in here.
+        const blob = await engine.exportProject(project, opts);
         const url = URL.createObjectURL(blob);
         urlRef.current = url;
         const actualFormat: ExportOpts["format"] = blob.type.includes("webm") ? "webm" : blob.type.includes("mp4") ? "mp4" : opts.format;
