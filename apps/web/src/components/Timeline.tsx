@@ -1,12 +1,20 @@
 /**
  * OWNER: DEV B — Poindeo-like timeline (shell-timeline 220px, resizable, with
  * canvas scroll area, playhead, and full controls bar). Keeps existing store
- * wiring (zoom diamonds, seeking, captions) inside the new shell.
+ * wiring (segment filmstrip, zoom diamonds, seeking, split, speed) inside the
+ * new shell. Timeline time is ON-TIMELINE; segments are laid out by
+ * segmentDuration / projectDuration; diamonds/edits target the selected segment.
  */
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
+import {
+  segmentDuration,
+  projectDuration,
+  resolveSegment,
+  sourceToTimeline,
+} from "@panoptik/engine";
 
 const RULER_HEIGHT = 28;
 const TRACK_HEIGHT = 36;
@@ -28,7 +36,7 @@ export function Timeline() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [shellH, setShellH] = useState(SHELL_DEFAULT_H);
   const [zoom, setZoom] = useState(0.52);
-  const [draggingDiamond, setDraggingDiamond] = useState<{ id: string; committed: boolean } | null>(null);
+  const [draggingDiamond, setDraggingDiamond] = useState<{ id: string; committed: boolean; segmentId: string } | null>(null);
   const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
 
@@ -38,25 +46,41 @@ export function Timeline() {
   const seek = useProjectStore((s) => s.seek);
   const play = useProjectStore((s) => s.play);
   const pause = useProjectStore((s) => s.pause);
+  const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
+  const selectSegment = useProjectStore((s) => s.selectSegment);
+  const splitAt = useProjectStore((s) => s.splitAt);
+  const updateSegment = useProjectStore((s) => s.updateSegment);
   const selectedZoomId = useProjectStore((s) => s.selectedZoomId);
   const setSelectedZoom = useProjectStore((s) => s.setSelectedZoom);
   const updateZoomPoint = useProjectStore((s) => s.updateZoomPoint);
   const removeZoomPoint = useProjectStore((s) => s.removeZoomPoint);
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
-  const playbackRate = useProjectStore((s) => s.playbackRate);
-  const setPlaybackRate = useProjectStore((s) => s.setPlaybackRate);
   const exportProgress = useProjectStore((s) => s.exportProgress);
   const [showSpeed, setShowSpeed] = useState(false);
 
-  const duration = project?.clip.duration ?? 28;
-  const effectiveDuration = duration / playbackRate;
+  // On-timeline duration across all segments.
+  const duration = project ? Math.max(projectDuration(project), 0.001) : 0.001;
 
-  // Canvas width scales with zoom: 0→0.5×, 1→2× base — uses effectiveDuration so ruler compresses with speed
+  // Canvas width scales with zoom: 0→0.5×, 1→2× base — ruler uses on-timeline duration
   const baseW = 1387;
   const canvasW = Math.round(baseW * (0.5 + zoom * 1.5));
   const canvasH = 108;
-  const timeToX = useCallback((t: number) => (t / effectiveDuration) * canvasW, [effectiveDuration, canvasW]);
-  const xToTime = useCallback((x: number) => Math.max(0, Math.min(effectiveDuration, (x / canvasW) * effectiveDuration)), [effectiveDuration, canvasW]);
+  const timeToX = useCallback((t: number) => (t / duration) * canvasW, [duration, canvasW]);
+  const xToTime = useCallback((x: number) => Math.max(0, Math.min(duration, (x / canvasW) * duration)), [duration, canvasW]);
+
+  // The selected segment's speed, or 1 when nothing is selected.
+  const sel = project?.segments.find((s) => s.id === selectedSegmentId);
+  const segSpeed = sel?.speed ?? 1;
+  const canSpeed = selectedSegmentId !== null && exportProgress === null;
+
+  // splitAt leaves `selectedSegmentId` dangling when the selected segment is the
+  // one being split; repair it to the segment the playhead now sits in.
+  useEffect(() => {
+    if (!project) return;
+    if (selectedSegmentId && project.segments.some((s) => s.id === selectedSegmentId)) return;
+    const r = resolveSegment(project, currentTime);
+    if (r) selectSegment(r.segment.id);
+  }, [project, selectedSegmentId, currentTime, selectSegment]);
 
   // Draw ruler + tracks onto canvas (lightweight, no DOM per tick)
   useEffect(() => {
@@ -74,13 +98,13 @@ export function Timeline() {
     ctx.fillStyle = "#ebebeb";
     ctx.fillRect(0, 27, canvasW, 1);
 
-    // Ticks — uses effectiveDuration so ruler compresses with speed
-    const interval = effectiveDuration <= 30 ? 1 : effectiveDuration <= 120 ? 5 : 10;
+    // Ticks — on-timeline duration
+    const interval = duration <= 30 ? 1 : duration <= 120 ? 5 : 10;
     ctx.strokeStyle = "#d4d4d4";
     ctx.lineWidth = 1;
     ctx.font = "10px monospace";
     ctx.fillStyle = "#666";
-    for (let t = 0; t <= effectiveDuration; t += interval) {
+    for (let t = 0; t <= duration; t += interval) {
       const x = Math.round(timeToX(t));
       const major = t % (interval * 5) === 0 || t === 0;
       ctx.beginPath();
@@ -93,61 +117,105 @@ export function Timeline() {
       }
     }
 
-    // Zoom track bg
-    ctx.fillStyle = "#f5f5f5";
-    ctx.fillRect(8, 40, canvasW - 16, 36);
-    ctx.strokeStyle = "#ebebeb";
-    ctx.strokeRect(8 + 0.5, 40 + 0.5, canvasW - 16, 36);
-    ctx.fillStyle = "#171717";
-    ctx.font = "9px monospace";
-    ctx.fillText("ZOOM", 14, 62);
-
-    // Diamonds — map original t -> effective t = t / rate so they stay with content when sped
-    const diamonds = [...(project?.zoomPoints ?? []), ...(project?.stagedZoomPoints ?? [])];
-    for (const zp of diamonds) {
-      const x = timeToX(zp.t / playbackRate);
-      const y = 40 + 18;
-      const staged = !!(project?.stagedZoomPoints ?? []).find((s) => s.id === zp.id);
-      const selected = zp.id === selectedZoomId;
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(Math.PI / 4);
-      ctx.fillStyle = staged ? "#ffefcf" : "#0070f3";
-      ctx.strokeStyle = staged ? "#f5a623" : selected ? "#004299" : "#0761d1";
-      ctx.lineWidth = selected ? 2 : 1;
-      if (staged) ctx.setLineDash([3, 2]);
+    // Segment filmstrip blocks
+    let acc = 0;
+    for (const seg of project?.segments ?? []) {
+      const d = segmentDuration(seg);
+      const x0 = timeToX(acc);
+      const x1 = timeToX(acc + d);
+      const selected = seg.id === selectedSegmentId;
+      ctx.fillStyle = selected ? "rgba(0,112,243,0.10)" : "#f2f2f2";
+      ctx.fillRect(x0 + 4, 36, Math.max(1, x1 - x0 - 8), TRACK_HEIGHT);
+      ctx.strokeStyle = selected ? "#0070f3" : "#d4d4d4";
+      ctx.strokeRect(x0 + 0.5, 36, x1 - x0, TRACK_HEIGHT);
+      // filmstrip placeholder tiles (real frame thumbnails are a follow-up)
+      const T = Math.max(1, Math.floor((x1 - x0) / 24));
+      ctx.fillStyle = "#1a1a1a";
+      for (let i = 0; i < T; i++) {
+        const cx = x0 + (i + 0.5) * ((x1 - x0) / T);
+        ctx.fillRect(cx - 4, 40, 8, 28);
+      }
+      if (selected) {
+        ctx.fillStyle = "#0070f3";
+        ctx.font = "9px monospace";
+        ctx.fillText(`${String(seg.speed).replace(/\.?0$/, "")}x`, x0 + 8, 50);
+      }
+      // split boundary between segments
+      ctx.strokeStyle = "#999";
       ctx.beginPath();
-      ctx.rect(-DIAMOND_SIZE / 2, -DIAMOND_SIZE / 2, DIAMOND_SIZE, DIAMOND_SIZE);
-      ctx.fill();
+      ctx.moveTo(x1 + 0.5, 36);
+      ctx.lineTo(x1 + 0.5, 36 + TRACK_HEIGHT);
       ctx.stroke();
-      ctx.restore();
+      acc += d;
     }
-  }, [canvasW, canvasH, effectiveDuration, playbackRate, project?.zoomPoints, project?.stagedZoomPoints, selectedZoomId, timeToX]);
+
+    // Diamonds — per segment, positioned via sourceToTimeline
+    for (const seg of project?.segments ?? []) {
+      for (const zp of [...seg.zoomPoints, ...seg.stagedZoomPoints]) {
+        const st = sourceToTimeline(project!, seg.id, zp.t);
+        if (st == null) continue;
+        const x = timeToX(st);
+        const y = 36 + TRACK_HEIGHT / 2;
+        const staged = !!seg.stagedZoomPoints.find((s) => s.id === zp.id);
+        const selected = zp.id === selectedZoomId;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillStyle = staged ? "#ffefcf" : "#0070f3";
+        ctx.strokeStyle = staged ? "#f5a623" : selected ? "#004299" : "#0761d1";
+        ctx.lineWidth = selected ? 2 : 1;
+        if (staged) ctx.setLineDash([3, 2]);
+        ctx.beginPath();
+        ctx.rect(-DIAMOND_SIZE / 2, -DIAMOND_SIZE / 2, DIAMOND_SIZE, DIAMOND_SIZE);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedZoomId, timeToX]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (isDraggingPlayhead || draggingDiamond) return;
     if (!scrollRef.current) return;
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
-    // Check diamond hit first — map source t to effective for display
-    const diamonds = [...(project?.zoomPoints ?? []), ...(project?.stagedZoomPoints ?? [])];
-    for (const zp of diamonds) {
-      const dx = timeToX(zp.t / playbackRate);
-      if (Math.abs(x - dx) < 14) {
-        setSelectedZoom(zp.id);
-        return;
+    // Diamond hit first — select the segment the diamond belongs to, then the zoom
+    for (const seg of project?.segments ?? []) {
+      for (const zp of [...seg.zoomPoints, ...seg.stagedZoomPoints]) {
+        const st = sourceToTimeline(project!, seg.id, zp.t);
+        if (st == null) continue;
+        if (Math.abs(x - timeToX(st)) < 14) {
+          selectSegment(seg.id);
+          setSelectedZoom(zp.id);
+          return;
+        }
       }
     }
+    // Segment selection: which filmstrip block does the x fall in?
+    let acc = 0;
+    for (const seg of project?.segments ?? []) {
+      const d = segmentDuration(seg);
+      if (x >= timeToX(acc) && x < timeToX(acc + d)) {
+        selectSegment(seg.id);
+        break;
+      }
+      acc += d;
+    }
     seek(xToTime(x));
-  }, [playbackRate, project?.zoomPoints, project?.stagedZoomPoints, seek, setSelectedZoom, timeToX, xToTime]);
+  }, [project, selectSegment, seek, setSelectedZoom, timeToX, xToTime]);
 
   const handleDiamondDrag = useCallback((e: React.PointerEvent) => {
     if (!draggingDiamond || !scrollRef.current) return;
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
-    // xToTime gives effective time, convert back to source t for storage
-    updateZoomPoint(draggingDiamond.id, { t: xToTime(x) * playbackRate });
-  }, [draggingDiamond, playbackRate, updateZoomPoint, xToTime]);
+    const timelineT = xToTime(x);
+    const resolved = project ? resolveSegment(project, timelineT) : null;
+    if (!resolved) return;
+    // updateZoomPoint targets the SELECTED segment, so select the dragged
+    // diamond's segment (matches the segment the pointer is over) before updating.
+    selectSegment(draggingDiamond.segmentId);
+    updateZoomPoint(draggingDiamond.id, { t: resolved.srcT });
+  }, [draggingDiamond, project, selectSegment, updateZoomPoint, xToTime]);
 
   const handleTimelinePointerDown = useCallback((e: React.PointerEvent) => {
     if (!scrollRef.current || draggingDiamond) return;
@@ -197,7 +265,7 @@ export function Timeline() {
   }
 
   const playheadX = timeToX(currentTime);
-  const endX = timeToX(effectiveDuration);
+  const endX = timeToX(duration);
 
   return (
     <footer className="shell-timeline flex flex-col border-t bg-white" style={{ height: shellH, borderColor: "#e5e5e5" }}>
@@ -213,14 +281,14 @@ export function Timeline() {
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Mic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 10a7 7 0 0 1-14 0"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
           <div className="ctrl-divider mx-1 h-4 w-px bg-[#ebebeb]" />
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Volume"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>
-          <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Split"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg></button>
+          <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Split at playhead" disabled={exportProgress !== null} onClick={() => splitAt(currentTime)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg></button>
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Mosaic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></button>
           <div className="relative" onMouseEnter={() => exportProgress === null && setShowSpeed(true)} onMouseLeave={() => setShowSpeed(false)}>
-            <button className="pk-icon-btn ctrl-btn h-8 w-8 relative" title={`Speed ${playbackRate}x`} disabled={exportProgress !== null}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{playbackRate !== 1 && <span className="absolute -right-1 -top-1 rounded-full bg-[#0070f3] px-1 py-0.5 text-[9px] font-bold leading-none text-white">{playbackRate}x</span>}</button>
+            <button className="pk-icon-btn ctrl-btn h-8 w-8 relative" title={`Speed ${segSpeed}x`} disabled={!canSpeed}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{segSpeed !== 1 && <span className="absolute -right-1 -top-1 rounded-full bg-[#0070f3] px-1 py-0.5 text-[9px] font-bold leading-none text-white">{segSpeed}x</span>}</button>
             {showSpeed && exportProgress === null && (
               <div className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 gap-1 rounded-xl border bg-white p-1.5 shadow-vercel-3" style={{ borderColor: "#ebebeb", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
                 {[0.5, 1, 1.5, 2, 3].map((v) => (
-                  <button key={v} onClick={() => setPlaybackRate(v)} className="pk-seg min-w-[48px] text-xs" data-active={playbackRate === v}>{v}x</button>
+                  <button key={v} onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: v })} className="pk-seg min-w-[48px] text-xs" data-active={segSpeed === v}>{v}x</button>
                 ))}
               </div>
             )}
@@ -240,7 +308,7 @@ export function Timeline() {
           <div className="time-display ml-3 flex items-center gap-1.5 font-mono text-[13px] tabular-nums">
             <span className="time-current font-medium" style={{ color: "#1a1a1a" }}>{fmtTime(currentTime)}</span>
             <span className="time-separator" style={{ color: "#888" }}>/</span>
-            <span className="time-total" style={{ color: "#888" }}>{fmtTime(effectiveDuration)}</span>
+            <span className="time-total" style={{ color: "#888" }}>{fmtTime(duration)}</span>
           </div>
         </div>
 
@@ -266,21 +334,21 @@ export function Timeline() {
           </div>
           {/* End line */}
           <div className="end-line pointer-events-none absolute top-0 h-full w-px" style={{ transform: `translateX(${endX}px)`, borderLeft: "1px solid rgba(0,0,0,0.08)" }} />
-          {/* Diamond hit areas (transparent, for dragging) — effective time */}
-          {(project.zoomPoints ?? []).map((zp) => (
-            <div key={zp.id} className="absolute top-[40px] z-10 h-9 w-6 -translate-x-1/2 cursor-grab" style={{ left: timeToX(zp.t / playbackRate) }} onPointerDown={(e) => { e.stopPropagation(); (e.target as HTMLElement).setPointerCapture(e.pointerId); setDraggingDiamond({ id: zp.id, committed: true }); setSelectedZoom(zp.id); }} onMouseEnter={() => setHoveredDiamond(zp.id)} onMouseLeave={() => setHoveredDiamond(null)}>
-              {hoveredDiamond === zp.id && (
-                <button className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#ee0000] text-[8px] font-bold text-white" onClick={(e) => { e.stopPropagation(); removeZoomPoint(zp.id); }}>×</button>
-              )}
-            </div>
-          ))}
-          {(project.stagedZoomPoints ?? []).map((zp) => (
-            <div key={zp.id} className="absolute top-[40px] z-10 h-9 w-6 -translate-x-1/2 cursor-grab" style={{ left: timeToX(zp.t / playbackRate) }} onPointerDown={(e) => { e.stopPropagation(); (e.target as HTMLElement).setPointerCapture(e.pointerId); setDraggingDiamond({ id: zp.id, committed: false }); setSelectedZoom(zp.id); }} onMouseEnter={() => setHoveredDiamond(zp.id)} onMouseLeave={() => setHoveredDiamond(null)}>
-              {hoveredDiamond === zp.id && (
-                <button className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#ee0000] text-[8px] font-bold text-white" onClick={(e) => { e.stopPropagation(); removeStagedZoom(zp.id); }}>×</button>
-              )}
-            </div>
-          ))}
+          {/* Diamond hit areas (transparent, for dragging) — per segment, on-timeline */}
+          {project.segments.flatMap((seg) =>
+            [...seg.zoomPoints, ...seg.stagedZoomPoints].map((zp) => {
+              const st = sourceToTimeline(project, seg.id, zp.t);
+              if (st == null) return null;
+              const isStaged = !!seg.stagedZoomPoints.find((s) => s.id === zp.id);
+              return (
+                <div key={zp.id} className="absolute top-[36px] z-10 h-9 w-6 -translate-x-1/2 cursor-grab" style={{ left: timeToX(st) }} onPointerDown={(e) => { e.stopPropagation(); (e.target as HTMLElement).setPointerCapture(e.pointerId); setDraggingDiamond({ id: zp.id, committed: !isStaged, segmentId: seg.id }); setSelectedZoom(zp.id); selectSegment(seg.id); }} onMouseEnter={() => setHoveredDiamond(zp.id)} onMouseLeave={() => setHoveredDiamond(null)}>
+                  {hoveredDiamond === zp.id && (
+                    <button className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#ee0000] text-[8px] font-bold text-white" onClick={(e) => { e.stopPropagation(); isStaged ? removeStagedZoom(zp.id) : removeZoomPoint(zp.id); }}>×</button>
+                  )}
+                </div>
+              );
+            }),
+          )}
         </div>
       </div>
     </footer>
