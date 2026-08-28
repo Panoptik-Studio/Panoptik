@@ -195,9 +195,13 @@ interface ProjectStore {
   setStagePadding: (n: number) => void;
   setAspectPreset: (preset: AspectPreset) => void;
 
-  // Facecam PiP placement (position / size / shape in the composed frame)
   setFacecam: (updates: Partial<Facecam>) => void;
-  replaceFacecamMedia: (facecamSrc: string | null, audioSrc?: string | null, startT?: number) => void;
+  replaceFacecamMedia: (
+    facecamSrc: string | null,
+    audioSrc?: string | null,
+    startT?: number,
+    duration?: number,
+  ) => void;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -955,34 +959,99 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     pushHistoryAndSet(project, s, set);
   },
 
-  replaceFacecamMedia: (facecamSrc, audioSrc, startT) => {
+  replaceFacecamMedia: (facecamSrc, audioSrc, startT, duration) => {
     const s = get();
     if (!s.project) return;
-    const isPartialReshoot = typeof startT === "number" && startT > 0.1;
-    let tAccum = 0;
-    const project = {
-      ...s.project,
-      audioSrc: audioSrc !== undefined ? audioSrc : s.project.audioSrc,
-      segments: s.project.segments.map((seg) => {
-        const segDur = (seg.srcEnd - seg.srcStart) / (seg.speed || 1);
-        const segEndT = tAccum + segDur;
-        const isPriorSegment = isPartialReshoot && segEndT <= startT;
-        tAccum = segEndT;
+    const isPartial = typeof startT === "number" && startT > 0.05;
 
-        if (isPriorSegment) {
-          // Keep existing camera take intact for prior segments
-          return seg;
-        }
-
-        return {
+    if (!isPartial) {
+      const project = {
+        ...s.project,
+        audioSrc: audioSrc !== undefined ? audioSrc : s.project.audioSrc,
+        segments: s.project.segments.map((seg) => ({
           ...seg,
           facecam: {
             ...seg.facecam,
             src: facecamSrc,
-            startT: startT !== undefined ? startT : (seg.facecam?.startT ?? 0),
+            startT: 0,
           },
-        };
-      }),
+        })),
+      };
+      pushHistoryAndSet(project, s, set);
+      return;
+    }
+
+    let proj = s.project;
+    const splitAtTimeline = (p: typeof proj, targetT: number): typeof proj => {
+      const r = resolveSegment(p, targetT);
+      if (!r) return p;
+      const t = r.srcT;
+      const orig = r.segment;
+      if (t <= orig.srcStart + 0.05 || t >= orig.srcEnd - 0.05) return p;
+
+      const a = structuredClone(orig);
+      a.id = crypto.randomUUID();
+      a.srcEnd = t;
+      a.zoomPoints = orig.zoomPoints.filter((z) => z.t < t).map((z) => ({ ...z }));
+      a.stagedZoomPoints = orig.stagedZoomPoints.filter((z) => z.t < t).map((z) => ({ ...z }));
+      a.textOverlays = orig.textOverlays.filter((o) => o.timestamp < t).map((o) => ({ ...o }));
+      a.stagedTextOverlays = orig.stagedTextOverlays.filter((o) => o.timestamp < t).map((o) => ({ ...o }));
+      a.captions = orig.captions.filter((c) => c.start < t).map((c) => ({ ...c }));
+      a.stagedCaptions = orig.stagedCaptions.filter((c) => c.start < t).map((c) => ({ ...c }));
+
+      const b = structuredClone(orig);
+      b.id = crypto.randomUUID();
+      b.srcStart = t;
+      b.zoomPoints = orig.zoomPoints.filter((z) => z.t >= t).map((z) => ({ ...z }));
+      b.stagedZoomPoints = orig.stagedZoomPoints.filter((z) => z.t >= t).map((z) => ({ ...z }));
+      b.textOverlays = orig.textOverlays.filter((o) => o.timestamp >= t).map((o) => ({ ...o }));
+      b.stagedTextOverlays = orig.stagedTextOverlays.filter((o) => o.timestamp >= t).map((o) => ({ ...o }));
+      b.captions = orig.captions.filter((c) => c.start >= t).map((c) => ({ ...c }));
+      b.stagedCaptions = orig.stagedCaptions.filter((c) => c.start >= t).map((c) => ({ ...c }));
+
+      const idx = p.segments.findIndex((seg) => seg.id === orig.id);
+      const segments = [...p.segments];
+      segments.splice(idx, 1, a, b);
+      return { ...p, segments };
+    };
+
+    proj = splitAtTimeline(proj, startT);
+    const takeDur = typeof duration === "number" && duration > 0.1 ? duration : null;
+    if (takeDur !== null) {
+      const endT = startT + takeDur;
+      const total = projectDuration(proj);
+      if (endT < total - 0.05) {
+        proj = splitAtTimeline(proj, endT);
+      }
+    }
+
+    let tAccum = 0;
+    const finalSegments = proj.segments.map((seg) => {
+      const segDur = (seg.srcEnd - seg.srcStart) / (seg.speed || 1);
+      const segStartT = tAccum;
+      const segEndT = tAccum + segDur;
+      tAccum = segEndT;
+
+      const isPrior = segEndT <= startT + 0.02;
+      const isSubsequent = takeDur !== null && segStartT >= startT + takeDur - 0.02;
+
+      if (isPrior || isSubsequent) {
+        return seg;
+      }
+
+      return {
+        ...seg,
+        facecam: {
+          ...seg.facecam,
+          src: facecamSrc,
+          startT: startT,
+        },
+      };
+    });
+
+    const project = {
+      ...proj,
+      segments: finalSegments,
     };
     pushHistoryAndSet(project, s, set);
   },

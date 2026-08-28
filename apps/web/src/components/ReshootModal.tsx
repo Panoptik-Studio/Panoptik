@@ -252,8 +252,8 @@ export function ReshootModal() {
       const { engine } = await import("@/lib/engineProvider");
       const facecamSrc = await engine.setFacecamBlob(facecamBlob, facecamBlob);
 
-      // Update project store with startT
-      replaceFacecamMedia(facecamSrc, facecamSrc, reshootStartT);
+      // Update project store with startT and take duration
+      replaceFacecamMedia(facecamSrc, facecamSrc, reshootStartT, elapsedRef.current);
 
       // Pre-decode initial frame so preview canvas displays immediately
       await engine.prepareAllFrames(reshootStartT, 0);
