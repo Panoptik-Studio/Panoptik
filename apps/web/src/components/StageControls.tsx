@@ -7,6 +7,7 @@
 "use client";
 
 import { useProjectStore } from "@/stores/projectStore";
+import type { Background, Facecam } from "@panoptik/schema";
 
 const THEMES: { name: string; bg: { kind: "solid" | "gradient"; color?: string; stops?: [string, string] }; swatch: string }[] = [
   { name: "Vercel", bg: { kind: "gradient", stops: ["#007cf0", "#7928ca"] }, swatch: "linear-gradient(135deg, #007cf0 0%, #7928ca 55%, #ff0080 100%)" },
@@ -30,6 +31,82 @@ const CAMERA_CORNERS = [
   { id: "bottomLeft", label: "Bottom left", at: (s: number, h: number) => ({ x: 0.03, y: 0.97 - h }) },
   { id: "bottomRight", label: "Bottom right", at: (s: number, h: number) => ({ x: 0.97 - s, y: 0.97 - h }) },
 ] as const;
+
+function isSameBackground(bg1: Background, bg2: Background): boolean {
+  if (bg1.kind !== bg2.kind) return false;
+  if (bg1.kind === "solid" && bg2.kind === "solid") return bg1.color === bg2.color;
+  if (bg1.kind === "gradient" && bg2.kind === "gradient") {
+    return bg1.stops[0] === bg2.stops[0] && bg1.stops[1] === bg2.stops[1];
+  }
+  return true;
+}
+
+function isSameFacecam(fc1: Facecam, fc2: Facecam): boolean {
+  return (
+    Math.abs(fc1.size - fc2.size) < 0.01 &&
+    Math.abs(fc1.x - fc2.x) < 0.01 &&
+    Math.abs(fc1.y - fc2.y) < 0.01 &&
+    (fc1.shape ?? "square") === (fc2.shape ?? "square")
+  );
+}
+
+function MatchClipButton({
+  direction,
+  onClick,
+  title,
+  label,
+  isSame,
+}: {
+  direction: "prev" | "next";
+  onClick: () => void;
+  title: string;
+  label?: string;
+  isSame?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={isSame}
+      title={isSame ? `Already matches ${direction === "prev" ? "previous" : "next"} clip${label ? ` (${label})` : ""}` : title}
+      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all ${
+        isSame
+          ? "cursor-default opacity-40 text-[#888] bg-[#f5f5f5]"
+          : "border border-[#e2e8f0] bg-[#fafafa] text-[#555] hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3] active:scale-95 shadow-sm"
+      }`}
+    >
+      {direction === "prev" ? (
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="9 14 4 9 9 4" />
+          <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+        </svg>
+      ) : (
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="15 14 20 9 15 4" />
+          <path d="M4 20v-7a4 4 0 0 1 4-4h12" />
+        </svg>
+      )}
+      <span>{label ?? (direction === "prev" ? "Match prev" : "Match next")}</span>
+    </button>
+  );
+}
 
 export function StageControls() {
   const project = useProjectStore((s) => s.project);
@@ -62,6 +139,10 @@ export function StageControls() {
     );
   }
 
+  const segIndex = project.segments.findIndex((s) => s.id === seg.id);
+  const prevSeg = segIndex > 0 ? project.segments[segIndex - 1]! : null;
+  const nextSeg = segIndex < project.segments.length - 1 ? project.segments[segIndex + 1]! : null;
+
   const camHeightFraction = (size: number) =>
     (size * (project.media.width / project.media.height)) / CAMERA_ASPECT;
 
@@ -88,14 +169,80 @@ export function StageControls() {
             </button>
           ))}
         </div>
+        {(prevSeg || nextSeg) && (
+          <div className="mt-2.5 flex gap-2">
+            {prevSeg && (
+              <button
+                onClick={() => {
+                  updateSegment(seg.id, {
+                    stagePadding: prevSeg.stagePadding,
+                    speed: prevSeg.speed,
+                    aspectPreset: prevSeg.aspectPreset,
+                    background: prevSeg.background,
+                    ...(prevSeg.facecam.src ? { facecam: { ...prevSeg.facecam } } : {}),
+                  });
+                }}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-2.5 py-1.5 text-xs font-medium text-[#333] shadow-sm transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3]"
+                title={`Copy all stage settings from Segment ${segIndex} to Segment ${segIndex + 1}`}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 14 4 9 9 4" />
+                  <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+                </svg>
+                <span>Match all from Seg {segIndex}</span>
+              </button>
+            )}
+            {nextSeg && (
+              <button
+                onClick={() => {
+                  updateSegment(seg.id, {
+                    stagePadding: nextSeg.stagePadding,
+                    speed: nextSeg.speed,
+                    aspectPreset: nextSeg.aspectPreset,
+                    background: nextSeg.background,
+                    ...(nextSeg.facecam.src ? { facecam: { ...nextSeg.facecam } } : {}),
+                  });
+                }}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-2.5 py-1.5 text-xs font-medium text-[#333] shadow-sm transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3]"
+                title={`Copy all stage settings from Segment ${segIndex + 2} to Segment ${segIndex + 1}`}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 14 20 9 15 4" />
+                  <path d="M4 20v-7a4 4 0 0 1 4-4h12" />
+                </svg>
+                <span>Match all from Seg {segIndex + 2}</span>
+              </button>
+            )}
+          </div>
+        )}
         <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>Settings apply to the selected segment; others keep their own.</p>
       </div>
 
-      {/* Padding resizer — reduces white space around black video container, and black letterboxing is via aspect */}
+      {/* Padding resizer */}
       <div className="mb-4">
         <div className="mb-1.5 flex items-center justify-between">
           <span className="pk-label">Padding</span>
-          <span className="pk-value" style={{ color: "#0070f3" }}>{seg.stagePadding}px</span>
+          <div className="flex items-center gap-1.5">
+            {prevSeg && (
+              <MatchClipButton
+                direction="prev"
+                onClick={() => setStagePadding(prevSeg.stagePadding)}
+                title={`Apply padding from Seg ${segIndex} (${prevSeg.stagePadding}px)`}
+                label={`Prev (${prevSeg.stagePadding}px)`}
+                isSame={seg.stagePadding === prevSeg.stagePadding}
+              />
+            )}
+            {nextSeg && (
+              <MatchClipButton
+                direction="next"
+                onClick={() => setStagePadding(nextSeg.stagePadding)}
+                title={`Apply padding from Seg ${segIndex + 2} (${nextSeg.stagePadding}px)`}
+                label={`Next (${nextSeg.stagePadding}px)`}
+                isSame={seg.stagePadding === nextSeg.stagePadding}
+              />
+            )}
+            <span className="pk-value ml-1" style={{ color: "#0070f3" }}>{seg.stagePadding}px</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setStagePadding(seg.stagePadding - 4)} className="pk-icon-btn h-7 w-7 text-xs">−</button>
@@ -105,11 +252,31 @@ export function StageControls() {
         <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>White space around video. 0 = edge-to-edge.</p>
       </div>
 
-      {/* Speed — per selected segment, affects cam+screen together, preview & export */}
+      {/* Speed */}
       <div className="mb-4">
         <div className="mb-1.5 flex items-center justify-between">
           <span className="pk-label">Speed</span>
-          <span className="pk-value" style={{ color: seg.speed !== 1 ? "#0070f3" : "#888" }}>{seg.speed.toFixed(2)}x</span>
+          <div className="flex items-center gap-1.5">
+            {prevSeg && (
+              <MatchClipButton
+                direction="prev"
+                onClick={() => updateSegment(seg.id, { speed: prevSeg.speed })}
+                title={`Apply speed from Seg ${segIndex} (${prevSeg.speed}x)`}
+                label={`Prev (${prevSeg.speed}x)`}
+                isSame={seg.speed === prevSeg.speed}
+              />
+            )}
+            {nextSeg && (
+              <MatchClipButton
+                direction="next"
+                onClick={() => updateSegment(seg.id, { speed: nextSeg.speed })}
+                title={`Apply speed from Seg ${segIndex + 2} (${nextSeg.speed}x)`}
+                label={`Next (${nextSeg.speed}x)`}
+                isSame={seg.speed === nextSeg.speed}
+              />
+            )}
+            <span className="pk-value ml-1" style={{ color: seg.speed !== 1 ? "#0070f3" : "#888" }}>{seg.speed.toFixed(2)}x</span>
+          </div>
         </div>
         <input
           type="range"
@@ -138,9 +305,31 @@ export function StageControls() {
         <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>0.25x–3x · affects preview & export · cam+screen synced</p>
       </div>
 
-      {/* Aspect — controls black letterboxing */}
+      {/* Aspect */}
       <div className="mb-4">
-        <p className="pk-label mb-1.5">Aspect</p>
+        <div className="mb-1.5 flex items-center justify-between">
+          <p className="pk-label">Aspect</p>
+          <div className="flex items-center gap-1.5">
+            {prevSeg && (
+              <MatchClipButton
+                direction="prev"
+                onClick={() => setAspectPreset(prevSeg.aspectPreset)}
+                title={`Apply aspect from Seg ${segIndex} (${prevSeg.aspectPreset})`}
+                label={`Prev (${prevSeg.aspectPreset === "source" ? "Fit" : prevSeg.aspectPreset})`}
+                isSame={seg.aspectPreset === prevSeg.aspectPreset}
+              />
+            )}
+            {nextSeg && (
+              <MatchClipButton
+                direction="next"
+                onClick={() => setAspectPreset(nextSeg.aspectPreset)}
+                title={`Apply aspect from Seg ${segIndex + 2} (${nextSeg.aspectPreset})`}
+                label={`Next (${nextSeg.aspectPreset === "source" ? "Fit" : nextSeg.aspectPreset})`}
+                isSame={seg.aspectPreset === nextSeg.aspectPreset}
+              />
+            )}
+          </div>
+        </div>
         <div className="grid grid-cols-5 gap-1.5">
           {(["source", "16:9", "9:16", "1:1", "4:3"] as const).map((preset) => (
             <button
@@ -160,9 +349,43 @@ export function StageControls() {
         <div className="mb-4">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="pk-label">Camera</span>
-            <span className="pk-help">
-              {Math.round(seg.facecam.size * 100)}%
-            </span>
+            <div className="flex items-center gap-1.5">
+              {prevSeg && prevSeg.facecam.src && (
+                <MatchClipButton
+                  direction="prev"
+                  onClick={() =>
+                    setFacecam({
+                      size: prevSeg.facecam.size,
+                      x: prevSeg.facecam.x,
+                      y: prevSeg.facecam.y,
+                      shape: prevSeg.facecam.shape,
+                    })
+                  }
+                  title={`Apply camera position & size from Seg ${segIndex}`}
+                  label="Match prev"
+                  isSame={isSameFacecam(seg.facecam, prevSeg.facecam)}
+                />
+              )}
+              {nextSeg && nextSeg.facecam.src && (
+                <MatchClipButton
+                  direction="next"
+                  onClick={() =>
+                    setFacecam({
+                      size: nextSeg.facecam.size,
+                      x: nextSeg.facecam.x,
+                      y: nextSeg.facecam.y,
+                      shape: nextSeg.facecam.shape,
+                    })
+                  }
+                  title={`Apply camera position & size from Seg ${segIndex + 2}`}
+                  label="Match next"
+                  isSame={isSameFacecam(seg.facecam, nextSeg.facecam)}
+                />
+              )}
+              <span className="pk-help ml-1">
+                {Math.round(seg.facecam.size * 100)}%
+              </span>
+            </div>
           </div>
           <div className="mb-2 grid grid-cols-4 gap-1.5">
             {CAMERA_CORNERS.map((c) => {
@@ -226,7 +449,29 @@ export function StageControls() {
 
       {/* Themes — beautiful presets for stage background (gradient/solid) */}
       <div>
-        <p className="pk-label mb-1.5">Theme</p>
+        <div className="mb-1.5 flex items-center justify-between">
+          <p className="pk-label">Theme</p>
+          <div className="flex items-center gap-1.5">
+            {prevSeg && (
+              <MatchClipButton
+                direction="prev"
+                onClick={() => stageBackground(prevSeg.background)}
+                title={`Apply background theme from Seg ${segIndex}`}
+                label="Match prev"
+                isSame={isSameBackground(seg.background, prevSeg.background)}
+              />
+            )}
+            {nextSeg && (
+              <MatchClipButton
+                direction="next"
+                onClick={() => stageBackground(nextSeg.background)}
+                title={`Apply background theme from Seg ${segIndex + 2}`}
+                label="Match next"
+                isSame={isSameBackground(seg.background, nextSeg.background)}
+              />
+            )}
+          </div>
+        </div>
         <div className="grid grid-cols-3 gap-2">
           {THEMES.map((t) => {
             const isActive =

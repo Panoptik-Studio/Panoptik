@@ -495,10 +495,44 @@ export function Timeline() {
           <div className="relative" onMouseEnter={() => exportProgress === null && setShowSpeed(true)} onMouseLeave={() => setShowSpeed(false)}>
             <button className="pk-icon-btn ctrl-btn h-8 w-8 relative" title={`Speed ${segSpeed}x`} disabled={!canSpeed}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{segSpeed !== 1 && <span className="absolute -right-1 -top-1 rounded-full bg-[#0070f3] px-1 py-0.5 text-[9px] font-bold leading-none text-white">{segSpeed}x</span>}</button>
             {showSpeed && exportProgress === null && (
-              <div className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 gap-1 rounded-xl border bg-white p-1.5 shadow-vercel-3" style={{ borderColor: "#ebebeb", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
-                {[0.5, 1, 1.5, 2, 3].map((v) => (
-                  <button key={v} onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: v })} className="pk-seg min-w-[48px] text-xs" data-active={segSpeed === v}>{v}x</button>
-                ))}
+              <div className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 flex-col items-center gap-1.5 rounded-xl border bg-white p-2 shadow-vercel-3" style={{ borderColor: "#ebebeb", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+                <div className="flex gap-1">
+                  {[0.5, 1, 1.5, 2, 3].map((v) => (
+                    <button key={v} onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: v })} className="pk-seg min-w-[44px] text-xs" data-active={segSpeed === v}>{v}x</button>
+                  ))}
+                </div>
+                {(() => {
+                  const segIdx = project?.segments.findIndex((s) => s.id === selectedSegmentId) ?? -1;
+                  const prevSeg = segIdx > 0 ? project?.segments[segIdx - 1] : null;
+                  const nextSeg = segIdx >= 0 && segIdx < (project?.segments.length ?? 0) - 1 ? project?.segments[segIdx + 1] : null;
+                  if (!prevSeg && !nextSeg) return null;
+                  return (
+                    <div className="flex w-full gap-1">
+                      {prevSeg && (
+                        <button
+                          onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: prevSeg.speed })}
+                          disabled={segSpeed === prevSeg.speed}
+                          className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[#e5e5e5] bg-[#fafafa] py-1 text-[10px] font-medium text-[#555] transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3] disabled:opacity-40"
+                          title={`Match speed from previous clip (${prevSeg.speed}x)`}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+                          <span>Prev ({prevSeg.speed}x)</span>
+                        </button>
+                      )}
+                      {nextSeg && (
+                        <button
+                          onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: nextSeg.speed })}
+                          disabled={segSpeed === nextSeg.speed}
+                          className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[#e5e5e5] bg-[#fafafa] py-1 text-[10px] font-medium text-[#555] transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3] disabled:opacity-40"
+                          title={`Match speed from next clip (${nextSeg.speed}x)`}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
+                          <span>Next ({nextSeg.speed}x)</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
