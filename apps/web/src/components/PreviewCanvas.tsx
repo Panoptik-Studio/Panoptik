@@ -206,11 +206,13 @@ export function PreviewCanvas() {
       // encoder and put the wrong pictures in the file.
       if (state.exportProgress !== null) return;
 
+      const playbackRate = state.playbackRate ?? 1;
+      const effectiveDuration = state.project.clip.duration / playbackRate;
       if (state.isPlaying) {
-        const newTime = state.currentTime + dt;
-        if (newTime >= state.project.clip.duration) {
+        const newTime = state.currentTime + dt * playbackRate;
+        if (newTime >= effectiveDuration) {
           state.pause();
-          state.setCurrentTime(state.project.clip.duration);
+          state.setCurrentTime(effectiveDuration);
         } else {
           state.setCurrentTime(newTime);
         }
@@ -219,14 +221,18 @@ export function PreviewCanvas() {
       }
 
       dirty = false;
-      const t = useProjectStore.getState().currentTime;
+      const tEff = useProjectStore.getState().currentTime;
+      const tSrc = tEff * (useProjectStore.getState().playbackRate ?? 1);
 
       // Don't contend with export's pump — it drives desiredTime at 30fps
       const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
-      if (!isExporting && t !== requestedTime) {
-        requestedTime = t;
+      if (!isExporting && tSrc !== requestedTime) {
+        requestedTime = tSrc;
         // Coalesced inside the engine — repeat calls only move the decode target.
-        const pending = engine.prepareFrame(t);
+        // Use prepareAllFrames so cam+screen stay synced at speed
+        const pending = (engine as unknown as { prepareAllFrames?: (t:number)=>Promise<void> }).prepareAllFrames
+          ? (engine as unknown as { prepareAllFrames: (t:number)=>Promise<void> }).prepareAllFrames(tSrc)
+          : engine.prepareFrame(tSrc);
         // One handler per in-flight decode; during playback the engine hands
         // back the same promise every tick and these would otherwise pile up.
         if (!decodePending) {
@@ -243,11 +249,11 @@ export function PreviewCanvas() {
           );
         }
       }
-      engine.renderFrame(ctx, state.project, t);
+      engine.renderFrame(ctx, state.project, tSrc);
       // Editor chrome on top of the composed frame — hidden during playback so
-      // the preview shows exactly what an export would.
+      // the preview shows exactly what an export would. Use source time for handles.
       if (!state.isPlaying) {
-        drawHandles(ctx, state.project, t, state.selectedZoomId, draggingIdRef.current);
+        drawHandles(ctx, state.project, tSrc, state.selectedZoomId, draggingIdRef.current);
       }
     };
 
@@ -273,12 +279,25 @@ export function PreviewCanvas() {
     }
   }, [project?.audioSrc, project?.clip.src]);
 
-  // Scrubbing while paused: follow the playhead.
+  // Keep audio element's playbackRate in sync
+  const playbackRate = useProjectStore((s) => s.playbackRate);
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.playbackRate = playbackRate;
+    try { (audio as unknown as { preservesPitch: boolean }).preservesPitch = true; } catch { /* ignore */ }
+    try { (audio as unknown as { mozPreservesPitch: boolean }).mozPreservesPitch = true; } catch { /* ignore */ }
+    try { (audio as unknown as { webkitPreservesPitch: boolean }).webkitPreservesPitch = true; } catch { /* ignore */ }
+  }, [playbackRate]);
+
+  // Scrubbing while paused: follow the playhead (effective -> source)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !project || isPlaying) return;
-    if (Math.abs(audio.currentTime - currentTime) > 0.15) audio.currentTime = currentTime;
-  }, [currentTime, isPlaying, project]);
+    const rate = useProjectStore.getState().playbackRate ?? 1;
+    const tSrc = currentTime * rate;
+    if (Math.abs(audio.currentTime - tSrc) > 0.15) audio.currentTime = tSrc;
+  }, [currentTime, isPlaying, project, playbackRate]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -292,20 +311,22 @@ export function PreviewCanvas() {
     // without this resumes from wherever the element happened to be left — and
     // if that was the end of the clip, it plays nothing at all, which is why
     // sound came and went between takes of play/pause.
-    const target = useProjectStore.getState().currentTime;
+    const rate = useProjectStore.getState().playbackRate ?? 1;
+    const target = useProjectStore.getState().currentTime * rate;
+    audio.playbackRate = rate;
     if (Math.abs(audio.currentTime - target) > 0.15) audio.currentTime = target;
     audio.play().catch(() => {});
 
     // The canvas runs off rAF and the audio off its own clock, so they drift
     // apart over a long clip unless they are pulled back together.
     const id = window.setInterval(() => {
-      const now = useProjectStore.getState().currentTime;
+      const now = useProjectStore.getState().currentTime * (useProjectStore.getState().playbackRate ?? 1);
       if (!audio.paused && Math.abs(audio.currentTime - now) > 0.3) {
         audio.currentTime = now;
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [isPlaying]);
+  }, [isPlaying, playbackRate]);
 
   // ── Keyboard undo/redo + moment mark (Phase 2.4 + 3.3) ──
   useEffect(() => {
