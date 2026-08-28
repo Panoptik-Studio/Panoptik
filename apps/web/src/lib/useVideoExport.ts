@@ -51,7 +51,8 @@ export function useVideoExport() {
       }
       setResult(null);
       try {
-        const blob = await engine.exportProject(project, opts);
+        const playbackRate = useProjectStore.getState().playbackRate ?? 1;
+        const blob = await engine.exportProject(project, { ...opts, playbackRate });
         const url = URL.createObjectURL(blob);
         urlRef.current = url;
         const actualFormat: ExportOpts["format"] = blob.type.includes("webm") ? "webm" : blob.type.includes("mp4") ? "mp4" : opts.format;

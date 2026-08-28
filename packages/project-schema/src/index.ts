@@ -68,4 +68,5 @@ export type ExportOpts = {
   format: "mp4" | "webm";
   resolution: "720p" | "1080p" | "4k";
   burnCaptions: boolean;
+  playbackRate?: number; // 0.25–3, affects cam+screen together, preview & export
 };

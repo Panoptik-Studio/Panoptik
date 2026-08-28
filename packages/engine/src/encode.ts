@@ -19,7 +19,7 @@ import {
 } from "mediabunny";
 import type { ExportOpts, Project } from "@panoptik/schema";
 import { presetAspect } from "./layout";
-import { prepareFrame, resetExportIterator } from "./decode";
+import { prepareFrame, prepareAllFrames, resetExportIterator } from "./decode";
 import { renderFrame } from "./render";
 
 /** Long-edge pixel height for each preset; width follows the clip's aspect. */
@@ -79,6 +79,21 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
   try {
     const { width, height } = exportSize(project, opts.resolution);
     const requestedIsMp4 = opts.format === "mp4";
+    // PlaybackRate from opts or persisted store (0.25–3, cam+screen together)
+    let playbackRate = opts.playbackRate ?? 1;
+    if (!opts.playbackRate) {
+      try {
+        const v = Number(typeof localStorage !== "undefined" ? localStorage.getItem("panoptik:playbackRate") : null);
+        if (Number.isFinite(v) && v >= 0.25 && v <= 3) playbackRate = v;
+        else {
+          const g = (globalThis as unknown as { localStorage?: Storage }).localStorage?.getItem("panoptik:playbackRate");
+          const gv = Number(g);
+          if (Number.isFinite(gv) && gv >= 0.25 && gv <= 3) playbackRate = gv;
+        }
+      } catch { /* ignore */ }
+    }
+    playbackRate = Math.min(3, Math.max(0.25, Math.round(playbackRate * 20) / 20));
+    console.log("[Export] playbackRate", playbackRate);
 
     // Need audioBuffer early to decide container when aac not encodable.
     // For maximal compatibility: mp4+avc+aac is the gold standard for every
@@ -173,31 +188,78 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
       console.warn("[Export] no encodable audio codec -> silent. Try WebM on Linux.");
     }
 
+    // Resample audio for speed if needed (pitch-corrected)
+    let spedAudioBuffer: AudioBuffer | null = audioBuffer;
+    if (audioBuffer && playbackRate !== 1) {
+      try {
+        const rate = playbackRate;
+        // Use OfflineAudioContext to time-stretch: render at playbackRate
+        const OfflineCtx = (globalThis as unknown as { OfflineAudioContext?: typeof OfflineAudioContext }).OfflineAudioContext;
+        if (OfflineCtx) {
+          const ctx = new OfflineCtx(audioBuffer.numberOfChannels, Math.ceil(audioBuffer.length / rate), audioBuffer.sampleRate);
+          const src = ctx.createBufferSource();
+          src.buffer = audioBuffer;
+          src.playbackRate.value = rate;
+          src.connect(ctx.destination);
+          src.start(0);
+          spedAudioBuffer = await ctx.startRendering();
+          console.log("[Export] resampled audio", { from: audioBuffer.duration.toFixed(2), to: spedAudioBuffer.duration.toFixed(2), rate });
+        } else {
+          // Fallback: crude channel data resample (no pitch correction but keeps duration)
+          const len = Math.ceil(audioBuffer.length / rate);
+          const Ctx2 = (globalThis as unknown as { AudioContext?: typeof AudioContext }).AudioContext;
+          const tmp = Ctx2 ? new Ctx2() : null;
+          const dest = tmp ? tmp.createBuffer(audioBuffer.numberOfChannels, len, audioBuffer.sampleRate) : null;
+          if (dest) {
+            for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+              const src = audioBuffer.getChannelData(ch);
+              const dst = dest.getChannelData(ch);
+              for (let i = 0; i < len; i++) {
+                const idx = i * rate;
+                const i0 = Math.floor(idx);
+                const i1 = Math.min(src.length - 1, i0 + 1);
+                const f = idx - i0;
+                dst[i] = src[i0]! * (1 - f) + src[i1]! * f;
+              }
+            }
+            spedAudioBuffer = dest;
+            try { tmp?.close(); } catch { /* ignore */ }
+          }
+        }
+      } catch (e) {
+        console.warn("[Export] audio resample failed, using original", e);
+        spedAudioBuffer = audioBuffer;
+      }
+    }
+
     await output.start();
 
-    const duration = Math.max(0, project.clip.duration);
+    const duration = Math.max(0, project.clip.duration / playbackRate);
     const totalFrames = Math.max(1, Math.ceil(duration * EXPORT_FPS));
     const frameDuration = 1 / EXPORT_FPS;
 
     try {
       for (let i = 0; i < totalFrames; i++) {
-        const t = i / EXPORT_FPS;
+        const tEff = i / EXPORT_FPS;
+        const tSrc = tEff * playbackRate;
         // Decode before composing: renderFrame draws whatever frame is current,
         // so without awaiting here every output frame would be the same picture.
-        await prepareFrame(t);
-        renderFrame(ctx as unknown as CanvasRenderingContext2D, project, t);
+        // Use prepareAllFrames so cam+screen stay synced at speed
+        if (typeof prepareAllFrames === "function") await prepareAllFrames(tSrc);
+        else await prepareFrame(tSrc);
+        renderFrame(ctx as unknown as CanvasRenderingContext2D, project, tSrc);
         // Awaited so encoder backpressure actually throttles us rather than
         // queueing the whole clip into memory.
-        await videoSource.add(t, frameDuration);
+        await videoSource.add(tEff, frameDuration);
         if (i % EXPORT_FPS === 0) emitProgress(i / totalFrames);
       }
 
-      if (audioSource && audioBuffer) {
-        console.log("[Export] adding audio buffer to muxer", audioBuffer.duration.toFixed(2), "s");
-        await audioSource.add(audioBuffer);
+      if (audioSource && spedAudioBuffer) {
+        console.log("[Export] adding audio buffer to muxer", spedAudioBuffer.duration.toFixed(2), "s", "rate", playbackRate);
+        await audioSource.add(spedAudioBuffer);
         console.log("[Export] audio added");
       } else {
-        console.log("[Export] skipping audio mux (silent)", { hasSource: !!audioSource, hasBuffer: !!audioBuffer });
+        console.log("[Export] skipping audio mux (silent)", { hasSource: !!audioSource, hasBuffer: !!spedAudioBuffer });
       }
 
       videoSource.close();
