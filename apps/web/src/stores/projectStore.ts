@@ -672,6 +672,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     if (s.exportProgress !== null) return;
     const v = clampRate(n);
     try { getLS()?.setItem("panoptik:playbackRate", String(v)); } catch { /* ignore */ }
-    set({ playbackRate: v });
+    // Clamp currentTime to new effective duration so playhead doesn't sit beyond end
+    const dur = s.project?.clip.duration ?? 0;
+    const eff = dur > 0 ? dur / v : 0;
+    const ct = s.currentTime > eff ? eff : s.currentTime;
+    set({ playbackRate: v, currentTime: ct });
   },
 }));
