@@ -15,7 +15,7 @@ export interface MediaEngine {
   /** Decode clip + facecam together for a complete frame. */
   prepareAllFrames(t: number): Promise<void>;
   /** Sync draw of cached frame + full composition. Preview and export share this. */
-  renderFrame(ctx: CanvasRenderingContext2D, project: Project, t: number): void;
+  renderFrame(ctx: CanvasRenderingContext2D, project: Project, t: number, options?: RenderOptions): void;
   loadClip(file: File): Promise<Project>;
   loadRecording(screen: Blob, facecam: Blob | null, audio: Blob | null): Promise<Project>;
   /** Re-open a saved project's media and reapply its edits. */
@@ -36,13 +36,15 @@ export { createRealEngine } from "./real-engine";
 export { frameRect, outputSize, presetAspect } from "./layout";
 export type { Rect } from "./layout";
 export {
+  IDENTITY,
   cameraViewport,
   canvasToFrame,
   frameToCanvas,
   getCameraTransform,
+  renderFrame,
   resolveInterpolatedFacecam,
 } from "./render";
-export type { Transform, Viewport } from "./render";
+export type { Transform, Viewport, RenderOptions } from "./render";
 
 // ── #region B-modules (DEV B adds re-export lines here; DEV A do not edit) ──
 export { segmentDuration, projectDuration, resolveSegment, sourceToTimeline } from "./timeline";

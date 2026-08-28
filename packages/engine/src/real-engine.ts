@@ -34,8 +34,8 @@ export function createRealEngine(): MediaEngine {
     async prepareAllFrames(t: number): Promise<void> {
       return prepareAllFrames(t);
     },
-    renderFrame(ctx, project, t) {
-      renderFrame(ctx, project, t);
+    renderFrame(ctx, project, t, options) {
+      renderFrame(ctx, project, t, options);
     },
     async loadRecording(screen: Blob, facecam: Blob | null, audio: Blob | null): Promise<Project> {
       // Capture/ingest boundary: B's record.ts captures blobs, we demux screen blob as clip.

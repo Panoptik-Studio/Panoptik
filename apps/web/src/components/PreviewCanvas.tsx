@@ -18,6 +18,7 @@ import {
 import { useProjectStore } from "@/stores/projectStore";
 import { engine } from "@/lib/engineProvider";
 import {
+  IDENTITY,
   cameraViewport,
   canvasToFrame,
   frameRect,
@@ -65,6 +66,7 @@ function canvasGeometry(
   canvas: HTMLCanvasElement,
   project: Project,
   t: number,
+  isPlaying?: boolean,
 ) {
   const { seg, srcT } = resolveActive(project, t);
   const paddingPx = (seg.stagePadding ?? 0) * (canvas.height / 1080) * 1.5;
@@ -75,7 +77,9 @@ function canvasGeometry(
     seg.aspectPreset,
     paddingPx,
   );
-  const view = cameraViewport(rect, getCameraTransform(seg.zoomPoints, srcT));
+  // When paused, zoom out to 100% full scale so all zoom ticks are clearly visible
+  const cam = isPlaying === false ? IDENTITY : getCameraTransform(seg.zoomPoints, srcT);
+  const view = cameraViewport(rect, cam);
   return { rect, view, srcT, radius: Math.max(10, rect.w * 0.014) };
 }
 
@@ -88,16 +92,44 @@ function pointerToCanvas(canvas: HTMLCanvasElement, clientX: number, clientY: nu
   };
 }
 
-/** Zooms whose handle is on screen: near the playhead, plus the selected one.
- *  Handles belong to the active segment and their `t` is source-relative, so the
- *  proximity window is measured against the active segment's srcT. */
-function editableZooms(project: Project, t: number, selectedId: string | null): ZoomPoint[] {
+/** Zooms whose handle is on screen: all keyframes when paused, or near playhead when playing. */
+function editableZooms(
+  project: Project,
+  t: number,
+  selectedId: string | null,
+  selectedSegmentId?: string | null,
+  isPlaying?: boolean,
+): ZoomPoint[] {
   const { seg, srcT } = resolveActive(project, t);
-  return [...seg.zoomPoints, ...seg.stagedZoomPoints].filter(
+  const targetSeg = (selectedSegmentId ? project.segments.find((s) => s.id === selectedSegmentId) : null) ?? seg;
+
+  const zoomMap = new Map<string, ZoomPoint>();
+  for (const z of [
+    ...seg.zoomPoints,
+    ...seg.stagedZoomPoints,
+    ...targetSeg.zoomPoints,
+    ...targetSeg.stagedZoomPoints,
+  ]) {
+    zoomMap.set(z.id, z);
+  }
+
+  // If selectedId is in any segment, include it
+  if (selectedId && !zoomMap.has(selectedId)) {
+    for (const s of project.segments) {
+      for (const z of [...s.zoomPoints, ...s.stagedZoomPoints]) {
+        if (z.id === selectedId) zoomMap.set(z.id, z);
+      }
+    }
+  }
+
+  const all = Array.from(zoomMap.values());
+  if (isPlaying === false) {
+    return all;
+  }
+  return all.filter(
     (z) => z.id === selectedId || Math.abs(z.t - srcT) <= MARKER_WINDOW,
   );
 }
-
 /** The zoom handle under a canvas-space point, topmost (latest) first. */
 function hitTestHandle(
   canvas: HTMLCanvasElement,
@@ -106,13 +138,18 @@ function hitTestHandle(
   selectedId: string | null,
   px: number,
   py: number,
+  selectedSegmentId?: string | null,
+  isPlaying?: boolean,
 ): ZoomPoint | null {
-  const { rect, view, radius } = canvasGeometry(canvas, project, t);
-  const grab = radius * 1.8;
-  const candidates = editableZooms(project, t, selectedId);
+  const { rect, view } = canvasGeometry(canvas, project, t, isPlaying);
+  const baseRadius = Math.max(32, Math.round(rect.w * 0.024));
+  const grab = baseRadius * 2.2;
+  const candidates = editableZooms(project, t, selectedId, selectedSegmentId, isPlaying);
   for (let i = candidates.length - 1; i >= 0; i--) {
     const z = candidates[i]!;
-    const p = frameToCanvas(rect, view, z.to.x * rect.w, z.to.y * rect.h);
+    const zx = z.to?.x ?? 0.5;
+    const zy = z.to?.y ?? 0.5;
+    const p = frameToCanvas(rect, view, zx * rect.w, zy * rect.h);
     if (Math.hypot(px - p.x, py - p.y) <= grab) return z;
   }
   return null;
@@ -128,41 +165,203 @@ function drawHandles(
   t: number,
   selectedId: string | null,
   draggingId: string | null,
+  selectedSegmentId?: string | null,
+  isPlaying?: boolean,
 ): void {
-  const { rect, view, srcT, radius } = canvasGeometry(ctx.canvas, project, t);
-  ctx.save();
-  for (const z of editableZooms(project, t, selectedId)) {
-    const p = frameToCanvas(rect, view, z.to.x * rect.w, z.to.y * rect.h);
-    const active = z.id === selectedId || z.id === draggingId;
-    const color = z.staged ? "#f5a623" : "#0070f3";
-    const r = active ? radius * 1.2 : radius;
-    // Fade handles whose keyframe is further from the playhead.
-    ctx.globalAlpha = active ? 1 : Math.max(0.35, 1 - Math.abs(z.t - srcT) / MARKER_WINDOW);
+  const { rect, view } = canvasGeometry(ctx.canvas, project, t, isPlaying);
+  const zooms = editableZooms(project, t, selectedId, selectedSegmentId, isPlaying);
 
+  // Chronological sequence index mapping (1, 2, 3...)
+  const sortedZooms = zooms.slice().sort((a, b) => a.t - b.t);
+  const zoomIndexMap = new Map<string, number>();
+  sortedZooms.forEach((zp, idx) => {
+    zoomIndexMap.set(zp.id, idx + 1);
+  });
+
+  const baseRadius = Math.max(22, Math.round(rect.w * 0.016));
+
+  for (const z of zooms) {
+    ctx.save();
+    const zx = z.to?.x ?? 0.5;
+    const zy = z.to?.y ?? 0.5;
+    const p = frameToCanvas(rect, view, zx * rect.w, zy * rect.h);
+    const active = z.id === selectedId || z.id === draggingId;
+    const isStaged = !!z.staged;
+    const seqNum = zoomIndexMap.get(z.id) ?? 1;
+
+    const brandColor = isStaged ? "#f5a623" : "#0070f3"; // Electric Blue
+    const r = active ? baseRadius * 1.15 : baseRadius;
+    const scaleVal = z.to?.scale ?? 2.2;
+
+    // 1. Magnification crop box & modern corner brackets (Figma / Screen Studio style)
+    if (active) {
+      const scale = Math.max(1, scaleVal);
+      const cropW = rect.w / scale;
+      const cropH = rect.h / scale;
+      const cropX = Math.max(rect.x, Math.min(rect.x + rect.w - cropW, p.x - cropW / 2));
+      const cropY = Math.max(rect.y, Math.min(rect.y + rect.h - cropH, p.y - cropH / 2));
+
+      ctx.save();
+      // Dashed boundary
+      ctx.strokeStyle = isStaged ? "rgba(245, 166, 35, 0.45)" : "rgba(0, 112, 243, 0.45)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 5]);
+      if (typeof ctx.roundRect === "function") {
+        ctx.beginPath();
+        ctx.roundRect(cropX, cropY, cropW, cropH, 8);
+        ctx.stroke();
+      } else {
+        ctx.strokeRect(cropX, cropY, cropW, cropH);
+      }
+
+      // Sleek Corner Brackets
+      const bLen = Math.min(16, cropW * 0.1);
+      ctx.strokeStyle = brandColor;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([]);
+
+      // Top-Left
+      ctx.beginPath();
+      ctx.moveTo(cropX, cropY + bLen);
+      ctx.lineTo(cropX, cropY);
+      ctx.lineTo(cropX + bLen, cropY);
+      ctx.stroke();
+
+      // Top-Right
+      ctx.beginPath();
+      ctx.moveTo(cropX + cropW - bLen, cropY);
+      ctx.lineTo(cropX + cropW, cropY);
+      ctx.lineTo(cropX + cropW, cropY + bLen);
+      ctx.stroke();
+
+      // Bottom-Left
+      ctx.beginPath();
+      ctx.moveTo(cropX, cropY + cropH - bLen);
+      ctx.lineTo(cropX, cropY + cropH);
+      ctx.lineTo(cropX + bLen, cropY + cropH);
+      ctx.stroke();
+
+      // Bottom-Right
+      ctx.beginPath();
+      ctx.moveTo(cropX + cropW - bLen, cropY + cropH);
+      ctx.lineTo(cropX + cropW, cropY + cropH);
+      ctx.lineTo(cropX + cropW, cropY + cropH - bLen);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // 2. Soft ambient aura glow
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r * 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = isStaged
+      ? "rgba(245, 166, 35, 0.12)"
+      : active
+        ? "rgba(0, 112, 243, 0.18)"
+        : "rgba(0, 112, 243, 0.08)";
+    ctx.fill();
+    ctx.restore();
+
+    // 3. Crisp Glassmorphic Focal Ring
+    ctx.save();
+    ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
+
+    // Semi-translucent glass fill
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(0,0,0,0.45)";
-    ctx.lineWidth = Math.max(4, r * 0.34);
-    ctx.stroke();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(2, r * 0.2);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, Math.max(1.5, r * 0.16), 0, Math.PI * 2);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = active ? "rgba(0, 112, 243, 0.2)" : "rgba(15, 23, 42, 0.4)";
     ctx.fill();
 
-    if (active) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r * 1.75, 0, Math.PI * 2);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = Math.max(1, r * 0.1);
-      ctx.globalAlpha = 0.5;
-      ctx.stroke();
+    // Clean outer stroke
+    ctx.strokeStyle = active ? "#ffffff" : brandColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Subtle inner accent ring
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r - 3, 0, Math.PI * 2);
+    ctx.strokeStyle = active ? brandColor : "rgba(255, 255, 255, 0.3)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+
+    // 4. Center Bullseye Aperture Dot
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, Math.max(3.5, r * 0.22), 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.strokeStyle = brandColor;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // 5. Sequence Number Badge (top-left shoulder of focal ring)
+    const seqBadgeR = Math.max(9, Math.round(r * 0.42));
+    const seqBadgeX = p.x - r * 0.72;
+    const seqBadgeY = p.y - r * 0.72;
+
+    ctx.save();
+    ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 1;
+
+    ctx.beginPath();
+    ctx.arc(seqBadgeX, seqBadgeY, seqBadgeR, 0, Math.PI * 2);
+    ctx.fillStyle = brandColor;
+    ctx.fill();
+
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold ${Math.max(10, Math.round(seqBadgeR * 1.1))}px system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`${seqNum}`, seqBadgeX, seqBadgeY + 0.5);
+    ctx.restore();
+
+    // 6. Minimal Modern Pill Badge (#1 · 2.2×)
+    const scaleText = `#${seqNum} · ${scaleVal.toFixed(1)}×`;
+    const fontSize = Math.max(12, Math.round(r * 0.52));
+    ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
+    const textW = ctx.measureText(scaleText).width;
+    const badgeH = Math.max(20, Math.round(r * 0.95));
+    const badgeW = textW + 16;
+    const badgeX = p.x + r + 8;
+    const badgeY = p.y - badgeH / 2;
+
+    ctx.save();
+    ctx.shadowColor = "rgba(0, 0, 0, 0.3)";
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 1;
+
+    // Pill background
+    ctx.fillStyle = active ? brandColor : "rgba(18, 18, 20, 0.85)";
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, badgeH / 2);
+    } else {
+      ctx.rect(badgeX, badgeY, badgeW, badgeH);
     }
+    ctx.fill();
+
+    // 1px hairline border
+    ctx.strokeStyle = active ? "rgba(255, 255, 255, 0.4)" : "rgba(255, 255, 255, 0.15)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+
+    // Text label
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(scaleText, badgeX + badgeW / 2, badgeY + badgeH / 2 + 0.5);
+
+    ctx.restore();
   }
-  ctx.restore();
 }
 
 export function PreviewCanvas() {
@@ -192,7 +391,17 @@ export function PreviewCanvas() {
     id: string;
     moved: boolean;
   } | null>(null);
-  const suppressClickRef = useRef(false);
+  const [draggingFacecam, setDraggingFacecam] = useState(false);
+  const facecamDragOffset = useRef<{ dx: number; dy: number } | null>(null);
+  const pointerDownRef = useRef<{
+    clientX: number;
+    clientY: number;
+    px: number;
+    py: number;
+    time: number;
+    isHit: boolean;
+  } | null>(null);
+  const lastAddZoomTimeRef = useRef(0);
   // The rAF loop is built once per clip, so it reads the drag through a ref.
   const draggingIdRef = useRef<string | null>(null);
   draggingIdRef.current = dragging?.id ?? null;
@@ -287,12 +496,20 @@ export function PreviewCanvas() {
           );
         }
       }
-      engine.renderFrame(ctx, state.project, tEff);
+      engine.renderFrame(ctx, state.project, tEff, { isPlaying: state.isPlaying });
       // Editor chrome on top of the composed frame — hidden during playback so
-      // the preview shows exactly what an export would. On-timeline time: the
-      // active segment's handles resolve internally.
+      // the preview shows exactly what an export would. When paused, full 100% frame
+      // displays all zoom ticks clearly with their respective scale badges.
       if (!state.isPlaying) {
-        drawHandles(ctx, state.project, tEff, state.selectedZoomId, draggingIdRef.current);
+        drawHandles(
+          ctx,
+          state.project,
+          tEff,
+          state.selectedZoomId,
+          draggingIdRef.current,
+          state.selectedSegmentId,
+          state.isPlaying,
+        );
       }
     };
 
@@ -423,61 +640,7 @@ export function PreviewCanvas() {
     [],
   );
 
-  // ── Click → add a zoom at the playhead (or select the handle under the cursor) ──
-  const handleCanvasClick = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      // A click always follows the pointerup that ended a drag — without this the
-      // drag would also spawn a zoom point.
-      if (suppressClickRef.current) {
-        suppressClickRef.current = false;
-        return;
-      }
-      const state = useProjectStore.getState();
-      if (!state.project || state.isPlaying || state.exportProgress !== null) return;
-
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
-      const t = state.currentTime;
-
-      // Handles and the geometry below belong to the playhead's segment.
-      const active = resolveActive(state.project, t);
-
-      const hit = hitTestHandle(canvas, state.project, t, state.selectedZoomId, px, py);
-      if (hit) {
-        // The handle lives in the ACTIVE segment — point the selection at it so the
-        // Inspector (which reads the selected segment) shows the zoom immediately.
-        if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
-        setSelectedZoom(hit.id);
-        return;
-      }
-
-      const { rect, view } = canvasGeometry(canvas, state.project, t);
-      const f = canvasToFrame(rect, view, px, py);
-      // Zoom keyframes are source-relative, so the new point lands at the active
-      // segment's srcT. addZoomPoint targets the selected segment — point the
-      // selection at the playhead's segment so the keyframe lands where it shows.
-      if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
-      addZoomPoint({
-        t: active.srcT,
-        to: {
-          scale: DEFAULT_ZOOM_SCALE,
-          x: clamp01(f.x / rect.w),
-          y: clamp01(f.y / rect.h),
-        },
-        dur: 0.7,
-        hold: 2.0,
-        ease: "easeInOutCubic",
-      });
-    },
-    [addZoomPoint, setSelectedZoom, selectSegment],
-  );
-
-  // ── Facecam PiP dragging ──
-  const [draggingFacecam, setDraggingFacecam] = useState(false);
-  const facecamDragOffset = useRef<{ dx: number; dy: number } | null>(null);
-
-  // ── Focal handle dragging ──
+  // ── Click / Drag handling for Zoom handles and Facecam ──
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const state = useProjectStore.getState();
@@ -501,12 +664,10 @@ export function PreviewCanvas() {
         if (px >= fx && px <= fx + pipW && py >= fy && py <= fy + pipH) {
           e.preventDefault();
           canvas.setPointerCapture(e.pointerId);
-          // setFacecam targets the selected segment — but the displayed PiP belongs
-          // to the ACTIVE segment, so point the selection at it before dragging
-          // (mirrors the zoom-handle path).
           if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
           facecamDragOffset.current = { dx: px - fx, dy: py - fy };
           setDraggingFacecam(true);
+          pointerDownRef.current = { clientX: e.clientX, clientY: e.clientY, px, py, time: performance.now(), isHit: true };
           return;
         }
       }
@@ -518,15 +679,21 @@ export function PreviewCanvas() {
         state.selectedZoomId,
         px,
         py,
+        state.selectedSegmentId,
+        state.isPlaying,
       );
-      if (!hit) return;
+      if (hit) {
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+        if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
+        setSelectedZoom(hit.id);
+        setDragging({ id: hit.id, moved: false });
+        pointerDownRef.current = { clientX: e.clientX, clientY: e.clientY, px, py, time: performance.now(), isHit: true };
+        return;
+      }
 
-      e.preventDefault();
-      canvas.setPointerCapture(e.pointerId);
-      // updateZoomPoint targets the selected segment — keep it at the playhead.
-      if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
-      setSelectedZoom(hit.id);
-      setDragging({ id: hit.id, moved: false });
+      // Record canvas press on empty space
+      pointerDownRef.current = { clientX: e.clientX, clientY: e.clientY, px, py, time: performance.now(), isHit: false };
     },
     [setSelectedZoom, selectSegment],
   );
@@ -558,73 +725,159 @@ export function PreviewCanvas() {
         return;
       }
 
-      if (!dragging) {
-        // Hover affordance: facecam grab beats zoom grab beats crosshair
-        if (!state.isPlaying) {
-          const { x: hx, y: hy } = pointerToCanvas(canvas, e.clientX, e.clientY);
-          const fc = active.seg.facecam;
-          if (fc.src) {
-            const resolved = resolveInterpolatedFacecam(state.project, state.currentTime, active.seg);
-            const cw = canvas.width;
-            const ch = canvas.height;
-            const pipW = cw * resolved.size;
-            const pipH = pipW / (16 / 9);
-            const fx = cw * resolved.x;
-            const fy = ch * resolved.y;
-            if (hx >= fx && hx <= fx + pipW && hy >= fy && hy <= fy + pipH) {
-              canvas.style.cursor = "grab";
-              return;
-            }
-          }
-          const over = hitTestHandle(
-            canvas,
-            state.project,
-            state.currentTime,
-            state.selectedZoomId,
-            hx,
-            hy,
-          );
-          canvas.style.cursor = over ? "grab" : "crosshair";
-        }
+      if (dragging) {
+        const zoom =
+          active.seg.zoomPoints.find((z) => z.id === dragging.id) ??
+          active.seg.stagedZoomPoints.find((z) => z.id === dragging.id);
+        if (!zoom) return;
+
+        const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
+        const { rect, view } = canvasGeometry(canvas, state.project, state.currentTime, state.isPlaying);
+        const f = canvasToFrame(rect, view, px, py);
+        // Keep the zoom's own depth — only the focal point moves.
+        updateZoomPoint(dragging.id, {
+          to: {
+            scale: zoom.to.scale,
+            x: clamp01(f.x / rect.w),
+            y: clamp01(f.y / rect.h),
+          },
+        });
+        if (!dragging.moved) setDragging({ ...dragging, moved: true });
         return;
       }
 
-      const zoom =
-        active.seg.zoomPoints.find((z) => z.id === dragging.id) ??
-        active.seg.stagedZoomPoints.find((z) => z.id === dragging.id);
-      if (!zoom) return;
-
-      const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
-      const { rect, view } = canvasGeometry(canvas, state.project, state.currentTime);
-      const f = canvasToFrame(rect, view, px, py);
-      // Keep the zoom's own depth — only the focal point moves.
-      updateZoomPoint(dragging.id, {
-        to: {
-          scale: zoom.to.scale,
-          x: clamp01(f.x / rect.w),
-          y: clamp01(f.y / rect.h),
-        },
-      });
-      if (!dragging.moved) setDragging({ ...dragging, moved: true });
+      // Hover affordance: facecam grab beats zoom grab beats crosshair
+      if (!state.isPlaying) {
+        const { x: hx, y: hy } = pointerToCanvas(canvas, e.clientX, e.clientY);
+        const fc = active.seg.facecam;
+        if (fc.src) {
+          const resolved = resolveInterpolatedFacecam(state.project, state.currentTime, active.seg);
+          const cw = canvas.width;
+          const ch = canvas.height;
+          const pipW = cw * resolved.size;
+          const pipH = pipW / (16 / 9);
+          const fx = cw * resolved.x;
+          const fy = ch * resolved.y;
+          if (hx >= fx && hx <= fx + pipW && hy >= fy && hy <= fy + pipH) {
+            canvas.style.cursor = "grab";
+            return;
+          }
+        }
+        const over = hitTestHandle(
+          canvas,
+          state.project,
+          state.currentTime,
+          state.selectedZoomId,
+          hx,
+          hy,
+          state.selectedSegmentId,
+          state.isPlaying,
+        );
+        canvas.style.cursor = over ? "grab" : "crosshair";
+      }
     },
     [dragging, draggingFacecam, updateZoomPoint, setFacecam],
   );
 
-  const handlePointerUp = useCallback(() => {
-    if (draggingFacecam) {
-      setDraggingFacecam(false);
-      facecamDragOffset.current = null;
-      commitDrag();
-      suppressClickRef.current = true;
-    }
-    if (dragging) {
-      if (dragging.moved) {
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (draggingFacecam) {
+        setDraggingFacecam(false);
+        facecamDragOffset.current = null;
         commitDrag();
-        suppressClickRef.current = true;
+        pointerDownRef.current = null;
+        return;
       }
-      setDragging(null);
-    }
-  }, [dragging, draggingFacecam, commitDrag]);
+      if (dragging) {
+        if (dragging.moved) {
+          commitDrag();
+        }
+        setDragging(null);
+        pointerDownRef.current = null;
+        return;
+      }
+
+      const down = pointerDownRef.current;
+      pointerDownRef.current = null;
+
+      if (down && !down.isHit) {
+        const dist = Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY);
+        if (dist < 10) {
+          const state = useProjectStore.getState();
+          if (state.project && !state.isPlaying && state.exportProgress === null) {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
+            const active = resolveActive(state.project, state.currentTime);
+            const { rect, view } = canvasGeometry(canvas, state.project, state.currentTime, false);
+            const f = canvasToFrame(rect, view, px, py);
+
+            lastAddZoomTimeRef.current = performance.now();
+            if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
+            addZoomPoint({
+              t: active.srcT,
+              to: {
+                scale: DEFAULT_ZOOM_SCALE,
+                x: clamp01(f.x / rect.w),
+                y: clamp01(f.y / rect.h),
+              },
+              dur: 0.7,
+              hold: 2.0,
+              ease: "easeInOutCubic",
+            });
+          }
+        }
+      }
+    },
+    [dragging, draggingFacecam, commitDrag, addZoomPoint, selectSegment],
+  );
+
+  const handleCanvasClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (performance.now() - lastAddZoomTimeRef.current < 300) return;
+
+      const state = useProjectStore.getState();
+      if (!state.project || state.isPlaying || state.exportProgress !== null) return;
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
+      const t = state.currentTime;
+      const active = resolveActive(state.project, t);
+
+      const hit = hitTestHandle(
+        canvas,
+        state.project,
+        t,
+        state.selectedZoomId,
+        px,
+        py,
+        state.selectedSegmentId,
+        state.isPlaying,
+      );
+      if (hit) {
+        if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
+        setSelectedZoom(hit.id);
+        return;
+      }
+
+      const { rect, view } = canvasGeometry(canvas, state.project, t, state.isPlaying);
+      const f = canvasToFrame(rect, view, px, py);
+      if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
+      addZoomPoint({
+        t: active.srcT,
+        to: {
+          scale: DEFAULT_ZOOM_SCALE,
+          x: clamp01(f.x / rect.w),
+          y: clamp01(f.y / rect.h),
+        },
+        dur: 0.7,
+        hold: 2.0,
+        ease: "easeInOutCubic",
+      });
+    },
+    [addZoomPoint, setSelectedZoom, selectSegment],
+  );
 
   // ── Canvas sizing ──
   const [canvasSize, setCanvasSize] = useState({

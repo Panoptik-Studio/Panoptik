@@ -49,17 +49,39 @@ describe("getCameraTransform", () => {
     expect(getCameraTransform([z1, z2], 6)).toEqual({ scale: 4, x: 0.5, y: 0.5 });
   });
 
-  it("overlapping zooms: latest wins, no compounding from previous scale", () => {
+  it("overlapping zooms: continuous transition from previous state without resetting to 1x", () => {
+    // A holds at (scale: 2, x: 0.2, y: 0.2) until 4 + 0.45 + 2.5 = 6.95
     const a = zp({ id: "a", t: 4, to: { scale: 2, x: 0.2, y: 0.2 }, dur: 0.45, hold: 2.5, ease: "linear" });
+    // B starts at 6.5 with scale 1.8 and pos (0.8, 0.8)
     const b = zp({ id: "b", t: 6.5, to: { scale: 1.8, x: 0.8, y: 0.8 }, dur: 0.45, hold: 0.5, ease: "linear" });
-    const at6_4 = getCameraTransform([a, b], 6.4); // still A (holding)
+
+    const at6_4 = getCameraTransform([a, b], 6.4); // A is holding
     expect(at6_4.scale).toBeCloseTo(2);
+    expect(at6_4.x).toBeCloseTo(0.2);
+
     const at6_6 = getCameraTransform([a, b], 6.6);
-    // B just started 0.1s in, from 1x → 1.8, so ~1.17, not between A and B
-    expect(at6_6.scale).toBeGreaterThan(1);
-    expect(at6_6.scale).toBeLessThan(1.5);
-    expect(at6_6.x).toBeGreaterThan(0.5);
+    // B started at 6.5 from A's state (2, 0.2, 0.2); 0.1s into 0.45s transition
+    // scale smoothly transitions from 2.0 → 1.8 (around 1.95, NOT resetting to 1.0!)
+    expect(at6_6.scale).toBeLessThan(2.0);
+    expect(at6_6.scale).toBeGreaterThan(1.8);
+    // position smoothly shifts from 0.2 towards 0.8
+    expect(at6_6.x).toBeGreaterThan(0.2);
     expect(at6_6.x).toBeLessThan(0.8);
+
+    const at6_95 = getCameraTransform([a, b], 6.95); // B finished transition, holding at target
+    expect(at6_95.scale).toBeCloseTo(1.8);
+    expect(at6_95.x).toBeCloseTo(0.8);
+  });
+
+  it("overlapping zooms at same scale: purely shifts position without any scale change", () => {
+    const z1 = zp({ id: "z1", t: 1, to: { scale: 2.5, x: 0.2, y: 0.2 }, dur: 0.5, hold: 4, ease: "linear" });
+    const z2 = zp({ id: "z2", t: 3, to: { scale: 2.5, x: 0.8, y: 0.3 }, dur: 0.5, hold: 2, ease: "linear" });
+
+    // Mid-shift at t=3.25 (halfway between z1 pos and z2 pos)
+    const mid = getCameraTransform([z1, z2], 3.25);
+    expect(mid.scale).toBeCloseTo(2.5); // scale remains exactly 2.5x
+    expect(mid.x).toBeCloseTo(0.5); // smoothly halfway between 0.2 and 0.8
+    expect(mid.y).toBeCloseTo(0.25); // smoothly halfway between 0.2 and 0.3
   });
 
   it("hold keeps zoom for hold seconds, then eases back to 1x", () => {
@@ -484,6 +506,7 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
   const baseProject: Project = {
     id: "p-fc",
     media: { src: "video.mp4", duration: 10, width: 1920, height: 1080 },
+    clickLog: [],
     segments: [
       {
         id: "seg-1",

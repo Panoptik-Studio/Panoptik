@@ -74,13 +74,19 @@ function selectedSegment(state: {
 
 /** Produce a new project with the selected segment replaced by `fn(seg)`. */
 function mapSelectedSegment(
-  state: { project: Project | null; selectedSegmentId: string | null },
+  state: { project: Project | null; selectedSegmentId: string | null; currentTime?: number },
   fn: (seg: Segment) => Segment,
 ): Project | null {
-  if (!state.project || !state.selectedSegmentId) return null;
+  if (!state.project || state.project.segments.length === 0) return null;
+  let targetId = state.selectedSegmentId;
+  if (!targetId || !state.project.segments.some((s) => s.id === targetId)) {
+    const active = state.currentTime !== undefined ? resolveSegment(state.project, state.currentTime) : null;
+    targetId = active?.segment.id ?? state.project.segments[0]?.id ?? null;
+  }
+  if (!targetId) return null;
   let found = false;
   const segments = state.project.segments.map((seg) => {
-    if (seg.id === state.selectedSegmentId) {
+    if (seg.id === targetId) {
       found = true;
       return fn(seg);
     }
@@ -492,18 +498,28 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   addZoomPoint: (zp) => {
     const state = get();
-    if (!state.project || !state.selectedSegmentId) return;
+    if (!state.project || state.project.segments.length === 0) return;
+    const targetSegId =
+      state.selectedSegmentId ??
+      resolveSegment(state.project, state.currentTime)?.segment.id ??
+      state.project.segments[0]?.id;
+    if (!targetSegId) return;
+
     const newZP: ZoomPoint = {
       ...zp,
       id: crypto.randomUUID(),
       staged: false,
     };
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      zoomPoints: [...seg.zoomPoints, newZP],
-    }));
-    if (!project) return;
+    const project = {
+      ...state.project,
+      segments: state.project.segments.map((seg) =>
+        seg.id === targetSegId
+          ? { ...seg, zoomPoints: [...seg.zoomPoints, newZP] }
+          : seg,
+      ),
+    };
     pushHistoryAndSet(project, state, set, {
+      selectedSegmentId: targetSegId,
       // Select it so the inspector opens on what was just created.
       selectedZoomId: newZP.id,
     });
@@ -511,12 +527,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   removeZoomPoint: (id) => {
     const state = get();
-    if (!state.project || !state.selectedSegmentId) return;
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      zoomPoints: seg.zoomPoints.filter((z) => z.id !== id),
-    }));
-    if (!project) return;
+    if (!state.project) return;
+    let found = false;
+    const segments = state.project.segments.map((seg) => {
+      const has = seg.zoomPoints.some((z) => z.id === id);
+      if (!has) return seg;
+      found = true;
+      return {
+        ...seg,
+        zoomPoints: seg.zoomPoints.filter((z) => z.id !== id),
+      };
+    });
+    if (!found) return;
+    const project = { ...state.project, segments };
     pushHistoryAndSet(project, state, set, {
       selectedZoomId:
         state.selectedZoomId === id ? null : state.selectedZoomId,
@@ -525,21 +548,25 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   updateZoomPoint: (id, updates) => {
     const state = get();
-    if (!state.project || !state.selectedSegmentId) return;
-    const seg = selectedSegment(state);
-    if (!seg) return;
-    const inCommitted = seg.zoomPoints.some((z) => z.id === id);
-    const project = mapSelectedSegment(state, (x) => ({
-      ...x,
-      zoomPoints: inCommitted
-        ? x.zoomPoints.map((z) => (z.id === id ? { ...z, ...updates } : z))
-        : x.zoomPoints,
-      stagedZoomPoints: !inCommitted
-        ? x.stagedZoomPoints.map((z) => (z.id === id ? { ...z, ...updates } : z))
-        : x.stagedZoomPoints,
-    }));
-    if (!project) return;
-    set({ project });
+    if (!state.project) return;
+    let found = false;
+    const segments = state.project.segments.map((seg) => {
+      const inCommitted = seg.zoomPoints.some((z) => z.id === id);
+      const inStaged = seg.stagedZoomPoints.some((z) => z.id === id);
+      if (!inCommitted && !inStaged) return seg;
+      found = true;
+      return {
+        ...seg,
+        zoomPoints: inCommitted
+          ? seg.zoomPoints.map((z) => (z.id === id ? { ...z, ...updates } : z))
+          : seg.zoomPoints,
+        stagedZoomPoints: inStaged
+          ? seg.stagedZoomPoints.map((z) => (z.id === id ? { ...z, ...updates } : z))
+          : seg.stagedZoomPoints,
+      };
+    });
+    if (!found) return;
+    set({ project: { ...state.project, segments } });
   },
 
   commitDrag: () => {

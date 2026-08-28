@@ -19,49 +19,88 @@ import { resolveSegment, segmentDuration } from "./timeline";
 export type Transform = { scale: number; x: number; y: number };
 export const IDENTITY: Transform = { scale: 1, x: 0.5, y: 0.5 };
 
+function evalZoomPoint(k: ZoomPoint, startState: Transform, tau: number): Transform {
+  const dur = Math.max(k.dur, 0.001);
+  const hold = k.hold ?? 2.0;
+  const inEnd = k.t + dur;
+  const holdEnd = inEnd + hold;
+  const ease = EASINGS[k.ease] ?? easeInOutCubic;
+
+  if (tau <= k.t) return startState;
+  if (tau < inEnd) {
+    const p = Math.max(0, Math.min(1, (tau - k.t) / dur));
+    const e = ease(p);
+    return {
+      scale: lerp(startState.scale, k.to.scale, e),
+      x: lerp(startState.x, k.to.x, e),
+      y: lerp(startState.y, k.to.y, e),
+    };
+  }
+  if (tau < holdEnd) {
+    return k.to;
+  }
+  // ease out towards IDENTITY
+  const p = Math.max(0, Math.min(1, (tau - holdEnd) / dur));
+  const e = ease(p);
+  return {
+    scale: lerp(k.to.scale, IDENTITY.scale, e),
+    x: lerp(k.to.x, IDENTITY.x, e),
+    y: lerp(k.to.y, IDENTITY.y, e),
+  };
+}
+
 export function getCameraTransform(points: ZoomPoint[], t: number): Transform {
-  // Non-compounding, windowed: each zoom is independent from 1×.
-  // For k at k.t with k.dur (zoom-in/out time) and k.hold (stay zoomed):
-  //   [k.t, k.t+k.dur)              → ease 1× → k.to
-  //   [k.t+k.dur, k.t+k.dur+k.hold)  → hold at k.to
-  //   [k.t+k.dur+k.hold, k.t+2*k.dur+k.hold) → ease k.to → 1×
-  // If windows overlap, the latest k wins — no stacking on previous scale.
-  const active = points.filter((p) => !p.staged);
-  // Find the latest starting zoom whose window contains t
-  let chosen: ZoomPoint | null = null;
-  for (const k of active) {
+  const active = points
+    .filter((p) => !p.staged)
+    .slice()
+    .sort((a, b) => a.t - b.t);
+
+  if (active.length === 0) return IDENTITY;
+
+  // Compute the seamless starting transform for each active keyframe
+  // (if keyframe k_i starts while k_{i-1} is still active in its zone, k_i starts from k_{i-1}'s state)
+  const startStates: Transform[] = [];
+  const outEnds: number[] = [];
+
+  for (let i = 0; i < active.length; i++) {
+    const k = active[i]!;
     const dur = Math.max(k.dur, 0.001);
     const hold = k.hold ?? 2.0;
     const outEnd = k.t + dur * 2 + hold;
-    if (t >= k.t && t < outEnd) {
-      if (!chosen || k.t > chosen.t) chosen = k;
+    outEnds.push(outEnd);
+
+    if (i === 0) {
+      startStates.push(IDENTITY);
+    } else {
+      const prevOutEnd = outEnds[i - 1]!;
+      if (k.t < prevOutEnd) {
+        // Overlapping with previous zoom zone: transition smoothly from previous state
+        const stateAtKStart = evalZoomPoint(active[i - 1]!, startStates[i - 1]!, k.t);
+        startStates.push(stateAtKStart);
+      } else {
+        startStates.push(IDENTITY);
+      }
     }
   }
-  if (!chosen) return IDENTITY;
-  const dur = Math.max(chosen.dur, 0.001);
-  const hold = chosen.hold ?? 2.0;
-  const inEnd = chosen.t + dur;
-  const holdEnd = inEnd + hold;
-  const outEnd = holdEnd + dur;
-  const ease = EASINGS[chosen.ease] ?? easeInOutCubic;
-  if (t < inEnd) {
-    const p = (t - chosen.t) / dur;
-    const e = ease(Math.min(1, p));
-    return {
-      scale: lerp(IDENTITY.scale, chosen.to.scale, e),
-      x: lerp(IDENTITY.x, chosen.to.x, e),
-      y: lerp(IDENTITY.y, chosen.to.y, e),
-    };
+
+  // Find the active zoom point governing time t
+  // If multiple points overlap, the latest point that has already begun (k.t <= t) takes precedence
+  let chosenIdx = -1;
+  for (let i = active.length - 1; i >= 0; i--) {
+    const k = active[i]!;
+    if (t >= k.t && t < outEnds[i]!) {
+      chosenIdx = i;
+      break;
+    }
   }
-  if (t < holdEnd) return chosen.to;
-  // ease out
-  const p = (t - holdEnd) / dur;
-  const e = ease(Math.min(1, p));
-  return {
-    scale: lerp(chosen.to.scale, IDENTITY.scale, e),
-    x: lerp(chosen.to.x, IDENTITY.x, e),
-    y: lerp(chosen.to.y, IDENTITY.y, e),
-  };
+
+  if (chosenIdx === -1) {
+    return IDENTITY;
+  }
+
+  const chosen = active[chosenIdx]!;
+  const startState = startStates[chosenIdx]!;
+  return evalZoomPoint(chosen, startState, t);
 }
 
 // Alias for spec naming — same deterministic function
@@ -140,6 +179,11 @@ export function getCurrentFrame(): CanvasImageSource | null {
   return currentFrame;
 }
 
+export type RenderOptions = {
+  isPlaying?: boolean;
+  cameraOverride?: Transform;
+};
+
 /**
  * 5-layer synchronous composition. Preview and export share this exact codepath.
  * Layer order: background → frame (zoomed) → facecam PiP → text → captions.
@@ -150,6 +194,7 @@ export function renderFrame(
   ctx: CanvasRenderingContext2D,
   project: Project,
   timelineT: number,
+  options?: RenderOptions,
 ): void {
   const r = resolveSegment(project, timelineT);
   const seg = r?.segment ?? project.segments[project.segments.length - 1];
@@ -175,7 +220,8 @@ export function renderFrame(
   const paddingPx = (seg.stagePadding ?? 0) * (h / 1080) * 1.5;
   const rect = frameRect(w, h, media, seg.aspectPreset, paddingPx);
   if (currentFrame) {
-    const view = cameraViewport(rect, getCameraTransform(seg.zoomPoints, srcT));
+    const camTransform = options?.cameraOverride ?? (options?.isPlaying === false ? IDENTITY : getCameraTransform(seg.zoomPoints, srcT));
+    const view = cameraViewport(rect, camTransform);
     ctx.save();
     // Clip with rounded corners when padded, or standard rect
     ctx.beginPath();
