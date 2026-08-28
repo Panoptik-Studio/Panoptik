@@ -164,8 +164,8 @@ export function useTimelineThumbnails(
         ? video.videoWidth / video.videoHeight
         : 16 / 9;
 
-      const thumbHeight = 40;
-      const thumbWidth = Math.max(20, Math.round(thumbHeight * aspect));
+      const thumbHeight = 72;
+      const thumbWidth = Math.max(36, Math.round(thumbHeight * aspect));
 
       const timestamps = generateThumbnailTimestamps(dur);
 

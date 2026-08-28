@@ -226,8 +226,12 @@ export function Timeline() {
     if (!c) return;
     const ctx = c.getContext("2d");
     if (!ctx) return;
-    c.width = canvasW;
-    c.height = canvasH;
+    const dpr = typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1;
+    c.width = Math.round(canvasW * dpr);
+    c.height = Math.round(canvasH * dpr);
+    c.style.width = `${canvasW}px`;
+    c.style.height = `${canvasH}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, canvasW, canvasH);
 
     // Identify active segment under playhead
@@ -243,8 +247,6 @@ export function Timeline() {
     const interval = duration <= 30 ? 1 : duration <= 120 ? 5 : 10;
     ctx.strokeStyle = "#d4d4d4";
     ctx.lineWidth = 1;
-    ctx.font = "10px monospace";
-    ctx.fillStyle = "#666";
     for (let t = 0; t <= duration; t += interval) {
       const x = Math.round(timeToX(t));
       const major = t % (interval * 5) === 0 || t === 0;
@@ -252,10 +254,6 @@ export function Timeline() {
       ctx.moveTo(x + 0.5, 0);
       ctx.lineTo(x + 0.5, major ? 10 : 5);
       ctx.stroke();
-      if (major) {
-        const label = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
-        ctx.fillText(label, x + 4, 18);
-      }
     }
 
     const segments = project?.segments ?? [];
@@ -333,24 +331,23 @@ export function Timeline() {
         ctx.lineWidth = 1;
         drawRoundRect(ctx, x0 + 0.5, VIDEO_TRACK_Y + 0.5, Math.max(1, segW - 1), VIDEO_TRACK_HEIGHT - 1, 4);
         ctx.stroke();
-      }
+        // Speed badge
+        if (seg.speed !== 1) {
+          const speedText = `${String(seg.speed).replace(/\.?0$/, "")}x`;
+          ctx.font = "700 9.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+          const textMetrics = ctx.measureText(speedText);
+          const badgeW = textMetrics.width + 8;
+          const badgeH = 14;
+          const badgeX = x0 + 4;
+          const badgeY = VIDEO_TRACK_Y + 4;
 
-      // Speed badge
-      if (seg.speed !== 1) {
-        const speedText = `${String(seg.speed).replace(/\.?0$/, "")}x`;
-        ctx.font = "bold 9px monospace";
-        const textMetrics = ctx.measureText(speedText);
-        const badgeW = textMetrics.width + 8;
-        const badgeH = 14;
-        const badgeX = x0 + 4;
-        const badgeY = VIDEO_TRACK_Y + 4;
+          ctx.fillStyle = selected ? "#0070f3" : "rgba(30, 30, 30, 0.85)";
+          drawRoundRect(ctx, badgeX, badgeY, badgeW, badgeH, 3);
+          ctx.fill();
 
-        ctx.fillStyle = selected ? "#0070f3" : "rgba(30, 30, 30, 0.85)";
-        drawRoundRect(ctx, badgeX, badgeY, badgeW, badgeH, 3);
-        ctx.fill();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(speedText, badgeX + 4, badgeY + 10);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(speedText, badgeX + 4, badgeY + 10);
+        }
       }
 
       // Split boundary line
@@ -386,41 +383,22 @@ export function Timeline() {
       ctx.fillStyle = selected ? "#f0fdf4" : "#f8fafc";
       ctx.fillRect(x0, SCREEN_AUDIO_TRACK_Y, segW, SCREEN_AUDIO_TRACK_HEIGHT);
 
-      // Waveform Bars (starting after speaker icon)
-      if (segW > 26) {
+      // Waveform Bars (Green)
+      const labelW = 24;
+      const waveformStartX = x0 + labelW;
+      const rightPadding = segW >= 130 ? 62 : 6;
+      const waveformW = Math.max(0, x1 - rightPadding - waveformStartX);
+      if (waveformW > 8) {
         drawWaveformBars(
           ctx,
-          x0 + 24,
+          waveformStartX,
           SCREEN_AUDIO_TRACK_Y,
-          segW - 24,
+          waveformW,
           SCREEN_AUDIO_TRACK_HEIGHT,
           vol,
           selected ? "#16a34a" : "#22c55e",
           23,
         );
-      }
-
-      // Track label / badge
-      ctx.font = "bold 8.5px monospace";
-      if (segW >= 96) {
-        ctx.fillStyle = selected ? "#15803d" : "#475569";
-        ctx.fillText("SCREEN AUDIO", x0 + 26, SCREEN_AUDIO_TRACK_Y + 16);
-      } else if (segW >= 56) {
-        ctx.fillStyle = selected ? "#15803d" : "#475569";
-        ctx.fillText("AUDIO", x0 + 26, SCREEN_AUDIO_TRACK_Y + 16);
-      }
-
-      // Volume readout pill on right
-      if (segW >= 130) {
-        const volText = vol === 0 ? "MUTED" : `${Math.round(vol * 100)}%`;
-        const textMetrics = ctx.measureText(volText);
-        const pillW = textMetrics.width + 6;
-        const pillX = x1 - pillW - 4;
-        ctx.fillStyle = vol === 0 ? "rgba(239, 68, 68, 0.15)" : "rgba(22, 163, 74, 0.12)";
-        drawRoundRect(ctx, pillX, SCREEN_AUDIO_TRACK_Y + 5, pillW, 14, 3);
-        ctx.fill();
-        ctx.fillStyle = vol === 0 ? "#dc2626" : "#16a34a";
-        ctx.fillText(volText, pillX + 3, SCREEN_AUDIO_TRACK_Y + 15);
       }
 
       ctx.restore();
@@ -472,54 +450,9 @@ export function Timeline() {
       if (hasCam) {
         ctx.fillStyle = selected ? "#eff6ff" : "#f8fafc";
         ctx.fillRect(x0, FACECAM_TRACK_Y, segW, FACECAM_TRACK_HEIGHT);
-
-        const hFrac = (seg.facecam.size * (project?.media?.width ?? 1920) / (project?.media?.height ?? 1080)) / (16 / 9);
-        const { preset } = getClosestGridPreset(
-          seg.facecam.x,
-          seg.facecam.y,
-          seg.facecam.size,
-          hFrac,
-        );
-        const positionText = preset.code;
-        const shapeIcon = seg.facecam.shape === "circle" ? "●" : "■";
-
-        // Draw mini 3x3 dot matrix glyph if segW >= 42
-        if (segW >= 42) {
-          const matrixX = x0 + 6;
-          const matrixY = FACECAM_TRACK_Y + 8;
-          const dotSize = 2;
-          const dotGap = 3.5;
-          for (let r = 0; r < 3; r++) {
-            for (let c = 0; c < 3; c++) {
-              const dx = matrixX + c * dotGap;
-              const dy = matrixY + r * dotGap;
-              const isActiveCell = r === preset.row && c === preset.col;
-              ctx.fillStyle = isActiveCell
-                ? (selected ? "#0070f3" : "#2563eb")
-                : (selected ? "rgba(0,112,243,0.2)" : "rgba(100,116,139,0.25)");
-              ctx.fillRect(dx, dy, dotSize, dotSize);
-            }
-          }
-        }
-
-        ctx.fillStyle = selected ? "#0070f3" : "#475569";
-        ctx.font = "bold 9px monospace";
-        const textOffsetX = segW >= 42 ? 22 : 4;
-        if (segW > 74) {
-          ctx.fillText(`CAM · ${positionText} ${shapeIcon}`, x0 + textOffsetX, FACECAM_TRACK_Y + 17);
-        } else if (segW > 32) {
-          ctx.fillText(`${positionText}`, x0 + textOffsetX, FACECAM_TRACK_Y + 17);
-        } else {
-          ctx.fillText("CAM", x0 + 3, FACECAM_TRACK_Y + 17);
-        }
       } else {
         ctx.fillStyle = "#fafafa";
         ctx.fillRect(x0, FACECAM_TRACK_Y, segW, FACECAM_TRACK_HEIGHT);
-        if (segW > 50) {
-          ctx.fillStyle = "#94a3b8";
-          ctx.font = "9px monospace";
-          ctx.fillText("NO CAM", x0 + 6, FACECAM_TRACK_Y + 17);
-        }
       }
       ctx.restore();
 
@@ -570,50 +503,26 @@ export function Timeline() {
         ctx.fillStyle = selected ? "#faf5ff" : "#f8fafc";
         ctx.fillRect(x0, FACECAM_AUDIO_TRACK_Y, segW, FACECAM_AUDIO_TRACK_HEIGHT);
 
-        // Waveform Bars (Purple / Mic, starting after speaker icon)
-        if (segW > 26) {
+        // Waveform Bars (Purple / Mic)
+        const labelW = 24;
+        const waveformStartX = x0 + labelW;
+        const rightPadding = segW >= 130 ? 62 : 6;
+        const waveformW = Math.max(0, x1 - rightPadding - waveformStartX);
+        if (waveformW > 8) {
           drawWaveformBars(
             ctx,
-            x0 + 24,
+            waveformStartX,
             FACECAM_AUDIO_TRACK_Y,
-            segW - 24,
+            waveformW,
             FACECAM_AUDIO_TRACK_HEIGHT,
             vol,
             selected ? "#9333ea" : "#a855f7",
             79,
           );
         }
-
-        // Track label
-        ctx.font = "bold 8.5px monospace";
-        if (segW >= 88) {
-          ctx.fillStyle = selected ? "#7e22ce" : "#475569";
-          ctx.fillText("CAM MIC", x0 + 26, FACECAM_AUDIO_TRACK_Y + 16);
-        } else if (segW >= 52) {
-          ctx.fillStyle = selected ? "#7e22ce" : "#475569";
-          ctx.fillText("MIC", x0 + 26, FACECAM_AUDIO_TRACK_Y + 16);
-        }
-
-        // Volume readout pill on right
-        if (segW >= 130) {
-          const volText = vol === 0 ? "MUTED" : `${Math.round(vol * 100)}%`;
-          const textMetrics = ctx.measureText(volText);
-          const pillW = textMetrics.width + 6;
-          const pillX = x1 - pillW - 4;
-          ctx.fillStyle = vol === 0 ? "rgba(239, 68, 68, 0.15)" : "rgba(168, 85, 247, 0.12)";
-          drawRoundRect(ctx, pillX, FACECAM_AUDIO_TRACK_Y + 5, pillW, 14, 3);
-          ctx.fill();
-          ctx.fillStyle = vol === 0 ? "#dc2626" : "#7e22ce";
-          ctx.fillText(volText, pillX + 3, FACECAM_AUDIO_TRACK_Y + 15);
-        }
       } else {
         ctx.fillStyle = "#fafafa";
         ctx.fillRect(x0, FACECAM_AUDIO_TRACK_Y, segW, FACECAM_AUDIO_TRACK_HEIGHT);
-        if (segW > 50) {
-          ctx.fillStyle = "#94a3b8";
-          ctx.font = "9px monospace";
-          ctx.fillText("NO MIC", x0 + 6, FACECAM_AUDIO_TRACK_Y + 16);
-        }
       }
       ctx.restore();
 
@@ -665,23 +574,9 @@ export function Timeline() {
       if (hasZoom) {
         ctx.fillStyle = selected ? "#eff6ff" : "#f8fafc";
         ctx.fillRect(x0, ZOOM_TRACK_Y, segW, ZOOM_TRACK_HEIGHT);
-
-        // Track label
-        ctx.fillStyle = selected ? "#0070f3" : "#64748b";
-        ctx.font = "bold 9px monospace";
-        if (segW > 70) {
-          ctx.fillText(`ZOOM (${allZps.length})`, x0 + 6, ZOOM_TRACK_Y + 16);
-        } else if (segW > 35) {
-          ctx.fillText("ZOOM", x0 + 4, ZOOM_TRACK_Y + 16);
-        }
       } else {
         ctx.fillStyle = "#fafafa";
         ctx.fillRect(x0, ZOOM_TRACK_Y, segW, ZOOM_TRACK_HEIGHT);
-        if (segW > 45) {
-          ctx.fillStyle = "#94a3b8";
-          ctx.font = "9px monospace";
-          ctx.fillText("ZOOM", x0 + 6, ZOOM_TRACK_Y + 16);
-        }
       }
 
       ctx.restore();
@@ -761,7 +656,7 @@ export function Timeline() {
         if (spanW >= 36) {
           const scaleVal = zp.to?.scale ?? 2;
           const scaleText = `${scaleVal.toFixed(1)}×`;
-          ctx.font = "bold 8.5px monospace";
+          ctx.font = "700 9.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
           ctx.fillStyle = staged ? "#b45309" : selected ? "#6b21a8" : "#7e22ce";
           ctx.fillText(scaleText, x + DIAMOND_SIZE / 2 + 4, ZOOM_TRACK_Y + 16);
         }
@@ -1191,7 +1086,28 @@ export function Timeline() {
         onPointerLeave={() => setIsDraggingPlayhead(false)}
       >
         <div className="relative" style={{ width: canvasW, height: canvasH }}>
-          <canvas ref={canvasRef} className="timeline-canvas block" width={canvasW} height={canvasH} style={{ width: canvasW, height: canvasH }} />
+          <canvas ref={canvasRef} className="timeline-canvas block" style={{ width: canvasW, height: canvasH }} />
+          {/* Ruler Timestamps DOM Overlay (Vector-sharp, non-blurry) */}
+          {(() => {
+            const interval = duration <= 30 ? 1 : duration <= 120 ? 5 : 10;
+            const majorInterval = interval * 5;
+            const ticks: { t: number; label: string; x: number }[] = [];
+            for (let t = 0; t <= duration; t += interval) {
+              if (t % majorInterval === 0 || t === 0) {
+                const label = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+                ticks.push({ t, label, x: timeToX(t) });
+              }
+            }
+            return ticks.map((tk) => (
+              <span
+                key={`ruler-tk-${tk.t}`}
+                className="pointer-events-none absolute top-1.5 select-none font-mono text-[10px] font-semibold text-[#64748b]"
+                style={{ left: tk.x + 4 }}
+              >
+                {tk.label}
+              </span>
+            ));
+          })()}
           {/* Playhead — draggable with grab cursor */}
           <div className={`playhead absolute top-0 z-20 h-full ${isDraggingPlayhead ? "cursor-grabbing" : "cursor-grab"}`} style={{ transform: `translateX(${playheadX}px)` }} onPointerDown={(e) => { e.stopPropagation(); (e.target as HTMLElement).setPointerCapture(e.pointerId); setIsDraggingPlayhead(true); }}>
             <div className="pointer-events-none absolute left-1/2 h-full w-px -translate-x-1/2 bg-[#0070f3]" />
@@ -1401,138 +1317,291 @@ export function Timeline() {
             </div>
           )}
 
-          {/* Small Speaker Buttons on Screen Audio Track */}
+          {/* Screen Audio Track DOM Overlays (Speaker Button + Crisp Text Badge + Volume Pill) */}
           {(() => {
             let sAcc = 0;
             return project.segments.map((seg, idx) => {
               const d = segmentDuration(seg);
               const segX0 = timeToX(sAcc);
+              const segX1 = timeToX(sAcc + d);
+              const segW = Math.max(1, segX1 - segX0);
               sAcc += d;
               const vol = seg.audioVolume ?? 1;
               const isMuted = vol === 0;
+              const labelText = segW >= 110 ? "SCREEN AUDIO" : segW >= 65 ? "AUDIO" : null;
 
               return (
                 <div
-                  key={`screen-vol-btn-${seg.id}`}
-                  className="absolute z-20 flex items-center"
+                  key={`screen-audio-dom-${seg.id}`}
+                  className="pointer-events-none absolute z-20 flex items-center justify-between"
                   style={{
                     left: segX0 + 3,
                     top: SCREEN_AUDIO_TRACK_Y + 3,
-                  }}
-                  onMouseEnter={() => {
-                    if (volumePopoverTimerRef.current) {
-                      clearTimeout(volumePopoverTimerRef.current);
-                      volumePopoverTimerRef.current = null;
-                    }
-                    setHoveredVolume({
-                      type: "screen",
-                      segmentId: seg.id,
-                      segmentIndex: idx,
-                      x: Math.min(canvasW - 195, Math.max(10, segX0)),
-                      y: SCREEN_AUDIO_TRACK_Y,
-                      volume: vol,
-                    });
-                  }}
-                  onMouseLeave={() => {
-                    if (volumePopoverTimerRef.current) clearTimeout(volumePopoverTimerRef.current);
-                    volumePopoverTimerRef.current = setTimeout(() => {
-                      setHoveredVolume(null);
-                    }, 300);
+                    width: Math.max(0, segW - 6),
+                    height: 18,
                   }}
                 >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSegmentAudioVolume(seg.id, isMuted ? 1.0 : 0);
-                    }}
-                    className={`flex h-[18px] w-[18px] items-center justify-center rounded transition-all cursor-pointer shadow-xs ${
-                      isMuted
-                        ? "bg-[#fee2e2] text-[#dc2626] border border-[#fca5a5]"
-                        : "bg-white text-[#16a34a] border border-[#dcfce7] hover:border-[#16a34a] hover:bg-[#f0fdf4]"
-                    }`}
-                    title={isMuted ? "Unmute Screen Audio" : `Screen Audio (${Math.round(vol * 100)}%)`}
-                  >
-                    {isMuted ? (
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                        <path d="M9 9v6a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-                      </svg>
-                    ) : (
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                      </svg>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSegmentAudioVolume(seg.id, isMuted ? 1.0 : 0);
+                      }}
+                      onMouseEnter={() => {
+                        if (volumePopoverTimerRef.current) {
+                          clearTimeout(volumePopoverTimerRef.current);
+                          volumePopoverTimerRef.current = null;
+                        }
+                        setHoveredVolume({
+                          type: "screen",
+                          segmentId: seg.id,
+                          segmentIndex: idx,
+                          x: Math.min(canvasW - 195, Math.max(10, segX0)),
+                          y: SCREEN_AUDIO_TRACK_Y,
+                          volume: vol,
+                        });
+                      }}
+                      onMouseLeave={() => {
+                        if (volumePopoverTimerRef.current) clearTimeout(volumePopoverTimerRef.current);
+                        volumePopoverTimerRef.current = setTimeout(() => setHoveredVolume(null), 300);
+                      }}
+                      className={`pointer-events-auto flex h-[18px] w-[18px] items-center justify-center rounded transition-all cursor-pointer shadow-xs ${
+                        isMuted
+                          ? "bg-[#fee2e2] text-[#dc2626] border border-[#fca5a5]"
+                          : "bg-white text-[#16a34a] border border-[#dcfce7] hover:border-[#16a34a] hover:bg-[#f0fdf4]"
+                      }`}
+                      title={isMuted ? "Unmute Screen Audio" : `Screen Audio (${Math.round(vol * 100)}%)`}
+                    >
+                      {isMuted ? (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                          <path d="M9 9v6a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                        </svg>
+                      ) : (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                      )}
+                    </button>
+                    {labelText && (
+                      <span className="select-none rounded border border-[#e2e8f0] bg-white/95 px-1.5 py-0.5 text-[9.5px] font-bold tracking-tight text-black shadow-2xs font-mono">
+                        {labelText}
+                      </span>
                     )}
-                  </button>
+                  </div>
+                  {segW >= 130 && (
+                    <span
+                      className={`select-none rounded px-1.5 py-0.5 text-[9.5px] font-bold font-mono shadow-2xs ${
+                        isMuted
+                          ? "bg-[#fee2e2] text-[#dc2626] border border-[#fca5a5]"
+                          : "bg-[#dcfce7] text-[#16a34a] border border-[#bbf7d0]"
+                      }`}
+                    >
+                      {isMuted ? "MUTED" : `${Math.round(vol * 100)}%`}
+                    </span>
+                  )}
                 </div>
               );
             });
           })()}
 
-          {/* Small Speaker Buttons on Facecam Mic Audio Track */}
+          {/* Facecam Track DOM Overlays (Position Badge) */}
+          {(() => {
+            let fcAcc = 0;
+            return project.segments.map((seg) => {
+              const d = segmentDuration(seg);
+              const segX0 = timeToX(fcAcc);
+              const segX1 = timeToX(fcAcc + d);
+              const segW = Math.max(1, segX1 - segX0);
+              fcAcc += d;
+              if (!seg.facecam.src) {
+                if (segW > 50) {
+                  return (
+                    <div
+                      key={`fc-badge-${seg.id}`}
+                      className="pointer-events-none absolute z-20 flex items-center"
+                      style={{ left: segX0 + 6, top: FACECAM_TRACK_Y + 3, height: 18 }}
+                    >
+                      <span className="select-none text-[9.5px] font-bold text-[#94a3b8] font-mono">NO CAM</span>
+                    </div>
+                  );
+                }
+                return null;
+              }
+
+              const hFrac = (seg.facecam.size * (project?.media?.width ?? 1920) / (project?.media?.height ?? 1080)) / (16 / 9);
+              const { preset } = getClosestGridPreset(seg.facecam.x, seg.facecam.y, seg.facecam.size, hFrac);
+              const positionText = preset.code;
+              const shapeIcon = seg.facecam.shape === "circle" ? "●" : "■";
+
+              return (
+                <div
+                  key={`fc-badge-${seg.id}`}
+                  className="pointer-events-none absolute z-20 flex items-center gap-1.5"
+                  style={{ left: segX0 + 4, top: FACECAM_TRACK_Y + 3, height: 18 }}
+                >
+                  {segW >= 42 && (
+                    <div className="grid grid-cols-3 gap-0.5 p-0.5 rounded bg-black/5">
+                      {[0, 1, 2].map((r) =>
+                        [0, 1, 2].map((c) => (
+                          <div
+                            key={`cell-${r}-${c}`}
+                            className={`h-[2.5px] w-[2.5px] rounded-xs ${
+                              r === preset.row && c === preset.col ? "bg-[#0070f3]" : "bg-black/20"
+                            }`}
+                          />
+                        ))
+                      )}
+                    </div>
+                  )}
+                  <span className="select-none rounded border border-[#e2e8f0] bg-white/95 px-1.5 py-0.5 text-[9.5px] font-bold tracking-tight text-black shadow-2xs font-mono">
+                    {segW > 74 ? `CAM · ${positionText} ${shapeIcon}` : segW > 32 ? positionText : "CAM"}
+                  </span>
+                </div>
+              );
+            });
+          })()}
+
+          {/* Facecam Mic Audio Track DOM Overlays (Speaker Button + Crisp Text Badge + Volume Pill) */}
           {(() => {
             let fcAcc = 0;
             return project.segments.map((seg, idx) => {
               const d = segmentDuration(seg);
               const segX0 = timeToX(fcAcc);
+              const segX1 = timeToX(fcAcc + d);
+              const segW = Math.max(1, segX1 - segX0);
               fcAcc += d;
-              if (!seg.facecam.src) return null;
+              if (!seg.facecam.src) {
+                if (segW > 50) {
+                  return (
+                    <div
+                      key={`fc-mic-badge-${seg.id}`}
+                      className="pointer-events-none absolute z-20 flex items-center"
+                      style={{ left: segX0 + 6, top: FACECAM_AUDIO_TRACK_Y + 3, height: 18 }}
+                    >
+                      <span className="select-none text-[9.5px] font-bold text-[#94a3b8] font-mono">NO MIC</span>
+                    </div>
+                  );
+                }
+                return null;
+              }
+
               const vol = seg.facecam?.audioVolume ?? 1;
               const isMuted = vol === 0;
+              const labelText = segW >= 95 ? "CAM MIC" : segW >= 55 ? "MIC" : null;
 
               return (
                 <div
-                  key={`fc-vol-btn-${seg.id}`}
-                  className="absolute z-20 flex items-center"
+                  key={`fc-mic-dom-${seg.id}`}
+                  className="pointer-events-none absolute z-20 flex items-center justify-between"
                   style={{
                     left: segX0 + 3,
                     top: FACECAM_AUDIO_TRACK_Y + 3,
-                  }}
-                  onMouseEnter={() => {
-                    if (volumePopoverTimerRef.current) {
-                      clearTimeout(volumePopoverTimerRef.current);
-                      volumePopoverTimerRef.current = null;
-                    }
-                    setHoveredVolume({
-                      type: "facecam",
-                      segmentId: seg.id,
-                      segmentIndex: idx,
-                      x: Math.min(canvasW - 195, Math.max(10, segX0)),
-                      y: FACECAM_AUDIO_TRACK_Y,
-                      volume: vol,
-                    });
-                  }}
-                  onMouseLeave={() => {
-                    if (volumePopoverTimerRef.current) clearTimeout(volumePopoverTimerRef.current);
-                    volumePopoverTimerRef.current = setTimeout(() => {
-                      setHoveredVolume(null);
-                    }, 300);
+                    width: Math.max(0, segW - 6),
+                    height: 18,
                   }}
                 >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setFacecamAudioVolume(seg.id, isMuted ? 1.0 : 0);
-                    }}
-                    className={`flex h-[18px] w-[18px] items-center justify-center rounded transition-all cursor-pointer shadow-xs ${
-                      isMuted
-                        ? "bg-[#fee2e2] text-[#dc2626] border border-[#fca5a5]"
-                        : "bg-white text-[#9333ea] border border-[#f3e8ff] hover:border-[#9333ea] hover:bg-[#faf5ff]"
-                    }`}
-                    title={isMuted ? "Unmute Cam Mic" : `Cam Mic (${Math.round(vol * 100)}%)`}
-                  >
-                    {isMuted ? (
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                        <path d="M9 9v6a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-                      </svg>
-                    ) : (
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                      </svg>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFacecamAudioVolume(seg.id, isMuted ? 1.0 : 0);
+                      }}
+                      onMouseEnter={() => {
+                        if (volumePopoverTimerRef.current) {
+                          clearTimeout(volumePopoverTimerRef.current);
+                          volumePopoverTimerRef.current = null;
+                        }
+                        setHoveredVolume({
+                          type: "facecam",
+                          segmentId: seg.id,
+                          segmentIndex: idx,
+                          x: Math.min(canvasW - 195, Math.max(10, segX0)),
+                          y: FACECAM_AUDIO_TRACK_Y,
+                          volume: vol,
+                        });
+                      }}
+                      onMouseLeave={() => {
+                        if (volumePopoverTimerRef.current) clearTimeout(volumePopoverTimerRef.current);
+                        volumePopoverTimerRef.current = setTimeout(() => setHoveredVolume(null), 300);
+                      }}
+                      className={`pointer-events-auto flex h-[18px] w-[18px] items-center justify-center rounded transition-all cursor-pointer shadow-xs ${
+                        isMuted
+                          ? "bg-[#fee2e2] text-[#dc2626] border border-[#fca5a5]"
+                          : "bg-white text-[#9333ea] border border-[#f3e8ff] hover:border-[#9333ea] hover:bg-[#faf5ff]"
+                      }`}
+                      title={isMuted ? "Unmute Cam Mic" : `Cam Mic (${Math.round(vol * 100)}%)`}
+                    >
+                      {isMuted ? (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                          <path d="M9 9v6a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                        </svg>
+                      ) : (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                      )}
+                    </button>
+                    {labelText && (
+                      <span className="select-none rounded border border-[#e2e8f0] bg-white/95 px-1.5 py-0.5 text-[9.5px] font-bold tracking-tight text-black shadow-2xs font-mono">
+                        {labelText}
+                      </span>
                     )}
-                  </button>
+                  </div>
+                  {segW >= 130 && (
+                    <span
+                      className={`select-none rounded px-1.5 py-0.5 text-[9.5px] font-bold font-mono shadow-2xs ${
+                        isMuted
+                          ? "bg-[#fee2e2] text-[#dc2626] border border-[#fca5a5]"
+                          : "bg-[#f3e8ff] text-[#7e22ce] border border-[#e9d5ff]"
+                      }`}
+                    >
+                      {isMuted ? "MUTED" : `${Math.round(vol * 100)}%`}
+                    </span>
+                  )}
+                </div>
+              );
+            });
+          })()}
+
+          {/* Dedicated Zoom Track DOM Overlays (Zoom Badge) */}
+          {(() => {
+            let zoomAcc = 0;
+            return project.segments.map((seg) => {
+              const d = segmentDuration(seg);
+              const segX0 = timeToX(zoomAcc);
+              const segX1 = timeToX(zoomAcc + d);
+              const segW = Math.max(1, segX1 - segX0);
+              zoomAcc += d;
+              const allZps = [...seg.zoomPoints, ...seg.stagedZoomPoints];
+              const hasZoom = allZps.length > 0;
+              if (!hasZoom) {
+                if (segW > 45) {
+                  return (
+                    <div
+                      key={`zoom-badge-${seg.id}`}
+                      className="pointer-events-none absolute z-20 flex items-center"
+                      style={{ left: segX0 + 6, top: ZOOM_TRACK_Y + 3, height: 18 }}
+                    >
+                      <span className="select-none text-[9.5px] font-bold text-[#94a3b8] font-mono">ZOOM</span>
+                    </div>
+                  );
+                }
+                return null;
+              }
+
+              return (
+                <div
+                  key={`zoom-badge-${seg.id}`}
+                  className="pointer-events-none absolute z-20 flex items-center"
+                  style={{ left: segX0 + 4, top: ZOOM_TRACK_Y + 3, height: 18 }}
+                >
+                  <span className="select-none rounded border border-[#e2e8f0] bg-white/95 px-1.5 py-0.5 text-[9.5px] font-bold tracking-tight text-black shadow-2xs font-mono">
+                    {segW > 70 ? `ZOOM (${allZps.length})` : "ZOOM"}
+                  </span>
                 </div>
               );
             });
