@@ -8,7 +8,8 @@ import {
   renderFrame,
   setCurrentFrame,
 } from "./render";
-import type { ZoomPoint, Project } from "@panoptik/schema";
+import { migrateProject, type Facecam, type Segment, type ZoomPoint, type Project } from "@panoptik/schema";
+import { resolveSegment } from "./timeline";
 
 const zp = (overrides: Partial<ZoomPoint>): ZoomPoint => ({
   id: "z1",
@@ -236,7 +237,7 @@ describe("facecam PiP placement", () => {
     videoHeight: 720,
   };
 
-  function drawnPiP(facecam: Project["facecam"]) {
+  function drawnPiP(facecam: Facecam) {
     const { ctx, calls } = makeCtx();
     // drawFacecam pulls its <video> from a module-level cache keyed by src, so
     // seed it through the document stub the module reads on first use.
@@ -343,21 +344,59 @@ function makeCtx() {
   return { ctx, calls };
 }
 
-function makeProject(overrides?: Partial<Project>): Project {
+type MakeProjectOverrides = Partial<Project> &
+  Partial<Segment> & { clip?: { src: string; duration: number; width: number; height: number } };
+
+function makeProject(overrides: MakeProjectOverrides = {}): Project {
+  const {
+    srcStart = 0,
+    srcEnd = 15,
+    speed = 1,
+    stagePadding = 0,
+    zoomPoints = [],
+    stagedZoomPoints = [],
+    textOverlays = [],
+    stagedTextOverlays = [],
+    captions = [],
+    stagedCaptions = [],
+    background = { kind: "solid", color: "#000000" },
+    facecam = { src: null, x: 0.8, y: 0.8, size: 0.2 },
+    aspectPreset = "16:9",
+    clip,
+    media: mediaOverride,
+    id = "test",
+    clickLog = [],
+  } = overrides;
+
+  const media = mediaOverride ?? {
+    src: clip?.src ?? "",
+    duration: clip?.duration ?? 15,
+    width: clip?.width ?? 1920,
+    height: clip?.height ?? 1080,
+  };
+
   return {
-    id: "test",
-    clip: { src: "", duration: 15, width: 1920, height: 1080 },
-    zoomPoints: [],
-    stagedZoomPoints: [],
-    textOverlays: [],
-    stagedTextOverlays: [],
-    captions: [],
-    stagedCaptions: [],
-    background: { kind: "solid", color: "#000000" },
-    facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
-    clickLog: [],
-    aspectPreset: "16:9",
-    ...overrides,
+    id,
+    media,
+    segments: [
+      {
+        id: "s1",
+        srcStart,
+        srcEnd,
+        speed,
+        stagePadding,
+        zoomPoints,
+        stagedZoomPoints,
+        textOverlays,
+        stagedTextOverlays,
+        captions,
+        stagedCaptions,
+        background,
+        facecam,
+        aspectPreset,
+      },
+    ],
+    clickLog,
   };
 }
 
@@ -414,5 +453,28 @@ describe("renderFrame", () => {
     renderFrame(ctx, p, 1);
     const texts = calls.filter((c) => c[0] === "fillText");
     expect(texts.some((c) => String(c[1]).includes("Welcome"))).toBe(true);
+  });
+});
+
+describe("renderFrame segment resolution", () => {
+  it("draws using the segment active at timeline time", () => {
+    const p = migrateProject({
+      id: "p", clip: { src: "x", duration: 4, width: 800, height: 600 },
+      playbackRate: 1, aspectPreset: "source",
+      facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+      zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
+      captions: [], stagedCaptions: [], background: { kind: "solid", color: "#000" }, clickLog: [],
+    } as never) as Project;
+    renderFrame; // compile guard
+    // After split at t=2: two segments; resolve at timeline 1 and 3
+    // (splitAt is store-side; here just construct a 2-segment project):
+    const p2 = { ...p, segments: [
+      { ...p.segments[0]!, id: "a", srcStart: 0, srcEnd: 2 },
+      { ...p.segments[0]!, id: "b", srcStart: 2, srcEnd: 4, facecam: { src: null, x: 0.1, y: 0.1, size: 0.5 } },
+    ] };
+    expect(resolveSegment(p2, 3)!.srcT).toBeCloseTo(3);
+    expect(resolveSegment(p2, 3)!.segment.id).toBe("b");
+    const { ctx } = makeCtx();
+    renderFrame(ctx, p2, 3); // must not throw and must use segment b's facecam
   });
 });

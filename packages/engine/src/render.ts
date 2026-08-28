@@ -6,8 +6,15 @@
  * Keyframe semantics: at k.t ease FROM current state TO k.to over k.dur, then hold.
  */
 import { EASINGS, easeInOutCubic, lerp } from "@panoptik/utils";
-import type { Project, ZoomPoint } from "@panoptik/schema";
+import type {
+  Background,
+  Facecam,
+  Project,
+  Segment,
+  ZoomPoint,
+} from "@panoptik/schema";
 import { frameRect } from "./layout";
+import { resolveSegment } from "./timeline";
 
 export type Transform = { scale: number; x: number; y: number };
 export const IDENTITY: Transform = { scale: 1, x: 0.5, y: 0.5 };
@@ -136,18 +143,24 @@ export function getCurrentFrame(): CanvasImageSource | null {
 /**
  * 5-layer synchronous composition. Preview and export share this exact codepath.
  * Layer order: background → frame (zoomed) → facecam PiP → text → captions.
+ * `timelineT` is ON-TIMELINE time: it is resolved to the active segment and its
+ * source time, falling back to the last segment at media.duration when out of range.
  */
 export function renderFrame(
   ctx: CanvasRenderingContext2D,
   project: Project,
-  t: number,
+  timelineT: number,
 ): void {
+  const r = resolveSegment(project, timelineT);
+  const seg = r?.segment ?? project.segments[project.segments.length - 1];
+  const srcT = r ? r.srcT : project.media.duration;
+  if (!seg) return;
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
   screenRenderFrames++;
   if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - screenRenderLastLog > 1000) {
     const isOffscreen = typeof OffscreenCanvas !== "undefined" && ctx.canvas instanceof OffscreenCanvas;
-    console.log(`[Screen] renderFrame ${isOffscreen ? "export" : "canvas"}`, { t: t.toFixed(3), hasFrame: !!currentFrame, canvas: `${w}x${h}`, draws: screenRenderFrames, noFrame: screenRenderNoFrame });
+    console.log(`[Screen] renderFrame ${isOffscreen ? "export" : "canvas"}`, { t: timelineT.toFixed(3), seg: seg.id, hasFrame: !!currentFrame, canvas: `${w}x${h}`, draws: screenRenderFrames, noFrame: screenRenderNoFrame });
     screenRenderLastLog = performance.now();
     screenRenderFrames = 0;
     screenRenderNoFrame = 0;
@@ -155,12 +168,13 @@ export function renderFrame(
   if (!currentFrame) screenRenderNoFrame++;
 
   // ── Layer 1: Background ──
-  drawBackground(ctx, project, w, h);
+  drawBackground(ctx, seg.background, w, h);
 
   // ── Layer 2: Letterboxed frame with camera zoom (virtual camera, clamped, aspect-aware) ──
-  const rect = frameRect(w, h, project.clip.width, project.clip.height, project.aspectPreset);
+  const media = project.media;
+  const rect = frameRect(w, h, media, seg.aspectPreset);
   if (currentFrame) {
-    const view = cameraViewport(rect, getCameraTransform(project.zoomPoints, t));
+    const view = cameraViewport(rect, getCameraTransform(seg.zoomPoints, srcT));
     ctx.save();
     // Clip first: at a non-native aspect preset the magnified frame would
     // otherwise spill out of the letterbox and cover the background.
@@ -180,22 +194,21 @@ export function renderFrame(
   }
 
   // ── Layer 3: Facecam PiP (screen space, never zoomed) ──
-  drawFacecam(ctx, project, t, w, h);
+  drawFacecam(ctx, seg.facecam, srcT, w, h);
 
   // ── Layer 4: Text overlays ──
-  drawTextOverlays(ctx, project, t, w, h);
+  drawTextOverlays(ctx, seg, srcT, w, h);
 
   // ── Layer 5: Captions ──
-  drawCaptions(ctx, project, t, w, h);
+  drawCaptions(ctx, seg, srcT, w, h);
 }
 
 function drawBackground(
   ctx: CanvasRenderingContext2D,
-  project: Project,
+  bg: Background,
   w: number,
   h: number,
 ): void {
-  const bg = project.background;
   if (bg.kind === "solid") {
     ctx.fillStyle = bg.color;
     ctx.fillRect(0, 0, w, h);
@@ -234,12 +247,12 @@ function drawBackground(
 
 function drawTextOverlays(
   ctx: CanvasRenderingContext2D,
-  project: Project,
+  seg: Segment,
   t: number,
   w: number,
   h: number,
 ): void {
-  const all = [...project.textOverlays, ...project.stagedTextOverlays];
+  const all = [...seg.textOverlays, ...seg.stagedTextOverlays];
   for (const to of all) {
     if (t >= to.timestamp && t <= to.timestamp + 3) {
       ctx.fillStyle = to.staged ? "#f59e0b" : "#ffffff";
@@ -253,12 +266,12 @@ function drawTextOverlays(
 
 function drawCaptions(
   ctx: CanvasRenderingContext2D,
-  project: Project,
+  seg: Segment,
   t: number,
   w: number,
   h: number,
 ): void {
-  const all = [...project.captions, ...project.stagedCaptions];
+  const all = [...seg.captions, ...seg.stagedCaptions];
   for (const c of all) {
     if (t >= c.start && t <= c.end) {
       ctx.fillStyle = "#ffffff";
@@ -331,12 +344,11 @@ export function clearFacecamCache(): void {
 
 function drawFacecam(
   ctx: CanvasRenderingContext2D,
-  project: Project,
+  fc: Facecam,
   t: number,
   canvasW: number,
   canvasH: number,
 ): void {
-  const fc = project.facecam;
   if (!fc.src) return;
 
   // Prefer the decoded camera frame. It is stepped in lockstep with the clip,
