@@ -76,6 +76,7 @@ export function Timeline() {
   const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
   const selectSegment = useProjectStore((s) => s.selectSegment);
   const splitAt = useProjectStore((s) => s.splitAt);
+  const deleteSegment = useProjectStore((s) => s.deleteSegment);
   const updateSegment = useProjectStore((s) => s.updateSegment);
   const selectedZoomId = useProjectStore((s) => s.selectedZoomId);
   const setSelectedZoom = useProjectStore((s) => s.setSelectedZoom);
@@ -84,6 +85,12 @@ export function Timeline() {
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
   const exportProgress = useProjectStore((s) => s.exportProgress);
   const [showSpeed, setShowSpeed] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    segmentId: string;
+    timelineT: number;
+  } | null>(null);
 
   const { getThumbnail, version: thumbVersion } = useTimelineThumbnails(
     project?.media?.src,
@@ -343,6 +350,7 @@ export function Timeline() {
   }, [draggingDiamond, project, selectSegment, updateZoomPoint, xToTime]);
 
   const handleTimelinePointerDown = useCallback((e: React.PointerEvent) => {
+    if (contextMenu) setContextMenu(null);
     if (!scrollRef.current || draggingDiamond) return;
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
@@ -354,7 +362,7 @@ export function Timeline() {
       seek(xToTime(x));
       e.preventDefault();
     }
-  }, [currentTime, draggingDiamond, seek, timeToX, xToTime]);
+  }, [contextMenu, currentTime, draggingDiamond, seek, timeToX, xToTime]);
 
   const handleTimelinePointerMove = useCallback((e: React.PointerEvent) => {
     if (!isDraggingPlayhead || !scrollRef.current) return;
@@ -362,6 +370,76 @@ export function Timeline() {
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     seek(xToTime(x));
   }, [isDraggingPlayhead, seek, xToTime]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!scrollRef.current || !project) return;
+    const rect = scrollRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+    const t = xToTime(x);
+
+    // Identify which segment was right-clicked
+    let acc = 0;
+    let clickedSegment = null;
+    for (const seg of project.segments) {
+      const d = segmentDuration(seg);
+      const startX = timeToX(acc);
+      const endX = timeToX(acc + d);
+      if (x >= startX && x <= endX) {
+        clickedSegment = seg;
+        break;
+      }
+      acc += d;
+    }
+
+    if (clickedSegment) {
+      selectSegment(clickedSegment.id);
+      setContextMenu({
+        x: Math.min(window.innerWidth - 210, Math.max(10, e.clientX)),
+        y: Math.min(window.innerHeight - 160, Math.max(10, e.clientY)),
+        segmentId: clickedSegment.id,
+        timelineT: t,
+      });
+    } else {
+      setContextMenu(null);
+    }
+  }, [project, selectSegment, timeToX, xToTime]);
+
+  // Context menu dismissal and keyboard Delete/Backspace listeners
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("#timeline-context-menu")) return;
+      setContextMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setContextMenu(null);
+      }
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        (e.target as HTMLElement)?.tagName !== "INPUT" &&
+        (e.target as HTMLElement)?.tagName !== "TEXTAREA"
+      ) {
+        const state = useProjectStore.getState();
+        if (
+          state.selectedSegmentId &&
+          (state.project?.segments.length ?? 0) > 1 &&
+          state.exportProgress === null
+        ) {
+          e.preventDefault();
+          state.deleteSegment(state.selectedSegmentId);
+          setContextMenu(null);
+        }
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 
   // Resize handle
   const onResizeStart = useCallback((e: React.PointerEvent) => {
@@ -406,7 +484,7 @@ export function Timeline() {
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Mic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 10a7 7 0 0 1-14 0"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
           <div className="ctrl-divider mx-1 h-4 w-px bg-[#ebebeb]" />
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Volume"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>
-          <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Split at playhead" disabled={exportProgress !== null} onClick={() => splitAt(currentTime)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/></svg></button>
+          <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Split at playhead" disabled={exportProgress !== null} onClick={() => splitAt(currentTime)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="6.5" height="14" rx="1.5" /><rect x="14.5" y="5" width="6.5" height="14" rx="1.5" /><line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2.5 2" strokeWidth="1.6" /></svg></button>
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Mosaic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></button>
           <div className="relative" onMouseEnter={() => exportProgress === null && setShowSpeed(true)} onMouseLeave={() => setShowSpeed(false)}>
             <button className="pk-icon-btn ctrl-btn h-8 w-8 relative" title={`Speed ${segSpeed}x`} disabled={!canSpeed}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{segSpeed !== 1 && <span className="absolute -right-1 -top-1 rounded-full bg-[#0070f3] px-1 py-0.5 text-[9px] font-bold leading-none text-white">{segSpeed}x</span>}</button>
@@ -419,7 +497,21 @@ export function Timeline() {
             )}
           </div>
           <div className="ctrl-divider mx-1 h-4 w-px bg-[#ebebeb]" />
-          <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Eraser"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M20 20H7L3 16l9-9 4 4-9 9z"/><path d="M6 11l8-8"/></svg></button>
+          <button
+            className="pk-icon-btn ctrl-btn h-8 w-8"
+            title={
+              !selectedSegmentId || project.segments.length <= 1
+                ? "Cannot delete the only clip (split first)"
+                : "Delete selected clip (⌫)"
+            }
+            disabled={!selectedSegmentId || project.segments.length <= 1 || exportProgress !== null}
+            onClick={() => selectedSegmentId && deleteSegment(selectedSegmentId)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M20 20H7L3 16l9-9 4 4-9 9z"/>
+              <path d="M6 11l8-8"/>
+            </svg>
+          </button>
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Undo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5A2.5 2.5 0 0 1 17 11.5v7"/></svg></button>
         </div>
 
@@ -447,7 +539,17 @@ export function Timeline() {
       </div>
 
       {/* Scroll area + canvas + playhead — seekbar draggable with cursor */}
-      <div ref={scrollRef} className="timeline-scroll-area relative flex-1 cursor-pointer overflow-auto" style={{ background: "#f8f8f8" }} onClick={handleCanvasClick} onPointerDown={handleTimelinePointerDown} onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); }} onPointerUp={() => { setDraggingDiamond(null); setIsDraggingPlayhead(false); }} onPointerLeave={() => setIsDraggingPlayhead(false)}>
+      <div
+        ref={scrollRef}
+        className="timeline-scroll-area relative flex-1 cursor-pointer overflow-auto"
+        style={{ background: "#f8f8f8" }}
+        onClick={handleCanvasClick}
+        onContextMenu={handleContextMenu}
+        onPointerDown={handleTimelinePointerDown}
+        onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); }}
+        onPointerUp={() => { setDraggingDiamond(null); setIsDraggingPlayhead(false); }}
+        onPointerLeave={() => setIsDraggingPlayhead(false)}
+      >
         <div className="relative" style={{ width: canvasW, height: canvasH }}>
           <canvas ref={canvasRef} className="timeline-canvas block" width={canvasW} height={canvasH} style={{ width: canvasW, height: canvasH }} />
           {/* Playhead — draggable with grab cursor */}
@@ -476,6 +578,81 @@ export function Timeline() {
           )}
         </div>
       </div>
+
+      {/* Right-click Context Menu */}
+      {contextMenu && (
+        <div
+          id="timeline-context-menu"
+          className="fixed z-50 min-w-[200px] rounded-xl border bg-white p-1.5 shadow-vercel-3 animate-in fade-in zoom-in-95 duration-100"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y - 85 < 0 ? contextMenu.y + 10 : contextMenu.y - 85,
+            borderColor: "#ebebeb",
+            boxShadow: "0 8px 30px rgba(0,0,0,0.14)",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#888]">
+            Clip Actions
+          </div>
+          <button
+            className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-[#1a1a1a] hover:bg-[#f5f5f5] transition-colors"
+            disabled={exportProgress !== null}
+            onClick={() => {
+              splitAt(contextMenu.timelineT);
+              setContextMenu(null);
+            }}
+          >
+            <span className="flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="5" width="6.5" height="14" rx="1.5" />
+                <rect x="14.5" y="5" width="6.5" height="14" rx="1.5" />
+                <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2.5 2" strokeWidth="1.6" />
+              </svg>
+              Split at cursor
+            </span>
+          </button>
+          <div className="my-1 h-px bg-[#ebebeb]" />
+          <button
+            className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
+              project.segments.length > 1 && exportProgress === null
+                ? "text-[#ee0000] hover:bg-[#fff0f0]"
+                : "cursor-not-allowed text-[#aaa]"
+            }`}
+            disabled={project.segments.length <= 1 || exportProgress !== null}
+            title={
+              project.segments.length <= 1
+                ? "Cannot delete the only clip (split first)"
+                : "Delete this clip"
+            }
+            onClick={() => {
+              deleteSegment(contextMenu.segmentId);
+              setContextMenu(null);
+            }}
+          >
+            <span className="flex items-center gap-2">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 6h18" />
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+              Delete clip
+            </span>
+            <span className="font-mono text-[10px] opacity-70">⌫</span>
+          </button>
+        </div>
+      )}
     </footer>
   );
 }

@@ -6,7 +6,7 @@
 "use client";
 
 import { create } from "zustand";
-import { projectDuration, resolveSegment } from "@panoptik/engine";
+import { projectDuration, resolveSegment, segmentDuration } from "@panoptik/engine";
 import {
   migrateProject,
   type Project,
@@ -105,13 +105,15 @@ interface ProjectStore {
   persistStatus: "idle" | "saving" | "saved" | "restoring";
 
   // Project lifecycle
-  setProject: (project: Project) => void;
+  setProject: (project: Project, history?: Project[], historyIndex?: number) => void;
   /** Drop the loaded video and every edit made on it. */
   clearProject: () => void;
   setPersistStatus: (s: "idle" | "saving" | "saved" | "restoring") => void;
   selectSegment: (id: string) => void;
   /** Non-destructively divide the segment under timelineT into two. */
   splitAt: (timelineT: number) => void;
+  /** Remove a segment from the timeline (when >1 segment exists). */
+  deleteSegment: (id: string) => void;
   updateSegment: (id: string, updates: Partial<Segment>) => void;
 
   // Playback
@@ -203,12 +205,46 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   // ── Project lifecycle ──
 
-  setProject: (project) => {
+  setProject: (project, savedHistory, savedHistoryIndex) => {
     const p = migrateProject(project);
+    const validMediaSrc = p.media.src;
+    const validAudioSrc = p.audioSrc;
+    const validFacecamSrc = p.segments[0]?.facecam?.src ?? null;
+
+    let hist: Project[];
+    if (savedHistory && savedHistory.length > 0) {
+      hist = savedHistory.map((snap) => {
+        const migrated = migrateProject(snap);
+        return {
+          ...migrated,
+          media: {
+            ...migrated.media,
+            src: validMediaSrc,
+          },
+          audioSrc: validAudioSrc,
+          segments: migrated.segments.map((seg) => ({
+            ...seg,
+            facecam: {
+              ...seg.facecam,
+              src: seg.facecam?.src ? validFacecamSrc : null,
+            },
+          })),
+        };
+      });
+    } else {
+      hist = [structuredClone(p)];
+    }
+
+    const hIdx =
+      typeof savedHistoryIndex === "number" &&
+      savedHistoryIndex >= 0 &&
+      savedHistoryIndex < hist.length
+        ? savedHistoryIndex
+        : hist.length - 1;
     set({
       project: p,
-      history: [structuredClone(p)],
-      historyIndex: 0,
+      history: hist,
+      historyIndex: hIdx,
       currentTime: 0,
       isPlaying: false,
       selectedZoomId: null,
@@ -296,6 +332,51 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     segments.splice(idx, 1, a, b);
     const project = { ...s.project, segments };
     pushHistoryAndSet(project, s, set);
+  },
+
+  deleteSegment: (id) => {
+    const s = get();
+    if (!s.project || s.exportProgress !== null) return;
+    const segments = s.project.segments;
+    if (segments.length <= 1) return; // Cannot delete the only remaining segment
+
+    const targetIndex = segments.findIndex((seg) => seg.id === id);
+    if (targetIndex === -1) return;
+
+    const remainingSegments = segments.filter((seg) => seg.id !== id);
+    const newProject = { ...s.project, segments: remainingSegments };
+
+    // Select adjacent segment (prefer previous, otherwise next)
+    const nextSelectedIndex = Math.max(0, Math.min(targetIndex - 1, remainingSegments.length - 1));
+    const nextSelectedId = remainingSegments[nextSelectedIndex]?.id ?? remainingSegments[0]?.id ?? null;
+
+    // Adjust currentTime if it fell inside the deleted segment
+    let acc = 0;
+    let deletedStart = 0;
+    let deletedEnd = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const d = segmentDuration(segments[i]!);
+      if (i === targetIndex) {
+        deletedStart = acc;
+        deletedEnd = acc + d;
+        break;
+      }
+      acc += d;
+    }
+
+    const newDur = projectDuration(newProject);
+    let newCurrentTime = s.currentTime;
+    if (s.currentTime >= deletedStart && s.currentTime <= deletedEnd) {
+      newCurrentTime = Math.min(newDur, deletedStart);
+    } else if (s.currentTime > deletedEnd) {
+      newCurrentTime = Math.max(0, s.currentTime - (deletedEnd - deletedStart));
+    }
+    newCurrentTime = Math.max(0, Math.min(newDur, newCurrentTime));
+
+    pushHistoryAndSet(newProject, s, set, {
+      selectedSegmentId: nextSelectedId,
+      currentTime: newCurrentTime,
+    });
   },
 
   updateSegment: (id, updates) => {
@@ -641,12 +722,28 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const stillSelected =
       state.selectedSegmentId &&
       snap.segments.some((seg) => seg.id === state.selectedSegmentId);
+
+    const currentMediaSrc = state.project.media.src;
+    const currentAudioSrc = state.project.audioSrc;
+    const currentFacecamSrc = state.project.segments[0]?.facecam?.src ?? null;
+
+    const restoredProject = structuredClone(snap);
+    restoredProject.media.src = currentMediaSrc;
+    restoredProject.audioSrc = currentAudioSrc;
+    restoredProject.segments = restoredProject.segments.map((seg) => ({
+      ...seg,
+      facecam: {
+        ...seg.facecam,
+        src: seg.facecam?.src ? currentFacecamSrc : null,
+      },
+    }));
+
     set({
-      project: structuredClone(snap),
+      project: restoredProject,
       historyIndex: newIndex,
       selectedSegmentId: stillSelected
         ? state.selectedSegmentId
-        : (snap.segments[0]?.id ?? null),
+        : (restoredProject.segments[0]?.id ?? null),
     });
   },
 
@@ -662,12 +759,28 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const stillSelected =
       state.selectedSegmentId &&
       snap.segments.some((seg) => seg.id === state.selectedSegmentId);
+
+    const currentMediaSrc = state.project.media.src;
+    const currentAudioSrc = state.project.audioSrc;
+    const currentFacecamSrc = state.project.segments[0]?.facecam?.src ?? null;
+
+    const restoredProject = structuredClone(snap);
+    restoredProject.media.src = currentMediaSrc;
+    restoredProject.audioSrc = currentAudioSrc;
+    restoredProject.segments = restoredProject.segments.map((seg) => ({
+      ...seg,
+      facecam: {
+        ...seg.facecam,
+        src: seg.facecam?.src ? currentFacecamSrc : null,
+      },
+    }));
+
     set({
-      project: structuredClone(snap),
+      project: restoredProject,
       historyIndex: newIndex,
       selectedSegmentId: stillSelected
         ? state.selectedSegmentId
-        : (snap.segments[0]?.id ?? null),
+        : (restoredProject.segments[0]?.id ?? null),
     });
   },
 

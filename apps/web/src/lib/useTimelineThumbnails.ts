@@ -79,8 +79,22 @@ export function useTimelineThumbnails(
   const cacheRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const sortedTimesRef = useRef<number[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lastSrcRef = useRef<string | null>(null);
+  const lastDurationRef = useRef<number | null>(null);
 
   useEffect(() => {
+    // If media source and duration haven't changed and cache is populated, preserve thumbnails
+    if (
+      mediaSrc === lastSrcRef.current &&
+      duration === lastDurationRef.current &&
+      cacheRef.current.size > 0
+    ) {
+      return;
+    }
+
+    lastSrcRef.current = mediaSrc ?? null;
+    lastDurationRef.current = duration ?? null;
+
     // Clear previous thumbnails when media source changes
     cacheRef.current.clear();
     sortedTimesRef.current = [];

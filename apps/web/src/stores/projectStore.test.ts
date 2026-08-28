@@ -436,4 +436,89 @@ describe("segment split + selection", () => {
     useProjectStore.getState().updateSegment(id, { speed: 2.32 });
     expect(useProjectStore.getState().project!.segments[0]!.speed).toBe(2.3);
   });
+
+  it("deleteSegment removes a segment when multiple segments exist, updates selection and pushes history", () => {
+    useProjectStore.getState().setProject(singleSegProject());
+    // Split at 5s to create 2 segments
+    useProjectStore.getState().splitAt(5);
+    const s1 = useProjectStore.getState();
+    expect(s1.project!.segments).toHaveLength(2);
+    const seg1Id = s1.project!.segments[0]!.id;
+    const seg2Id = s1.project!.segments[1]!.id;
+
+    // Delete the second segment
+    useProjectStore.getState().deleteSegment(seg2Id);
+    const s2 = useProjectStore.getState();
+    expect(s2.project!.segments).toHaveLength(1);
+    expect(s2.project!.segments[0]!.id).toBe(seg1Id);
+    expect(s2.selectedSegmentId).toBe(seg1Id);
+
+    // Undo restores the deleted segment
+    useProjectStore.getState().undo();
+    const s3 = useProjectStore.getState();
+    expect(s3.project!.segments).toHaveLength(2);
+    expect(s3.project!.segments[1]!.id).toBe(seg2Id);
+  });
+
+  it("deleteSegment is a no-op when only one segment remains in the project", () => {
+    useProjectStore.getState().setProject(singleSegProject());
+    const initialSegments = useProjectStore.getState().project!.segments;
+    expect(initialSegments).toHaveLength(1);
+    const singleId = initialSegments[0]!.id;
+
+    useProjectStore.getState().deleteSegment(singleId);
+    expect(useProjectStore.getState().project!.segments).toHaveLength(1);
+    expect(useProjectStore.getState().project!.segments[0]!.id).toBe(singleId);
+  });
+
+  it("setProject restores saved history snapshots and historyIndex across sessions", () => {
+    const base = singleSegProject();
+    const snap1 = structuredClone(base);
+    const snap2 = structuredClone(base);
+    snap2.segments[0]!.speed = 2;
+
+    useProjectStore.getState().setProject(snap2, [snap1, snap2], 1);
+    const s = useProjectStore.getState();
+    expect(s.history).toHaveLength(2);
+    expect(s.historyIndex).toBe(1);
+    expect(s.project!.segments[0]!.speed).toBe(2);
+
+    // Undo reverts to snap1
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().project!.segments[0]!.speed).toBe(1);
+    expect(useProjectStore.getState().historyIndex).toBe(0);
+
+    // Redo restores snap2
+    useProjectStore.getState().redo();
+    expect(useProjectStore.getState().project!.segments[0]!.speed).toBe(2);
+    expect(useProjectStore.getState().historyIndex).toBe(1);
+  });
+
+  it("undo and redo preserve the active session media and audio URLs even if history had older URLs", () => {
+    const base = singleSegProject();
+    base.media.src = "blob:active-url";
+    base.audioSrc = "blob:active-audio";
+
+    // Older history snapshot with obsolete URL
+    const oldSnap = singleSegProject();
+    oldSnap.media.src = "blob:stale-url";
+    oldSnap.audioSrc = "blob:stale-audio";
+    oldSnap.segments[0]!.speed = 1.5;
+
+    useProjectStore.getState().setProject(base, [oldSnap, base], 1);
+
+    // Undo should restore segment properties from oldSnap, but retain active media URLs
+    useProjectStore.getState().undo();
+    const undone = useProjectStore.getState().project!;
+    expect(undone.segments[0]!.speed).toBe(1.5);
+    expect(undone.media.src).toBe("blob:active-url");
+    expect(undone.audioSrc).toBe("blob:active-audio");
+
+    // Redo should also retain active media URLs
+    useProjectStore.getState().redo();
+    const redone = useProjectStore.getState().project!;
+    expect(redone.segments[0]!.speed).toBe(1);
+    expect(redone.media.src).toBe("blob:active-url");
+    expect(redone.audioSrc).toBe("blob:active-audio");
+  });
 });

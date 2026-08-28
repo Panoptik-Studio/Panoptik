@@ -22,6 +22,7 @@ function isSecureContext(): boolean {
 export async function saveProject(
   project: Project,
   includeMedia = true,
+  extra?: { history?: Project[]; historyIndex?: number },
 ): Promise<void> {
   if (!isSecureContext()) return;
 
@@ -39,6 +40,26 @@ export async function saveProject(
   const jsonWritable = await jsonFile.createWritable();
   await jsonWritable.write(JSON.stringify(project));
   await jsonWritable.close();
+
+  // Save history JSON if provided
+  if (extra?.history && extra.history.length > 0) {
+    try {
+      const historyFile = await projectDir.getFileHandle(
+        "history.json",
+        { create: true },
+      );
+      const historyWritable = await historyFile.createWritable();
+      await historyWritable.write(
+        JSON.stringify({
+          history: extra.history,
+          historyIndex: extra.historyIndex ?? extra.history.length - 1,
+        }),
+      );
+      await historyWritable.close();
+    } catch {
+      /* ignore history write error */
+    }
+  }
 
   if (!includeMedia) return;
 
@@ -87,6 +108,8 @@ export async function loadProjectRecord(id: string): Promise<{
   media: Blob | null;
   facecam: Blob | null;
   audio: Blob | null;
+  history?: Project[];
+  historyIndex?: number;
 } | null> {
   if (!isSecureContext()) return null;
   try {
@@ -95,6 +118,23 @@ export async function loadProjectRecord(id: string): Promise<{
     const json = await (await (await dir.getFileHandle("project.json")).getFile()).text();
     // Old v1.1 records get upgraded to the v1.2 segment model on read.
     const project = migrateProject(JSON.parse(json));
+
+    let history: Project[] | undefined;
+    let historyIndex: number | undefined;
+    try {
+      const histJson = await (await (await dir.getFileHandle("history.json")).getFile()).text();
+      const parsed = JSON.parse(histJson);
+      if (Array.isArray(parsed.history)) {
+        const hist = parsed.history.map(migrateProject);
+        history = hist;
+        historyIndex =
+          typeof parsed.historyIndex === "number"
+            ? parsed.historyIndex
+            : hist.length - 1;
+      }
+    } catch {
+      /* history file is optional */
+    }
 
     const read = async (name: string): Promise<Blob | null> => {
       try {
@@ -108,6 +148,8 @@ export async function loadProjectRecord(id: string): Promise<{
       media: await read("clip.webm"),
       facecam: await read("facecam.webm"),
       audio: await read("audio.webm"),
+      history,
+      historyIndex,
     };
   } catch {
     return null;
