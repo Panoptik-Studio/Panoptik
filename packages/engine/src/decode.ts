@@ -11,8 +11,13 @@
  */
 import { ALL_FORMATS, BlobSource, CanvasSink, Input, type WrappedCanvas } from "mediabunny";
 import type { Project } from "@panoptik/schema";
+<<<<<<< HEAD
 import { clearFacecamCache, getCurrentFrame, setCurrentFrame, setFacecamFrameSource } from "./render";
 import { setAudioSink } from "./audio";
+=======
+import { clearFacecamCache, getCurrentFrame, setCurrentFrame } from "./render";
+import { setAudioBlobFallback, setAudioSink } from "./audio";
+>>>>>>> a30e6c3 (refactor: improve export reliability with sequential iterator resets, robust AAC codec probing, and export state signaling)
 
 /** Keep 1920 everywhere on canvas per request — export and preview share res. */
 const MAX_DECODE_WIDTH = 1920;
@@ -81,12 +86,30 @@ export async function setAudioBlob(blob: Blob | null): Promise<string | null> {
     URL.revokeObjectURL(audioUrl);
     audioUrl = null;
   }
-  if (!blob || blob.size === 0) return null;
+  // Keep fallback for export decodeAudioData path
+  setAudioBlobFallback(blob);
+  if (!blob || blob.size === 0) {
+    console.log("[Audio] setAudioBlob: empty blob");
+    return null;
+  }
   try {
     audioInput = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
     const track = await audioInput.getPrimaryAudioTrack();
-    if (track && (await track.canDecode())) setAudioSink(track);
-  } catch {
+    console.log("[Audio] setAudioBlob: track", !!track, "blob", `${blob.type} ${blob.size}`);
+    if (track) {
+      const can = await track.canDecode();
+      console.log("[Audio] setAudioBlob: canDecode", can);
+      if (can) setAudioSink(track);
+      else {
+        console.warn("[Audio] setAudioBlob: track cannot be decoded -> preview will work (blob URL) but export will be silent");
+        setAudioSink(null);
+      }
+    } else {
+      console.warn("[Audio] setAudioBlob: no audio track found");
+      setAudioSink(null);
+    }
+  } catch (e) {
+    console.warn("[Audio] setAudioBlob: exception", e);
     /* keep whatever the clip itself provided */
   }
   // Playback uses a plain <audio> element, which needs its own URL.
@@ -322,16 +345,44 @@ export async function loadClip(file: File): Promise<Project> {
  * Request the frame covering `t`. Safe to call every animation frame: repeat
  * calls while a decode is in flight only move the target, they never stack up.
  */
+export async function resetExportIterator(): Promise<void> {
+  if (exportIterator) {
+    try { await exportIterator.return(); } catch { /* already done */ }
+    exportIterator = null;
+  }
+  // Don't clear `presented` here — the preview may be on a different t.
+  // The next export will iterate from 0 and overwrite it as it steps.
+}
+
 export async function prepareFrame(t: number): Promise<void> {
   if (!sink) return;
   const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
   const qt = Math.max(0, t);
   if (isExporting) {
+    // Sequential path avoids the SEEK_AHEAD_LIMIT seek-storm that on Linux
+    // mp4/avc1 causes 130ms VideoDecoder re-init per frame at tail (14.8s).
+    // One forward iterator from 0 covers the whole export with no seeks.
     if (!exportIterator) exportIterator = sink.canvases(0);
+    else if (qt === 0) {
+      // Second export in same session must start over, not resume at EOS.
+      await resetExportIterator();
+      exportIterator = sink.canvases(0);
+    } else if (presented && qt < presented.start) {
+      // Non-monotonic jump backwards (shouldn't happen in export's 0..duration
+      // sweep, but guards against a stale iterator after a preview seek).
+      await resetExportIterator();
+      exportIterator = sink.canvases(0);
+    }
     while (true) {
       if (presented && qt >= presented.start && qt < presented.end) return;
       const { value, done } = await exportIterator.next();
-      if (done || !value) return;
+      if (done || !value) {
+        // Past EOS: hold last frame so renderFrame still has something to draw.
+        // Extend presented to Infinity so future tail frames are cache hits
+        // instead of spinning on done.
+        if (presented) presented = { start: presented.start, end: Infinity };
+        return;
+      }
       const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
       present(value, end);
       if (qt >= value.timestamp && qt < end) return;
@@ -401,7 +452,14 @@ async function runPump(): Promise<void> {
 
     iteratorTime = value.timestamp;
     const end = value.timestamp + (value.duration > 0 ? value.duration : NOMINAL_FRAME_DUR);
-    if (!presented || end > target) {
+    // Only present the frame whose interval [timestamp, end) contains target.
+    // The old `!presented || end > target` also presented future frames that
+    // start *after* target (e.g. 14.811 when target is 14.800) which made
+    // `presented.start > target`, so the cache check `target >= presented.start`
+    // failed and the next loop thought `target < iteratorTime` → not
+    // continuable → seek. That seek-storm repeated 130ms VideoDecoder re-inits
+    // on Linux mp4/avc1 and looked like an infinite hang at tail (14.8s).
+    if (value.timestamp <= target && target < end) {
       const presentStart = performance.now();
       present(value, end);
       framesInThisPump++;
@@ -411,6 +469,12 @@ async function runPump(): Promise<void> {
         console.log("[Screen] video fps", { fps, framesInThisPump, totalDecoded: pumpFramesDecoded, target: target.toFixed(3), presented: `${value.timestamp.toFixed(3)}-${end.toFixed(3)}`, blitTook: `${(performance.now() - presentStart).toFixed(1)}ms` });
         pumpLastLog = performance.now();
       }
+    } else if (!presented) {
+      // First frame bootstrap: if nothing has been shown yet, display the
+      // very first decoded frame as placeholder even if it doesn't cover the
+      // target (target 0 is normally covered, so this is rare). It will be
+      // overwritten as soon as the covering frame is found.
+      present(value, end);
     }
   }
 }

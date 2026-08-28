@@ -19,7 +19,11 @@ import {
 } from "mediabunny";
 import type { ExportOpts, Project } from "@panoptik/schema";
 import { presetAspect } from "./layout";
+<<<<<<< HEAD
 import { prepareAllFrames } from "./decode";
+=======
+import { prepareFrame, resetExportIterator } from "./decode";
+>>>>>>> a30e6c3 (refactor: improve export reliability with sequential iterator resets, robust AAC codec probing, and export state signaling)
 import { renderFrame } from "./render";
 
 /** Long-edge pixel height for each preset; width follows the clip's aspect. */
@@ -57,56 +61,15 @@ function exportSize(project: Project, resolution: ExportOpts["resolution"]) {
 }
 
 export async function exportProject(project: Project, opts: ExportOpts): Promise<Blob> {
-  const { width, height } = exportSize(project, opts.resolution);
-  const isMp4 = opts.format === "mp4";
-
-  const videoCodec = await getFirstEncodableVideoCodec(isMp4 ? MP4_VIDEO : WEBM_VIDEO, {
-    width,
-    height,
-  });
-  if (!videoCodec) {
-    throw new Error(
-      `This browser cannot encode ${opts.format.toUpperCase()} at ${opts.resolution}. Try WebM, or a lower resolution.`,
-    );
-  }
-
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas 2D is unavailable, so frames cannot be composed");
-
-  const output = new Output({
-    format: isMp4 ? new Mp4OutputFormat() : new WebMOutputFormat(),
-    target: new BufferTarget(),
-  });
-
-  const videoSource = new CanvasSource(canvas, {
-    codec: videoCodec,
-    quality: QUALITY_VERY_HIGH,
-    keyFrameInterval: 2,
-  });
-  output.addVideoTrack(videoSource, { frameRate: EXPORT_FPS });
-
-  // Audio is optional: a screen recording may carry no track at all.
-  let audioSource: AudioBufferSource | null = null;
-  const audioBuffer = await getExportAudio(project);
-  if (audioBuffer) {
-    const audioCodec = await getFirstEncodableAudioCodec(isMp4 ? MP4_AUDIO : WEBM_AUDIO, {
-      numberOfChannels: audioBuffer.numberOfChannels,
-      sampleRate: audioBuffer.sampleRate,
-    });
-    if (audioCodec) {
-      audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: 192_000 });
-      output.addAudioTrack(audioSource);
-    }
-  }
-
-  await output.start();
-
-  const duration = Math.max(0, project.clip.duration);
-  const totalFrames = Math.max(1, Math.ceil(duration * EXPORT_FPS));
-  const frameDuration = 1 / EXPORT_FPS;
-
+  // Signal preview to pause its own prepareFrame — they share the global CanvasSink pump.
+  // Also drives decode.ts's sequential exportIterator path that avoids the avc1
+  // seek-storm at tail (130ms per seek) seen on Linux mp4. The flag was added in
+  // 21f6199, lost in 891c233's revert, and left dead in 6cde3e6 so export fell
+  // back to runPump and stuck at 14.8s (see decode logs: repeated seek 14.800 → 14.760).
+  if (typeof window !== "undefined") (window as unknown as { __isExporting?: boolean }).__isExporting = true;
+  // Reset sequential iterator so a second export starts from 0, not EOS.
   try {
+<<<<<<< HEAD
     for (let i = 0; i < totalFrames; i++) {
       const t = i / EXPORT_FPS;
       // Decode before composing: renderFrame draws whatever frame is current,
@@ -117,27 +80,135 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
       // queueing the whole clip into memory.
       await videoSource.add(t, frameDuration);
       if (i % EXPORT_FPS === 0) emitProgress(i / totalFrames);
+=======
+    await resetExportIterator();
+  } catch { /* ignore */ }
+  try {
+    const { width, height } = exportSize(project, opts.resolution);
+    const isMp4 = opts.format === "mp4";
+
+    const videoCodec = await getFirstEncodableVideoCodec(isMp4 ? MP4_VIDEO : WEBM_VIDEO, {
+      width,
+      height,
+    });
+    if (!videoCodec) {
+      throw new Error(
+        `This browser cannot encode ${opts.format.toUpperCase()} at ${opts.resolution}. Try WebM, or a lower resolution.`,
+      );
+>>>>>>> a30e6c3 (refactor: improve export reliability with sequential iterator resets, robust AAC codec probing, and export state signaling)
     }
 
-    if (audioSource && audioBuffer) {
-      await audioSource.add(audioBuffer);
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas 2D is unavailable, so frames cannot be composed");
+
+    const output = new Output({
+      format: isMp4 ? new Mp4OutputFormat() : new WebMOutputFormat(),
+      target: new BufferTarget(),
+    });
+
+    const videoSource = new CanvasSource(canvas, {
+      codec: videoCodec,
+      quality: QUALITY_VERY_HIGH,
+      keyFrameInterval: 2,
+    });
+    output.addVideoTrack(videoSource, { frameRate: EXPORT_FPS });
+
+    // Audio is optional: a screen recording may carry no track at all.
+    let audioSource: AudioBufferSource | null = null;
+    const audioBuffer = await getExportAudio(project);
+    console.log("[Export] audioBuffer", audioBuffer ? { dur: audioBuffer.duration.toFixed(2), sr: audioBuffer.sampleRate, ch: audioBuffer.numberOfChannels, len: audioBuffer.length } : null);
+    if (audioBuffer) {
+      // For mp4, `aac` is universally supported in players but not encodable on
+      // Linux Chrome (no proprietary codec). `opus` in mp4 plays in browsers but
+      // NOT in COSMIC/GStreamer players (Pop!_OS) — user reported browser OK,
+      // COSMIC silent. Try aac with multiple configs before falling back to opus.
+      let audioCodec: AudioCodec | null = null;
+      if (isMp4) {
+        const tryAacConfigs: Array<{ numberOfChannels: number; sampleRate: number }> = [
+          { numberOfChannels: audioBuffer.numberOfChannels, sampleRate: audioBuffer.sampleRate },
+          { numberOfChannels: 2, sampleRate: audioBuffer.sampleRate },
+          { numberOfChannels: audioBuffer.numberOfChannels, sampleRate: 44100 },
+          { numberOfChannels: 2, sampleRate: 44100 },
+          { numberOfChannels: 1, sampleRate: 48000 },
+          { numberOfChannels: 2, sampleRate: 48000 },
+        ];
+        for (const cfg of tryAacConfigs) {
+          const c = await getFirstEncodableAudioCodec(["aac"] as AudioCodec[], cfg);
+          if (c) { audioCodec = c; console.log("[Export] aac encodable with", cfg, "->", c); break; }
+        }
+        if (!audioCodec) {
+          audioCodec = await getFirstEncodableAudioCodec(["opus"] as AudioCodec[], {
+            numberOfChannels: audioBuffer.numberOfChannels,
+            sampleRate: audioBuffer.sampleRate,
+          });
+          if (audioCodec) {
+            console.warn("[Export] mp4: aac not encodable on this browser (Linux Chrome), falling back to opus. Opus-in-mp4 plays in browsers but NOT in COSMIC/GStreamer players. For native playback, export as WebM.");
+          }
+        }
+      } else {
+        audioCodec = await getFirstEncodableAudioCodec(WEBM_AUDIO, {
+          numberOfChannels: audioBuffer.numberOfChannels,
+          sampleRate: audioBuffer.sampleRate,
+        });
+      }
+      console.log("[Export] audioCodec for", isMp4 ? "mp4" : "webm", "->", audioCodec, "candidates", isMp4 ? MP4_AUDIO : WEBM_AUDIO);
+      if (audioCodec) {
+        audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: 192_000 });
+        output.addAudioTrack(audioSource);
+        console.log("[Export] audio track added", audioCodec, "to", isMp4 ? "mp4" : "webm");
+      } else {
+        console.warn("[Export] no encodable audio codec -> silent. Try WebM on Linux.");
+      }
+    } else {
+      console.warn("[Export] no audioBuffer -> silent export (preview uses <audio> blob URL, different decoder)");
     }
 
-    videoSource.close();
-    audioSource?.close();
-    await output.finalize();
-  } catch (err) {
+    await output.start();
+
+    const duration = Math.max(0, project.clip.duration);
+    const totalFrames = Math.max(1, Math.ceil(duration * EXPORT_FPS));
+    const frameDuration = 1 / EXPORT_FPS;
+
     try {
-      await output.cancel();
-    } catch { /* already torn down */ }
-    throw err;
+      for (let i = 0; i < totalFrames; i++) {
+        const t = i / EXPORT_FPS;
+        // Decode before composing: renderFrame draws whatever frame is current,
+        // so without awaiting here every output frame would be the same picture.
+        await prepareFrame(t);
+        renderFrame(ctx as unknown as CanvasRenderingContext2D, project, t);
+        // Awaited so encoder backpressure actually throttles us rather than
+        // queueing the whole clip into memory.
+        await videoSource.add(t, frameDuration);
+        if (i % EXPORT_FPS === 0) emitProgress(i / totalFrames);
+      }
+
+      if (audioSource && audioBuffer) {
+        console.log("[Export] adding audio buffer to muxer", audioBuffer.duration.toFixed(2), "s");
+        await audioSource.add(audioBuffer);
+        console.log("[Export] audio added");
+      } else {
+        console.log("[Export] skipping audio mux (silent)", { hasSource: !!audioSource, hasBuffer: !!audioBuffer });
+      }
+
+      videoSource.close();
+      audioSource?.close();
+      await output.finalize();
+    } catch (err) {
+      try {
+        await output.cancel();
+      } catch { /* already torn down */ }
+      throw err;
+    }
+
+    emitProgress(1);
+
+    const buffer = (output.target as BufferTarget).buffer;
+    if (!buffer) throw new Error("Export produced no data");
+    return new Blob([buffer], { type: isMp4 ? "video/mp4" : "video/webm" });
+  } finally {
+    if (typeof window !== "undefined") (window as unknown as { __isExporting?: boolean }).__isExporting = false;
   }
-
-  emitProgress(1);
-
-  const buffer = (output.target as BufferTarget).buffer;
-  if (!buffer) throw new Error("Export produced no data");
-  return new Blob([buffer], { type: isMp4 ? "video/mp4" : "video/webm" });
 }
 
 /** Exposed for unit tests; not part of the engine's public surface. */
