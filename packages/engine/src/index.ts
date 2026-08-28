@@ -40,6 +40,7 @@ export {
 export type { Transform, Viewport } from "./render";
 
 // ── #region B-modules (DEV B adds re-export lines here; DEV A do not edit) ──
+export { segmentDuration, projectDuration, resolveSegment, sourceToTimeline } from "./timeline";
 export { startRecording, openCameraTrack, openMicrophoneTrack } from "./record";
 export type { RecordingHandles } from "./record";
 export { saveProject, loadProject, loadProjectRecord, listProjects, deleteProject } from "./opfs";

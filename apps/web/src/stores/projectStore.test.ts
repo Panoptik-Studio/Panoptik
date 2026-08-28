@@ -1,9 +1,21 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useProjectStore } from "./projectStore";
 import { mockProject } from "../../../../packages/engine/src/test-fixtures";
+import { projectDuration } from "@panoptik/engine";
+import {
+  migrateProject,
+  type Project,
+  type Segment,
+} from "@panoptik/schema";
 
 const fresh = () =>
   useProjectStore.getState().setProject(structuredClone(mockProject()));
+const seg = () => {
+  const s = useProjectStore.getState();
+  return s.project!.segments.find(
+    (x) => x.id === s.selectedSegmentId,
+  )!;
+};
 const zp = (id: string, t: number) =>
   ({
     id,
@@ -27,20 +39,19 @@ describe("projectStore", () => {
     });
     const s = useProjectStore.getState();
     expect(
-      s.project!.zoomPoints.some((z) => z.t === 9),
+      seg().zoomPoints.some((z) => z.t === 9),
     ).toBe(true);
     expect(s.historyIndex).toBe(before + 1);
   });
 
   it("staging adds ghosts without touching committed state or history", () => {
-    const before =
-      useProjectStore.getState().project!.zoomPoints.length;
+    const before = seg().zoomPoints.length;
     useProjectStore
       .getState()
       .stageZoomProposals([zp("ghost-1", 12)]);
     const s = useProjectStore.getState();
-    expect(s.project!.stagedZoomPoints).toHaveLength(1);
-    expect(s.project!.zoomPoints).toHaveLength(before);
+    expect(seg().stagedZoomPoints).toHaveLength(1);
+    expect(seg().zoomPoints).toHaveLength(before);
     expect(s.historyIndex).toBe(0);
   });
 
@@ -57,28 +68,22 @@ describe("projectStore", () => {
     const s0 = useProjectStore.getState();
     s0.stageZoomProposals([zp("g", 2)]);
     s0.commitAll();
-    const s1 = useProjectStore.getState();
-    expect(s1.project!.stagedZoomPoints).toHaveLength(0);
+    expect(seg().stagedZoomPoints).toHaveLength(0);
     expect(
-      s1.project!.zoomPoints.find((z) => z.id === "g")
+      seg().zoomPoints.find((z) => z.id === "g")
         ?.staged,
     ).toBe(false);
   });
 
   it("undo reverts a commit, redo reapplies; boundaries never throw", () => {
-    const countBefore =
-      useProjectStore.getState().project!.zoomPoints.length;
+    const countBefore = seg().zoomPoints.length;
     const s0 = useProjectStore.getState();
     s0.stageZoomProposals([zp("g", 4)]);
     s0.commitAll();
     useProjectStore.getState().undo();
-    expect(
-      useProjectStore.getState().project!.zoomPoints.length,
-    ).toBe(countBefore);
+    expect(seg().zoomPoints.length).toBe(countBefore);
     useProjectStore.getState().redo();
-    expect(
-      useProjectStore.getState().project!.zoomPoints.length,
-    ).toBe(countBefore + 1);
+    expect(seg().zoomPoints.length).toBe(countBefore + 1);
     const s = useProjectStore.getState();
     s.undo();
     s.undo();
@@ -90,18 +95,14 @@ describe("projectStore", () => {
   });
 
   it("clearStaged discards ghosts and reverts pending background", () => {
-    const origBg = structuredClone(
-      useProjectStore.getState().project!.background,
-    );
+    const origBg = structuredClone(seg().background);
     const s = useProjectStore.getState();
     s.stageBackground({ kind: "solid", color: "#ff0000" });
     expect(
       useProjectStore.getState().pendingBackgroundBadge,
     ).toBe(true);
     s.clearStaged();
-    expect(
-      useProjectStore.getState().project!.background,
-    ).toEqual(origBg);
+    expect(seg().background).toEqual(origBg);
     expect(
       useProjectStore.getState().pendingBackgroundBadge,
     ).toBe(false);
@@ -111,11 +112,7 @@ describe("projectStore", () => {
     const s = useProjectStore.getState();
     s.stageZoomProposals([zp("a", 1), zp("b", 2)]);
     s.removeStagedZoom("a");
-    expect(
-      useProjectStore
-        .getState()
-        .project!.stagedZoomPoints.map((z) => z.id),
-    ).toEqual(["b"]);
+    expect(seg().stagedZoomPoints.map((z) => z.id)).toEqual(["b"]);
   });
 
   it("removeStagedTextOverlay drops one ghost only", () => {
@@ -137,11 +134,7 @@ describe("projectStore", () => {
       staged: true,
     });
     s.removeStagedTextOverlay("txt-a");
-    expect(
-      useProjectStore
-        .getState()
-        .project!.stagedTextOverlays.map((t) => t.id),
-    ).toEqual(["txt-b"]);
+    expect(seg().stagedTextOverlays.map((t) => t.id)).toEqual(["txt-b"]);
   });
 
   it("stageBackground sets badge, commitAll clears it", () => {
@@ -188,7 +181,7 @@ describe("projectStore", () => {
   });
 
   it("play restarts from the top once the clip has finished", () => {
-    const duration = useProjectStore.getState().project!.clip.duration;
+    const duration = projectDuration(useProjectStore.getState().project!);
     // Playback parks the playhead at the end; play there should replay, not
     // sit at the end and stop again immediately.
     useProjectStore.getState().setCurrentTime(duration);
@@ -198,7 +191,7 @@ describe("projectStore", () => {
   });
 
   it("togglePlay also restarts from the end", () => {
-    const duration = useProjectStore.getState().project!.clip.duration;
+    const duration = projectDuration(useProjectStore.getState().project!);
     useProjectStore.getState().setCurrentTime(duration);
     useProjectStore.getState().togglePlay();
     expect(useProjectStore.getState().currentTime).toBe(0);
@@ -212,7 +205,7 @@ describe("projectStore", () => {
   });
 
   it("pausing at the end does not rewind", () => {
-    const duration = useProjectStore.getState().project!.clip.duration;
+    const duration = projectDuration(useProjectStore.getState().project!);
     useProjectStore.getState().setCurrentTime(duration);
     useProjectStore.getState().play();
     useProjectStore.getState().setCurrentTime(duration);
@@ -294,49 +287,90 @@ describe("projectStore", () => {
       { text: "a", start: 0, end: 1 },
       { text: "b", start: 1, end: 2 },
     ]);
-    expect(
-      useProjectStore.getState().project!.stagedCaptions,
-    ).toHaveLength(2);
+    expect(seg().stagedCaptions).toHaveLength(2);
     useProjectStore.getState().clearStagedCaptions();
-    expect(
-      useProjectStore.getState().project!.stagedCaptions,
-    ).toHaveLength(0);
+    expect(seg().stagedCaptions).toHaveLength(0);
   });
 
-  it("playbackRate defaults to 1 and clamps 0.25–3", () => {
+  it("segment speed starts at 1 from migration and drives duration", () => {
     const s = useProjectStore.getState();
-    expect(s.playbackRate).toBe(1);
-    s.setPlaybackRate(10);
-    expect(useProjectStore.getState().playbackRate).toBe(3);
-    s.setPlaybackRate(0);
-    expect(useProjectStore.getState().playbackRate).toBe(0.25);
-    s.setPlaybackRate(1.33);
-    expect(useProjectStore.getState().playbackRate).toBeCloseTo(1.35, 1);
+    expect(s.selectedSegmentId).toBe(seg().id);
+    expect(seg().speed).toBe(1);
+    // mock clip is 15s at 1x → whole project duration
+    expect(projectDuration(s.project!)).toBe(15);
+    // speed up the selected segment → shorter timeline
+    s.updateSegment(seg().id, { speed: 2 });
+    expect(projectDuration(useProjectStore.getState().project!)).toBeCloseTo(
+      7.5,
+    );
   });
 
-  it("effectiveDuration divides clip duration", () => {
-    useProjectStore.getState().setProject(structuredClone(mockProject()));
-    const dur = useProjectStore.getState().project!.clip.duration; // 15 from mock
-    useProjectStore.getState().setPlaybackRate(2);
-    expect(useProjectStore.getState().project!.clip.duration / useProjectStore.getState().playbackRate).toBe(dur / 2);
-    useProjectStore.getState().setPlaybackRate(0.5);
-    expect(useProjectStore.getState().project!.clip.duration / useProjectStore.getState().playbackRate).toBe(dur / 0.5);
-  });
-
-  it("persists playbackRate across reload", () => {
+  it("setStagePadding/setAspectPreset forward to the selected segment", () => {
     const s = useProjectStore.getState();
-    // Mock localStorage for node environment
-    const store: Record<string, string> = {};
-    const mockLS = {
-      getItem: (k: string) => store[k] ?? null,
-      setItem: (k: string, v: string) => { store[k] = v; },
-      removeItem: (k: string) => { delete store[k]; },
-      clear: () => { for (const k in store) delete store[k]; },
-    } as unknown as Storage;
-    (globalThis as unknown as { localStorage: Storage }).localStorage = mockLS;
-    // Also ensure window.localStorage if exists
-    if (typeof window !== "undefined") (window as unknown as { localStorage: Storage }).localStorage = mockLS;
-    s.setPlaybackRate(2.5);
-    expect(mockLS.getItem("panoptik:playbackRate")).toBe("2.5");
+    s.setStagePadding(32);
+    s.setAspectPreset("1:1");
+    expect(seg().stagePadding).toBe(32);
+    expect(seg().aspectPreset).toBe("1:1");
+  });
+
+  it("splitAt is a no-op at the timeline boundaries", () => {
+    useProjectStore.getState().setProject(singleSegProject());
+    useProjectStore.getState().splitAt(0);
+    useProjectStore.getState().splitAt(10);
+    expect(useProjectStore.getState().project!.segments).toHaveLength(1);
+  });
+});
+
+function singleSegProject(overrides?: Partial<Segment>): Project {
+  return migrateProject({
+    id: "p",
+    clip: { src: "blob:v", duration: 10, width: 800, height: 600 },
+    playbackRate: 1,
+    aspectPreset: "source",
+    facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+    zoomPoints: [],
+    stagedZoomPoints: [],
+    textOverlays: [],
+    stagedTextOverlays: [],
+    captions: [],
+    stagedCaptions: [],
+    background: { kind: "solid", color: "#000" },
+    clickLog: [],
+    ...overrides,
+  } as never) as Project;
+}
+
+describe("segment split + selection", () => {
+  it("splitAt divides the containing segment into two covering the full range", () => {
+    useProjectStore.getState().setProject(singleSegProject());
+    useProjectStore.getState().splitAt(4); // 0..4 and 4..10 at 1x
+    const { project } = useProjectStore.getState();
+    expect(project!.segments).toHaveLength(2);
+    expect(project!.segments[0]!.srcEnd).toBe(project!.segments[1]!.srcStart);
+    expect(project!.segments[1]!.srcEnd).toBe(10);
+  });
+
+  it("updateSegment only mutates the targeted segment's speed", () => {
+    useProjectStore.getState().setProject(singleSegProject());
+    useProjectStore.getState().splitAt(4);
+    useProjectStore
+      .getState()
+      .updateSegment(useProjectStore.getState().project!.segments[0]!.id, {
+        speed: 2,
+      });
+    const segs = useProjectStore.getState().project!.segments;
+    expect(segs[0]!.speed).toBe(2);
+    expect(segs[1]!.speed).toBe(1);
+  });
+
+  it("setFacecam targets the selected segment", () => {
+    useProjectStore.getState().setProject(singleSegProject());
+    useProjectStore.getState().splitAt(4);
+    const [a, b] = useProjectStore.getState().project!.segments;
+    useProjectStore.getState().selectSegment(b!.id);
+    useProjectStore.getState().setFacecam({ size: 0.5 });
+    const segs = useProjectStore.getState().project!.segments;
+    expect(segs[0]!.facecam.size).toBe(0.2);
+    expect(segs[1]!.facecam.size).toBe(0.5);
   });
 });

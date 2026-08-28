@@ -6,23 +6,19 @@
 "use client";
 
 import { create } from "zustand";
-import type {
-  Project,
-  ZoomPoint,
-  TextOverlay,
-  Caption,
-  Background,
-  ClickEvent,
-  AspectPreset,
-  Facecam,
+import { projectDuration, resolveSegment } from "@panoptik/engine";
+import {
+  migrateProject,
+  type Project,
+  type Segment,
+  type ZoomPoint,
+  type TextOverlay,
+  type Caption,
+  type Background,
+  type ClickEvent,
+  type AspectPreset,
+  type Facecam,
 } from "@panoptik/schema";
-
-type HistoryEntry = {
-  zoomPoints: ZoomPoint[];
-  textOverlays: TextOverlay[];
-  captions: Caption[];
-  background: Background;
-};
 
 /** Within this of the duration counts as "at the end" — the playhead lands on
  *  exactly duration, but float drift and frame steps can leave it just short. */
@@ -33,38 +29,63 @@ const END_EPSILON = 0.05;
  * otherwise finish instantly, so start over instead.
  */
 function rewindIfEnded(s: { project: Project | null; currentTime: number }) {
-  const duration = s.project?.clip.duration ?? 0;
+  const duration = s.project ? projectDuration(s.project) : 0;
   return duration > 0 && s.currentTime >= duration - END_EPSILON ? { currentTime: 0 } : {};
 }
 
-function snapshot(project: Project): HistoryEntry {
-  return {
-    zoomPoints: project.zoomPoints.map((z) => ({ ...z })),
-    textOverlays: project.textOverlays.map((t) => ({ ...t })),
-    captions: project.captions.map((c) => ({ ...c })),
-    background: structuredClone(project.background),
-  };
+/**
+ * Push a full-project history snapshot before committing a state change.
+ * History holds whole `Project` copies, so undo/redo restore every field.
+ */
+function pushHistoryAndSet(
+  project: Project,
+  state: ProjectStore,
+  set: (partial: Partial<ProjectStore>) => void,
+  extra: Partial<ProjectStore> = {},
+): void {
+  const snap = structuredClone(project);
+  const history = [
+    ...state.history.slice(0, state.historyIndex + 1),
+    snap,
+  ];
+  set({ project, history, historyIndex: history.length - 1, ...extra });
 }
 
-function restoreFromSnapshot(
-  project: Project,
-  snap: HistoryEntry,
-): Project {
-  return {
-    ...project,
-    zoomPoints: snap.zoomPoints,
-    textOverlays: snap.textOverlays,
-    captions: snap.captions,
-    background: snap.background,
-  };
+/** The currently-selected segment, or null when nothing is selected. */
+function selectedSegment(state: {
+  project: Project | null;
+  selectedSegmentId: string | null;
+}): Segment | null {
+  return (
+    state.project?.segments.find((s) => s.id === state.selectedSegmentId) ??
+    null
+  );
+}
+
+/** Produce a new project with the selected segment replaced by `fn(seg)`. */
+function mapSelectedSegment(
+  state: { project: Project | null; selectedSegmentId: string | null },
+  fn: (seg: Segment) => Segment,
+): Project | null {
+  if (!state.project || !state.selectedSegmentId) return null;
+  let found = false;
+  const segments = state.project.segments.map((seg) => {
+    if (seg.id === state.selectedSegmentId) {
+      found = true;
+      return fn(seg);
+    }
+    return seg;
+  });
+  return found ? { ...state.project, segments } : null;
 }
 
 interface ProjectStore {
   project: Project | null;
-  history: HistoryEntry[];
+  history: Project[]; // whole-project snapshots; undo/redo swap the full project
   historyIndex: number;
   isPlaying: boolean;
-  currentTime: number;
+  currentTime: number; // ON-TIMELINE time
+  selectedSegmentId: string | null;
   selectedZoomId: string | null;
   pendingBackgroundBadge: boolean;
   whisperProgress: number | null; // null = idle, -1 = transcribing, 0-100 = model loading
@@ -72,14 +93,16 @@ interface ProjectStore {
   exportProgress: number | null;
   /** Where the on-device save/restore has got to. */
   persistStatus: "idle" | "saving" | "saved" | "restoring";
-  stagePadding: number; // p-4 = 16, p-2 = 8, p-8 = 32 etc — white space around black video container
-  playbackRate: number; // 0.25–3, affects preview & export, cam+screen synced
 
   // Project lifecycle
   setProject: (project: Project) => void;
   /** Drop the loaded video and every edit made on it. */
   clearProject: () => void;
   setPersistStatus: (s: "idle" | "saving" | "saved" | "restoring") => void;
+  selectSegment: (id: string) => void;
+  /** Non-destructively divide the segment under timelineT into two. */
+  splitAt: (timelineT: number) => void;
+  updateSegment: (id: string, updates: Partial<Segment>) => void;
 
   // Playback
   play: () => void;
@@ -153,30 +176,6 @@ interface ProjectStore {
 
   // Facecam PiP placement (position / size / shape in the composed frame)
   setFacecam: (updates: Partial<Facecam>) => void;
-
-  // Playback speed — global, affects cam+screen together, preview & export
-  setPlaybackRate: (n: number) => void;
-}
-
-function clampRate(n: number): number {
-  return Math.min(3, Math.max(0.25, Math.round(n * 20) / 20));
-}
-function getLS(): Storage | null {
-  try {
-    if (typeof localStorage !== "undefined") return localStorage;
-    if (typeof window !== "undefined" && (window as unknown as { localStorage?: Storage }).localStorage) return (window as unknown as { localStorage: Storage }).localStorage;
-    const g = globalThis as unknown as { localStorage?: Storage };
-    if (g.localStorage) return g.localStorage;
-  } catch { /* no storage */ }
-  return null;
-}
-function initialRate(): number {
-  try {
-    const ls = getLS();
-    const v = Number(ls?.getItem("panoptik:playbackRate"));
-    if (Number.isFinite(v) && v >= 0.25 && v <= 3) return clampRate(v);
-  } catch { /* no localStorage */ }
-  return 1;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -185,29 +184,27 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   historyIndex: -1,
   isPlaying: false,
   currentTime: 0,
+  selectedSegmentId: null,
   selectedZoomId: null,
   pendingBackgroundBadge: false,
   whisperProgress: null,
   exportProgress: null,
   persistStatus: "idle",
-  stagePadding: 0,
-  playbackRate: initialRate(),
 
   // ── Project lifecycle ──
 
   setProject: (project) => {
-    const snap = snapshot(project);
+    const p = migrateProject(project);
     set({
-      project,
-      history: [snap],
+      project: p,
+      history: [structuredClone(p)],
       historyIndex: 0,
       currentTime: 0,
       isPlaying: false,
       selectedZoomId: null,
       pendingBackgroundBadge: false,
-      playbackRate: 1,
+      selectedSegmentId: p.segments[0]?.id ?? null,
     });
-    try { getLS()?.setItem("panoptik:playbackRate", "1"); } catch { /* ignore */ }
   },
 
   setPersistStatus: (persistStatus) => set({ persistStatus }),
@@ -220,10 +217,85 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       currentTime: 0,
       isPlaying: false,
       selectedZoomId: null,
+      selectedSegmentId: null,
       pendingBackgroundBadge: false,
       exportProgress: null,
-      playbackRate: 1,
     }),
+
+  selectSegment: (id) => set({ selectedSegmentId: id }),
+
+  splitAt: (timelineT) => {
+    const s = get();
+    if (!s.project || s.exportProgress !== null) return;
+    const r = resolveSegment(s.project, timelineT);
+    if (!r) return;
+    const t = r.srcT;
+    const orig = r.segment;
+    if (t <= orig.srcStart + 0.001 || t >= orig.srcEnd - 0.001)
+      return; // no-op at boundary
+
+    const a = structuredClone(orig);
+    a.id = crypto.randomUUID();
+    a.srcEnd = t;
+    a.zoomPoints = orig.zoomPoints
+      .filter((z) => z.t < t)
+      .map((z) => ({ ...z }));
+    a.stagedZoomPoints = orig.stagedZoomPoints
+      .filter((z) => z.t < t)
+      .map((z) => ({ ...z }));
+    a.textOverlays = orig.textOverlays
+      .filter((o) => o.timestamp < t)
+      .map((o) => ({ ...o }));
+    a.stagedTextOverlays = orig.stagedTextOverlays
+      .filter((o) => o.timestamp < t)
+      .map((o) => ({ ...o }));
+    a.captions = orig.captions
+      .filter((c) => c.start < t)
+      .map((c) => ({ ...c }));
+    a.stagedCaptions = orig.stagedCaptions
+      .filter((c) => c.start < t)
+      .map((c) => ({ ...c }));
+
+    const b = structuredClone(orig);
+    b.id = crypto.randomUUID();
+    b.srcStart = t;
+    b.zoomPoints = orig.zoomPoints
+      .filter((z) => z.t >= t)
+      .map((z) => ({ ...z, t: z.t - t }));
+    b.stagedZoomPoints = orig.stagedZoomPoints
+      .filter((z) => z.t >= t)
+      .map((z) => ({ ...z, t: z.t - t }));
+    b.textOverlays = orig.textOverlays
+      .filter((o) => o.timestamp >= t)
+      .map((o) => ({ ...o, timestamp: o.timestamp - t }));
+    b.stagedTextOverlays = orig.stagedTextOverlays
+      .filter((o) => o.timestamp >= t)
+      .map((o) => ({ ...o, timestamp: o.timestamp - t }));
+    b.captions = orig.captions
+      .filter((c) => c.start >= t)
+      .map((c) => ({ ...c, start: c.start - t, end: c.end - t }));
+    b.stagedCaptions = orig.stagedCaptions
+      .filter((c) => c.start >= t)
+      .map((c) => ({ ...c, start: c.start - t, end: c.end - t }));
+
+    const idx = s.project.segments.indexOf(orig);
+    const segments = [...s.project.segments];
+    segments.splice(idx, 1, a, b);
+    const project = { ...s.project, segments };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  updateSegment: (id, updates) => {
+    const s = get();
+    if (!s.project) return;
+    const project = {
+      ...s.project,
+      segments: s.project.segments.map((seg) =>
+        seg.id === id ? { ...seg, ...updates } : seg,
+      ),
+    };
+    pushHistoryAndSet(project, s, set);
+  },
 
   // ── Playback ──
 
@@ -247,25 +319,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   addZoomPoint: (zp) => {
     const state = get();
-    if (!state.project) return;
+    if (!state.project || !state.selectedSegmentId) return;
     const newZP: ZoomPoint = {
       ...zp,
       id: crypto.randomUUID(),
       staged: false,
     };
-    const project = {
-      ...state.project,
-      zoomPoints: [...state.project.zoomPoints, newZP],
-    };
-    const snap = snapshot(project);
-    const history = [
-      ...state.history.slice(0, state.historyIndex + 1),
-      snap,
-    ];
-    set({
-      project,
-      history,
-      historyIndex: history.length - 1,
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      zoomPoints: [...seg.zoomPoints, newZP],
+    }));
+    if (!project) return;
+    pushHistoryAndSet(project, state, set, {
       // Select it so the inspector opens on what was just created.
       selectedZoomId: newZP.id,
     });
@@ -273,20 +338,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   removeZoomPoint: (id) => {
     const state = get();
-    if (!state.project) return;
-    const project = {
-      ...state.project,
-      zoomPoints: state.project.zoomPoints.filter((z) => z.id !== id),
-    };
-    const snap = snapshot(project);
-    const history = [
-      ...state.history.slice(0, state.historyIndex + 1),
-      snap,
-    ];
-    set({
-      project,
-      history,
-      historyIndex: history.length - 1,
+    if (!state.project || !state.selectedSegmentId) return;
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      zoomPoints: seg.zoomPoints.filter((z) => z.id !== id),
+    }));
+    if (!project) return;
+    pushHistoryAndSet(project, state, set, {
       selectedZoomId:
         state.selectedZoomId === id ? null : state.selectedZoomId,
     });
@@ -294,35 +352,27 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   updateZoomPoint: (id, updates) => {
     const state = get();
-    if (!state.project) return;
-    const inCommitted = state.project.zoomPoints.some((z) => z.id === id);
-    const project = {
-      ...state.project,
+    if (!state.project || !state.selectedSegmentId) return;
+    const seg = selectedSegment(state);
+    if (!seg) return;
+    const inCommitted = seg.zoomPoints.some((z) => z.id === id);
+    const project = mapSelectedSegment(state, (x) => ({
+      ...x,
       zoomPoints: inCommitted
-        ? state.project.zoomPoints.map((z) =>
-            z.id === id ? { ...z, ...updates } : z,
-          )
-        : state.project.zoomPoints,
+        ? x.zoomPoints.map((z) => (z.id === id ? { ...z, ...updates } : z))
+        : x.zoomPoints,
       stagedZoomPoints: !inCommitted
-        ? state.project.stagedZoomPoints.map((z) =>
-            z.id === id ? { ...z, ...updates } : z,
-          )
-        : state.project.stagedZoomPoints,
-    };
+        ? x.stagedZoomPoints.map((z) => (z.id === id ? { ...z, ...updates } : z))
+        : x.stagedZoomPoints,
+    }));
+    if (!project) return;
     set({ project });
   },
 
   commitDrag: () => {
     const state = get();
     if (!state.project) return;
-    const history = [
-      ...state.history.slice(0, state.historyIndex + 1),
-      snapshot(state.project),
-    ];
-    set({
-      history,
-      historyIndex: history.length - 1,
-    });
+    pushHistoryAndSet(state.project, state, set);
   },
 
   setSelectedZoom: (id) => set({ selectedZoomId: id }),
@@ -331,78 +381,63 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   stageZoomProposals: (proposals) => {
     const state = get();
-    if (!state.project) return;
-    set({
-      project: {
-        ...state.project,
-        stagedZoomPoints: [
-          ...state.project.stagedZoomPoints,
-          ...proposals,
-        ],
-      },
-    });
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      stagedZoomPoints: [...seg.stagedZoomPoints, ...proposals],
+    }));
+    if (!project) return;
+    set({ project });
   },
 
   removeStagedZoom: (id) => {
     const state = get();
-    if (!state.project) return;
-    set({
-      project: {
-        ...state.project,
-        stagedZoomPoints:
-          state.project.stagedZoomPoints.filter((z) => z.id !== id),
-      },
-    });
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      stagedZoomPoints: seg.stagedZoomPoints.filter((z) => z.id !== id),
+    }));
+    if (!project) return;
+    set({ project });
   },
 
   // ── Text — committed ──
 
   addTextOverlay: (overlay) => {
     const state = get();
-    if (!state.project) return;
+    if (!state.project || !state.selectedSegmentId) return;
     const newOverlay: TextOverlay = {
       ...overlay,
       id: crypto.randomUUID(),
       staged: false,
     };
-    const project = {
-      ...state.project,
-      textOverlays: [...state.project.textOverlays, newOverlay],
-    };
-    const snap = snapshot(project);
-    const history = [
-      ...state.history.slice(0, state.historyIndex + 1),
-      snap,
-    ];
-    set({ project, history, historyIndex: history.length - 1 });
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      textOverlays: [...seg.textOverlays, newOverlay],
+    }));
+    if (!project) return;
+    pushHistoryAndSet(project, state, set);
   },
 
   removeTextOverlay: (id) => {
     const state = get();
-    if (!state.project) return;
-    const project = {
-      ...state.project,
-      textOverlays: state.project.textOverlays.filter(
-        (t) => t.id !== id,
-      ),
-    };
-    const snap = snapshot(project);
-    const history = [
-      ...state.history.slice(0, state.historyIndex + 1),
-      snap,
-    ];
-    set({ project, history, historyIndex: history.length - 1 });
+    if (!state.project || !state.selectedSegmentId) return;
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      textOverlays: seg.textOverlays.filter((t) => t.id !== id),
+    }));
+    if (!project) return;
+    pushHistoryAndSet(project, state, set);
   },
 
   updateTextOverlay: (id, updates) => {
     const state = get();
-    if (!state.project) return;
-    const project = {
-      ...state.project,
-      textOverlays: state.project.textOverlays.map((t) =>
+    if (!state.project || !state.selectedSegmentId) return;
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      textOverlays: seg.textOverlays.map((t) =>
         t.id === id ? { ...t, ...updates } : t,
       ),
-    };
+    }));
+    if (!project) return;
     set({ project });
   },
 
@@ -410,119 +445,98 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   stageTextOverlay: (overlay) => {
     const state = get();
-    if (!state.project) return;
-    set({
-      project: {
-        ...state.project,
-        stagedTextOverlays: [
-          ...state.project.stagedTextOverlays,
-          overlay,
-        ],
-      },
-    });
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      stagedTextOverlays: [...seg.stagedTextOverlays, overlay],
+    }));
+    if (!project) return;
+    set({ project });
   },
 
   removeStagedTextOverlay: (id) => {
     const state = get();
-    if (!state.project) return;
-    set({
-      project: {
-        ...state.project,
-        stagedTextOverlays:
-          state.project.stagedTextOverlays.filter(
-            (t) => t.id !== id,
-          ),
-      },
-    });
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      stagedTextOverlays: seg.stagedTextOverlays.filter((t) => t.id !== id),
+    }));
+    if (!project) return;
+    set({ project });
   },
 
   // ── Captions — committed ──
 
   setCaptions: (captions) => {
     const state = get();
-    if (!state.project) return;
-    const project = { ...state.project, captions };
-    const snap = snapshot(project);
-    const history = [
-      ...state.history.slice(0, state.historyIndex + 1),
-      snap,
-    ];
-    set({ project, history, historyIndex: history.length - 1 });
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      captions,
+    }));
+    if (!project) return;
+    pushHistoryAndSet(project, state, set);
   },
 
   // ── Captions — staging ──
 
   stageCaptions: (captions) => {
     const state = get();
-    if (!state.project) return;
-    set({
-      project: {
-        ...state.project,
-        stagedCaptions: captions,
-      },
-    });
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      stagedCaptions: captions,
+    }));
+    if (!project) return;
+    set({ project });
   },
 
   clearStagedCaptions: () => {
     const state = get();
-    if (!state.project) return;
-    set({
-      project: {
-        ...state.project,
-        stagedCaptions: [],
-      },
-    });
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      stagedCaptions: [],
+    }));
+    if (!project) return;
+    set({ project });
   },
 
   // ── Background ──
 
   setBackground: (bg) => {
     const state = get();
-    if (!state.project) return;
-    const project = { ...state.project, background: bg };
-    const snap = snapshot(project);
-    const history = [
-      ...state.history.slice(0, state.historyIndex + 1),
-      snap,
-    ];
-    set({
-      project,
-      history,
-      historyIndex: history.length - 1,
-      pendingBackgroundBadge: false,
-    });
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      background: bg,
+    }));
+    if (!project) return;
+    pushHistoryAndSet(project, state, set, { pendingBackgroundBadge: false });
   },
 
   stageBackground: (bg) => {
     const state = get();
-    if (!state.project) return;
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
+      background: bg,
+    }));
+    if (!project) return;
     // Staged background applies immediately to visual + sets badge
-    set({
-      project: {
-        ...state.project,
-        background: bg,
-      },
-      pendingBackgroundBadge: true,
-    });
+    set({ project, pendingBackgroundBadge: true });
   },
 
   // ── Staging diff ──
 
   getStagedDiff: () => {
     const state = get();
-    if (!state.project)
+    const seg = selectedSegment(state);
+    if (!seg)
       return { added: [], removed: [], totalCount: 0 };
-    const p = state.project;
     return {
       added: [
-        ...p.stagedZoomPoints.map(
+        ...seg.stagedZoomPoints.map(
           (zp) => `Zoom at ${zp.t.toFixed(1)}s`,
         ),
-        ...p.stagedTextOverlays.map(
+        ...seg.stagedTextOverlays.map(
           (t) => `"${t.text}" at ${t.timestamp.toFixed(1)}s`,
         ),
-        ...(p.stagedCaptions.length
-          ? [`${p.stagedCaptions.length} captions`]
+        ...(seg.stagedCaptions.length
+          ? [`${seg.stagedCaptions.length} captions`]
           : []),
         ...(state.pendingBackgroundBadge
           ? ["Background change"]
@@ -530,73 +544,72 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       ],
       removed: [],
       totalCount:
-        p.stagedZoomPoints.length +
-        p.stagedTextOverlays.length +
-        p.stagedCaptions.length +
+        seg.stagedZoomPoints.length +
+        seg.stagedTextOverlays.length +
+        seg.stagedCaptions.length +
         (state.pendingBackgroundBadge ? 1 : 0),
     };
   },
 
   commitAll: () => {
     const state = get();
-    if (!state.project) return;
-    const p = state.project;
-    const project = {
-      ...p,
+    const project = mapSelectedSegment(state, (seg) => ({
+      ...seg,
       zoomPoints: [
-        ...p.zoomPoints,
-        ...p.stagedZoomPoints.map((z) => ({
+        ...seg.zoomPoints,
+        ...seg.stagedZoomPoints.map((z) => ({
           ...z,
           staged: false,
         })),
       ],
       stagedZoomPoints: [],
       textOverlays: [
-        ...p.textOverlays,
-        ...p.stagedTextOverlays.map((t) => ({
+        ...seg.textOverlays,
+        ...seg.stagedTextOverlays.map((t) => ({
           ...t,
           staged: false,
         })),
       ],
       stagedTextOverlays: [],
-      captions: [...p.captions, ...p.stagedCaptions],
+      captions: [...seg.captions, ...seg.stagedCaptions],
       stagedCaptions: [],
-    };
-    const snap = snapshot(project);
-    const history = [
-      ...state.history.slice(0, state.historyIndex + 1),
-      snap,
-    ];
-    set({
-      project,
-      history,
-      historyIndex: history.length - 1,
-      pendingBackgroundBadge: false,
-    });
+    }));
+    if (!project) return;
+    pushHistoryAndSet(project, state, set, { pendingBackgroundBadge: false });
   },
 
   clearStaged: () => {
     const state = get();
-    if (!state.project) return;
+    if (!state.project || !state.selectedSegmentId) return;
     // Revert background to last committed if pending
-    let revertedBg = state.project.background;
+    let revertedBg = selectedSegment(state)?.background;
     if (
       state.pendingBackgroundBadge &&
       state.historyIndex >= 0 &&
       state.history[state.historyIndex]
     ) {
-      revertedBg = state.history[state.historyIndex]!.background;
+      const histSeg = state.history[state.historyIndex]!.segments.find(
+        (seg) => seg.id === state.selectedSegmentId,
+      );
+      if (histSeg) revertedBg = histSeg.background;
     }
-    set({
-      project: {
-        ...state.project,
-        stagedZoomPoints: [],
-        stagedTextOverlays: [],
-        stagedCaptions: [],
-        background: revertedBg,
-      },
-      pendingBackgroundBadge: false,
-    });
+    const project = {
+      ...state.project,
+      segments: state.project.segments.map((seg) =>
+        seg.id === state.selectedSegmentId
+          ? {
+              ...seg,
+              stagedZoomPoints: [],
+              stagedTextOverlays: [],
+              stagedCaptions: [],
+              ...(revertedBg !== undefined
+                ? { background: revertedBg }
+                : {}),
+            }
+          : seg,
+      ),
+    };
+    set({ project, pendingBackgroundBadge: false });
   },
 
   // ── Undo / redo ──
@@ -606,9 +619,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     if (state.historyIndex <= 0 || !state.project) return;
     const newIndex = state.historyIndex - 1;
     const snap = state.history[newIndex]!;
+    const stillSelected =
+      state.selectedSegmentId &&
+      snap.segments.some((seg) => seg.id === state.selectedSegmentId);
     set({
-      project: restoreFromSnapshot(state.project, snap),
+      project: structuredClone(snap),
       historyIndex: newIndex,
+      selectedSegmentId: stillSelected
+        ? state.selectedSegmentId
+        : (snap.segments[0]?.id ?? null),
     });
   },
 
@@ -621,9 +640,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       return;
     const newIndex = state.historyIndex + 1;
     const snap = state.history[newIndex]!;
+    const stillSelected =
+      state.selectedSegmentId &&
+      snap.segments.some((seg) => seg.id === state.selectedSegmentId);
     set({
-      project: restoreFromSnapshot(state.project, snap),
+      project: structuredClone(snap),
       historyIndex: newIndex,
+      selectedSegmentId: stillSelected
+        ? state.selectedSegmentId
+        : (snap.segments[0]?.id ?? null),
     });
   },
 
@@ -653,29 +678,27 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   setExportProgress: (p) => set({ exportProgress: Math.max(0, Math.min(1, p)) }),
   endExport: () => set({ exportProgress: null }),
 
-  setStagePadding: (n) => set({ stagePadding: Math.max(0, Math.min(48, n)) }),
+  setStagePadding: (n) => {
+    const s = get();
+    if (!s.selectedSegmentId) return;
+    s.updateSegment(s.selectedSegmentId, {
+      stagePadding: Math.max(0, Math.min(48, n)),
+    });
+  },
 
   setAspectPreset: (preset) => {
     const s = get();
-    if (!s.project) return;
-    set({ project: { ...s.project, aspectPreset: preset } });
+    if (!s.selectedSegmentId) return;
+    s.updateSegment(s.selectedSegmentId, { aspectPreset: preset });
   },
 
   setFacecam: (updates) => {
     const s = get();
-    if (!s.project) return;
-    set({ project: { ...s.project, facecam: { ...s.project.facecam, ...updates } } });
-  },
-
-  setPlaybackRate: (n) => {
-    const s = get();
-    if (s.exportProgress !== null) return;
-    const v = clampRate(n);
-    try { getLS()?.setItem("panoptik:playbackRate", String(v)); } catch { /* ignore */ }
-    // Clamp currentTime to new effective duration so playhead doesn't sit beyond end
-    const dur = s.project?.clip.duration ?? 0;
-    const eff = dur > 0 ? dur / v : 0;
-    const ct = s.currentTime > eff ? eff : s.currentTime;
-    set({ playbackRate: v, currentTime: ct });
+    if (!s.selectedSegmentId) return;
+    const seg = selectedSegment(s);
+    if (!seg) return;
+    s.updateSegment(s.selectedSegmentId, {
+      facecam: { ...seg.facecam, ...updates },
+    });
   },
 }));
