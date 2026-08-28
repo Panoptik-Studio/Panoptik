@@ -16,7 +16,7 @@ import {
 import { renderFrame } from "./render";
 import { getAudioBuffer as audioGetBuffer } from "./audio";
 import { exportProject as encodeProject } from "./encode";
-import { loadProjectRecord } from "./opfs";
+import { loadProjectRecord, mintUrl } from "./opfs";
 import { mergeSavedProject } from "./sanitize";
 
 export function createRealEngine(): MediaEngine {
@@ -58,11 +58,30 @@ export function createRealEngine(): MediaEngine {
       // and facecam pipeline are all opened — loading only the JSON would give
       // a project whose blob URLs point at nothing decodable.
       const proj = await this.loadRecording(saved.media, saved.facecam, saved.audio);
+
+      // Mint blob URLs for all loaded facecam takes
+      const mintedTakes = new Map<string, string>();
+      if (saved.facecamTakes) {
+        for (const [filename, blob] of saved.facecamTakes.entries()) {
+          mintedTakes.set(filename, mintUrl(blob));
+        }
+      }
+
+      // Map each saved segment to its specific minted take URL
+      const savedSegs = saved.project.segments ?? [];
+      const segmentFacecamSrcs: (string | null)[] = savedSegs.map((_, i) => {
+        const filename = saved.segmentFacecamTakes?.[i];
+        if (filename && mintedTakes.has(filename)) {
+          return mintedTakes.get(filename)!;
+        }
+        return proj.segments[0]?.facecam.src ?? null;
+      });
+
       // project.json is same-origin but not something we produced this session,
       // so its values are validated before they reach the renderer. The saved
       // edits (annotations, settings) are re-applied per-segment over the
       // freshly re-opened media.
-      return mergeSavedProject(proj, saved.project);
+      return mergeSavedProject(proj, saved.project, segmentFacecamSrcs);
     },
     async getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
       return audioGetBuffer(project);

@@ -16,8 +16,26 @@ function isSecureContext(): boolean {
 }
 
 /**
- * Persist a project. `includeMedia` copies the recordings themselves, which is
- * expensive — edits only need the JSON rewritten, so autosave passes false.
+ * Blob URLs minted for the last loaded project. They pin the whole recording in
+ * memory until revoked, so loading another project releases the previous one.
+ */
+let loadedUrls: string[] = [];
+
+export function mintUrl(blob: Blob): string {
+  const url = URL.createObjectURL(blob);
+  loadedUrls.push(url);
+  return url;
+}
+
+/** Release the blob URLs held by the previously loaded project. */
+export function releaseLoadedProjectUrls(): void {
+  loadedUrls.forEach((u) => URL.revokeObjectURL(u));
+  loadedUrls = [];
+}
+
+/**
+ * Persist a project. `includeMedia` copies the recordings themselves.
+ * Edits rewrite the JSON and any newly added take blobs (e.g. reshots).
  */
 export async function saveProject(
   project: Project,
@@ -31,6 +49,34 @@ export async function saveProject(
     project.id,
     { create: true },
   );
+
+  // Collect all unique facecam sources across all segments
+  const uniqueFacecamSrcs: string[] = [];
+  const srcToFilename = new Map<string, string>();
+  for (const seg of project.segments) {
+    const src = seg.facecam?.src;
+    if (src && typeof src === "string" && src.startsWith("blob:") && !srcToFilename.has(src)) {
+      const idx = uniqueFacecamSrcs.length;
+      const filename = idx === 0 ? "facecam.webm" : `facecam_take_${idx}.webm`;
+      uniqueFacecamSrcs.push(src);
+      srcToFilename.set(src, filename);
+    }
+  }
+
+  // Save takes manifest
+  const takesManifest = {
+    segmentFacecams: project.segments.map((seg) =>
+      seg.facecam?.src ? srcToFilename.get(seg.facecam.src) ?? null : null,
+    ),
+  };
+  try {
+    const takesFile = await projectDir.getFileHandle("takes.json", { create: true });
+    const takesWritable = await takesFile.createWritable();
+    await takesWritable.write(JSON.stringify(takesManifest));
+    await takesWritable.close();
+  } catch (e) {
+    console.warn("Failed to write takes.json", e);
+  }
 
   // Save project JSON
   const jsonFile = await projectDir.getFileHandle(
@@ -61,44 +107,44 @@ export async function saveProject(
     }
   }
 
-  if (!includeMedia) return;
+  // Helper to save a blob to a file in projectDir
+  const saveBlobFile = async (filename: string, blobUrl: string, force = false) => {
+    try {
+      if (!force) {
+        // Check if file already exists
+        try {
+          await projectDir.getFileHandle(filename);
+          return; // already saved
+        } catch {
+          // file does not exist, proceed to save
+        }
+      }
+      const response = await fetch(blobUrl);
+      const blob = await response.blob();
+      const file = await projectDir.getFileHandle(filename, { create: true });
+      const writable = await file.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    } catch (e) {
+      console.warn(`Failed to save blob to ${filename}:`, e);
+    }
+  };
 
   // Save clip blob if it's a blob URL
   if (project.media.src.startsWith("blob:")) {
-    const response = await fetch(project.media.src);
-    const blob = await response.blob();
-    const clipFile = await projectDir.getFileHandle(
-      "clip.webm",
-      { create: true },
-    );
-    const clipWritable = await clipFile.createWritable();
-    await clipWritable.write(blob);
-    await clipWritable.close();
+    if (includeMedia) {
+      await saveBlobFile("clip.webm", project.media.src, true);
+    }
   }
 
-  // The active (first) segment's facecam, if present and a blob URL.
-  const facecamSrc = project.segments[0]?.facecam.src ?? null;
-  if (facecamSrc && facecamSrc.startsWith("blob:")) {
-    const response = await fetch(facecamSrc);
-    const blob = await response.blob();
-    const facecamFile = await projectDir.getFileHandle(
-      "facecam.webm",
-      { create: true },
-    );
-    const facecamWritable =
-      await facecamFile.createWritable();
-    await facecamWritable.write(blob);
-    await facecamWritable.close();
-  }
-
-  // A recording's narration lives in its own file, so it has to be saved too —
-  // otherwise a reloaded project comes back silent.
+  // Save audio blob if it's a blob URL
   if (project.audioSrc && project.audioSrc.startsWith("blob:")) {
-    const blob = await (await fetch(project.audioSrc)).blob();
-    const audioFile = await projectDir.getFileHandle("audio.webm", { create: true });
-    const audioWritable = await audioFile.createWritable();
-    await audioWritable.write(blob);
-    await audioWritable.close();
+    await saveBlobFile("audio.webm", project.audioSrc, includeMedia);
+  }
+
+  // Save all facecam takes
+  for (const [src, filename] of srcToFilename.entries()) {
+    await saveBlobFile(filename, src, includeMedia);
   }
 }
 
@@ -108,6 +154,8 @@ export async function loadProjectRecord(id: string): Promise<{
   media: Blob | null;
   facecam: Blob | null;
   audio: Blob | null;
+  facecamTakes?: Map<string, Blob>;
+  segmentFacecamTakes?: (string | null)[];
   history?: Project[];
   historyIndex?: number;
 } | null> {
@@ -143,11 +191,37 @@ export async function loadProjectRecord(id: string): Promise<{
         return null;
       }
     };
+
+    let segmentFacecamTakes: (string | null)[] | undefined;
+    const facecamTakes = new Map<string, Blob>();
+    try {
+      const takesJson = await (await (await dir.getFileHandle("takes.json")).getFile()).text();
+      const parsedTakes = JSON.parse(takesJson);
+      if (Array.isArray(parsedTakes.segmentFacecams)) {
+        segmentFacecamTakes = parsedTakes.segmentFacecams;
+        for (const filename of new Set(parsedTakes.segmentFacecams as (string | null)[])) {
+          if (filename) {
+            const blob = await read(filename);
+            if (blob) facecamTakes.set(filename, blob);
+          }
+        }
+      }
+    } catch {
+      // takes.json not present
+    }
+
+    const primaryFacecamBlob = await read("facecam.webm");
+    if (primaryFacecamBlob && !facecamTakes.has("facecam.webm")) {
+      facecamTakes.set("facecam.webm", primaryFacecamBlob);
+    }
+
     return {
       project,
       media: await read("clip.webm"),
-      facecam: await read("facecam.webm"),
+      facecam: primaryFacecamBlob,
       audio: await read("audio.webm"),
+      facecamTakes,
+      segmentFacecamTakes,
       history,
       historyIndex,
     };
@@ -167,24 +241,6 @@ export async function deleteProject(id: string): Promise<void> {
   }
 }
 
-/**
- * Blob URLs minted for the last loaded project. They pin the whole recording in
- * memory until revoked, so loading another project releases the previous one.
- */
-let loadedUrls: string[] = [];
-
-function mintUrl(blob: Blob): string {
-  const url = URL.createObjectURL(blob);
-  loadedUrls.push(url);
-  return url;
-}
-
-/** Release the blob URLs held by the previously loaded project. */
-export function releaseLoadedProjectUrls(): void {
-  loadedUrls.forEach((u) => URL.revokeObjectURL(u));
-  loadedUrls = [];
-}
-
 export async function loadProject(
   id: string,
 ): Promise<Project | null> {
@@ -201,7 +257,6 @@ export async function loadProject(
     );
     const file = await jsonFile.getFile();
     const text = await file.text();
-    // Old v1.1 records upgrade to the v1.2 segment model on read.
     let project = migrateProject(JSON.parse(text));
 
     // Restore clip blob URL from OPFS
@@ -215,22 +270,64 @@ export async function loadProject(
       // clip not saved — keep existing src
     }
 
-    // Restore facecam blob URL from OPFS
+    // Restore audio blob URL from OPFS
     try {
-      const facecamFile = await projectDir.getFileHandle(
-        "facecam.webm",
+      const audioFile = await projectDir.getFileHandle(
+        "audio.webm",
       );
-      const facecamBlob = await facecamFile.getFile();
-      const src = mintUrl(facecamBlob);
-      project = {
-        ...project,
-        segments: project.segments.map((seg, i) =>
-          i === 0 ? { ...seg, facecam: { ...seg.facecam, src } } : seg,
-        ),
-      };
+      const audioBlob = await audioFile.getFile();
+      project = { ...project, audioSrc: mintUrl(audioBlob) };
     } catch {
-      // no facecam
+      // no audio
     }
+
+    // Restore facecam blob URLs from OPFS
+    let segmentFacecamFilenames: (string | null)[] | null = null;
+    try {
+      const takesFile = await projectDir.getFileHandle("takes.json");
+      const takesText = await (await takesFile.getFile()).text();
+      const parsedTakes = JSON.parse(takesText);
+      if (Array.isArray(parsedTakes.segmentFacecams)) {
+        segmentFacecamFilenames = parsedTakes.segmentFacecams;
+      }
+    } catch {}
+
+    const fileToUrl = new Map<string, string>();
+    const getOrMint = async (filename: string): Promise<string | null> => {
+      if (fileToUrl.has(filename)) return fileToUrl.get(filename)!;
+      try {
+        const f = await projectDir.getFileHandle(filename);
+        const b = await f.getFile();
+        const url = mintUrl(b);
+        fileToUrl.set(filename, url);
+        return url;
+      } catch {
+        return null;
+      }
+    };
+
+    let defaultFacecamUrl: string | null = null;
+    try {
+      const defaultFacecam = await getOrMint("facecam.webm");
+      defaultFacecamUrl = defaultFacecam;
+    } catch {}
+
+    project = {
+      ...project,
+      segments: await Promise.all(
+        project.segments.map(async (seg, i) => {
+          const targetFilename = segmentFacecamFilenames?.[i];
+          const segUrl = targetFilename ? await getOrMint(targetFilename) : defaultFacecamUrl;
+          return {
+            ...seg,
+            facecam: {
+              ...seg.facecam,
+              src: segUrl ?? seg.facecam.src,
+            },
+          };
+        }),
+      ),
+    };
 
     return project;
   } catch {

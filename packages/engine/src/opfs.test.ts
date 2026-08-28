@@ -132,4 +132,29 @@ describe("opfs serialize/deserialize", () => {
     expect(deserialized.segments[0]!.zoomPoints).toHaveLength(1);
     expect(deserialized.segments[0]!.zoomPoints[0]!.t).toBe(2.5);
   });
+
+  it("preserves multi-take facecam references across segments", () => {
+    const multiTakeProject: Project = {
+      ...mockProject,
+      segments: [
+        {
+          ...mockProject.segments[0]!,
+          id: "s1",
+          facecam: { src: "blob:http://localhost/take1", x: 0.8, y: 0.8, size: 0.2, shape: "square" },
+        },
+        {
+          ...mockProject.segments[0]!,
+          id: "s2",
+          facecam: { src: "blob:http://localhost/take2-reshoot", x: 0.8, y: 0.8, size: 0.2, shape: "square", startT: 4 },
+        },
+      ],
+    };
+
+    const serialized = JSON.stringify(multiTakeProject);
+    const parsed = JSON.parse(serialized) as Project;
+    expect(parsed.segments).toHaveLength(2);
+    expect(parsed.segments[0]!.facecam.src).toBe("blob:http://localhost/take1");
+    expect(parsed.segments[1]!.facecam.src).toBe("blob:http://localhost/take2-reshoot");
+    expect(parsed.segments[1]!.facecam.startT).toBe(4);
+  });
 });

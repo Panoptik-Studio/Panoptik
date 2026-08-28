@@ -214,7 +214,11 @@ function sanitizeSegment(
  * bare annotations/settings object with no windows) merge by index onto the
  * fresh segments, exactly as before.
  */
-export function mergeSavedProject(fresh: Project, saved: Partial<Project> | null | undefined): Project {
+export function mergeSavedProject(
+  fresh: Project,
+  saved: Partial<Project> | null | undefined,
+  segmentFacecamSrcs?: (string | null)[],
+): Project {
   if (!saved || typeof saved !== "object") return fresh;
   const media = (saved.media ?? {}) as Partial<Media>;
   const mediaDuration = fresh.media.duration;
@@ -234,7 +238,10 @@ export function mergeSavedProject(fresh: Project, saved: Partial<Project> | null
   let segments: Segment[];
   if (freshSeg && savedSegs.length > 0 && hasWindows) {
     const restored = savedSegs
-      .map((s) => restoreSegment(s, freshSeg, freshSeg.facecam.src, mediaDuration))
+      .map((s, i) => {
+        const segFcSrc = segmentFacecamSrcs ? segmentFacecamSrcs[i] ?? null : freshSeg.facecam.src;
+        return restoreSegment(s, freshSeg, segFcSrc, mediaDuration);
+      })
       .filter((s): s is Segment => s !== null);
     segments = restored.length > 0 ? restored : [mergeSegment(freshSeg, savedSegs[0])];
   } else {
