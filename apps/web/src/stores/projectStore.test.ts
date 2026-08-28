@@ -521,4 +521,26 @@ describe("segment split + selection", () => {
     expect(redone.media.src).toBe("blob:active-url");
     expect(redone.audioSrc).toBe("blob:active-audio");
   });
+
+  it("setCurrentTime updates selectedSegmentId to the active segment during playback", () => {
+    useProjectStore.getState().setProject(singleSegProject());
+    // Split at 5s -> Segment 1: [0, 5], Segment 2: [5, 10]
+    useProjectStore.getState().splitAt(5);
+    const p = useProjectStore.getState().project!;
+    const seg1Id = p.segments[0]!.id;
+    const seg2Id = p.segments[1]!.id;
+
+    // Start playback at 2s (in segment 1)
+    useProjectStore.getState().seek(2);
+    useProjectStore.getState().play();
+    expect(useProjectStore.getState().selectedSegmentId).toBe(seg1Id);
+
+    // Playback advances into segment 2 (at 7s)
+    useProjectStore.getState().setCurrentTime(7);
+    expect(useProjectStore.getState().selectedSegmentId).toBe(seg2Id);
+
+    // Seeking back to segment 1 updates selectedSegmentId
+    useProjectStore.getState().seek(3);
+    expect(useProjectStore.getState().selectedSegmentId).toBe(seg1Id);
+  });
 });

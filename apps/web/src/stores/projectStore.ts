@@ -412,8 +412,25 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           ? { isPlaying: false }
           : { isPlaying: true, ...rewindIfEnded(s) },
     ),
-  seek: (t) => set((s) => (s.exportProgress !== null ? {} : { currentTime: t, isPlaying: false })),
-  setCurrentTime: (t) => set({ currentTime: t }),
+  seek: (t) =>
+    set((s) => {
+      if (s.exportProgress !== null) return {};
+      const segId = s.project
+        ? (resolveSegment(s.project, t)?.segment.id ?? s.selectedSegmentId)
+        : s.selectedSegmentId;
+      return { currentTime: t, isPlaying: false, selectedSegmentId: segId };
+    }),
+  setCurrentTime: (t) => {
+    const s = get();
+    if (s.isPlaying && s.project) {
+      const r = resolveSegment(s.project, t);
+      if (r && r.segment.id !== s.selectedSegmentId) {
+        set({ currentTime: t, selectedSegmentId: r.segment.id });
+        return;
+      }
+    }
+    set({ currentTime: t });
+  },
 
   // ── Zoom — committed ──
 

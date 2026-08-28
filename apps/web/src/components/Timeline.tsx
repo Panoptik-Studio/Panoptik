@@ -112,14 +112,16 @@ export function Timeline() {
   const segSpeed = sel?.speed ?? 1;
   const canSpeed = selectedSegmentId !== null && exportProgress === null;
 
-  // splitAt leaves `selectedSegmentId` dangling when the selected segment is the
-  // one being split; repair it to the segment the playhead now sits in.
+  // Track and highlight the active segment under the playhead slider during playback
   useEffect(() => {
     if (!project) return;
-    if (selectedSegmentId && project.segments.some((s) => s.id === selectedSegmentId)) return;
-    const r = resolveSegment(project, currentTime);
-    if (r) selectSegment(r.segment.id);
-  }, [project, selectedSegmentId, currentTime, selectSegment]);
+    if (isPlaying || !selectedSegmentId || !project.segments.some((s) => s.id === selectedSegmentId)) {
+      const r = resolveSegment(project, currentTime);
+      if (r && r.segment.id !== selectedSegmentId) {
+        selectSegment(r.segment.id);
+      }
+    }
+  }, [project, selectedSegmentId, currentTime, isPlaying, selectSegment]);
 
   // Draw ruler + tracks onto canvas (lightweight, no DOM per tick)
   useEffect(() => {
@@ -130,6 +132,10 @@ export function Timeline() {
     c.width = canvasW;
     c.height = canvasH;
     ctx.clearRect(0, 0, canvasW, canvasH);
+
+    // Identify active segment under playhead
+    const activeSegId = project ? resolveSegment(project, currentTime)?.segment.id : null;
+    const highlightId = isPlaying ? (activeSegId ?? selectedSegmentId) : (selectedSegmentId ?? activeSegId);
 
     // Ruler bg
     ctx.fillStyle = "#fafafa";
@@ -164,7 +170,7 @@ export function Timeline() {
       const x0 = timeToX(acc);
       const x1 = timeToX(acc + d);
       const segW = Math.max(1, x1 - x0);
-      const selected = seg.id === selectedSegmentId;
+      const selected = seg.id === highlightId;
 
       // 1. Clip filmstrip to the rounded segment block so thumbnails stay neat
       ctx.save();
@@ -291,7 +297,7 @@ export function Timeline() {
         ctx.restore();
       }
     }
-  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedZoomId, thumbVersion, getThumbnail, timeToX]);
+  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (isDraggingPlayhead || draggingDiamond) return;
