@@ -41,7 +41,7 @@ export function getAudioSinkTrackId(): string | null {
   return audioTrackId;
 }
 
-async function decodeViaAudioContext(blob: Blob): Promise<AudioBuffer | null> {
+export async function decodeViaAudioContext(blob: Blob): Promise<AudioBuffer | null> {
   try {
     const arrayBuf = await blob.arrayBuffer();
     // Prefer AudioContext.decodeAudioData (uses browser's media stack, same as <audio>)

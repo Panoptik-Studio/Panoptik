@@ -213,9 +213,49 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
     let spedAudioBuffer: AudioBuffer | null = audioBuffer;
     if (audioBuffer) {
       try {
-        const parts = project.segments.map((seg) => sliceAndStretchAudio(audioBuffer, seg));
-        spedAudioBuffer = concatAudio(parts);
-        console.log("[Export] per-segment audio windows", { parts: parts.length, from: audioBuffer.duration.toFixed(2), to: spedAudioBuffer.duration.toFixed(2), segments: project.segments.map((s) => `${s.srcStart}-${s.srcEnd}@${s.speed}x`) });
+        const audioBufferCache = new Map<string, AudioBuffer | null>();
+        audioBufferCache.set("default", audioBuffer);
+        const { decodeViaAudioContext } = await import("./audio");
+
+        const parts: AudioBuffer[] = [];
+        for (const seg of project.segments) {
+          const segSrc = seg.facecam?.src || project.audioSrc || project.media.src;
+          let buf = audioBuffer;
+          if (segSrc && audioBufferCache.has(segSrc)) {
+            buf = audioBufferCache.get(segSrc) || audioBuffer;
+          } else if (segSrc && segSrc.startsWith("blob:")) {
+            try {
+              const res = await fetch(segSrc);
+              const blob = await res.blob();
+              const decoded = await decodeViaAudioContext(blob);
+              audioBufferCache.set(segSrc, decoded || audioBuffer);
+              buf = decoded || audioBuffer;
+            } catch {
+              audioBufferCache.set(segSrc, audioBuffer);
+            }
+          }
+
+          const fcStartT = seg.facecam?.startT ?? 0;
+          const sliceSeg =
+            fcStartT > 0
+              ? {
+                  ...seg,
+                  srcStart: Math.max(0, seg.srcStart - fcStartT),
+                  srcEnd: Math.max(0, seg.srcEnd - fcStartT),
+                }
+              : seg;
+          parts.push(sliceAndStretchAudio(buf, sliceSeg));
+        }
+
+        if (parts.length > 0) {
+          spedAudioBuffer = concatAudio(parts);
+        }
+        console.log("[Export] per-segment audio windows", {
+          parts: parts.length,
+          from: audioBuffer.duration.toFixed(2),
+          to: spedAudioBuffer ? spedAudioBuffer.duration.toFixed(2) : "0",
+          segments: project.segments.map((s) => `${s.srcStart}-${s.srcEnd}@${s.speed}x`),
+        });
       } catch (e) {
         console.warn("[Export] audio time-stretch failed, using original", e);
         spedAudioBuffer = audioBuffer;
