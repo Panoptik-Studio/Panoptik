@@ -224,7 +224,9 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     }
   }
 
-  if (layout !== "screenOnly" && microphoneEnabled) {
+  // Narration is wanted for every layout, including screen-only — the mic is
+  // not tied to the camera.
+  if (microphoneEnabled) {
     const micTrack = await openMicrophoneTrack(microphoneDeviceId);
     if (micTrack) {
       facecamStream.addTrack(micTrack);

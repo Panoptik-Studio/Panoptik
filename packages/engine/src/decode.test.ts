@@ -9,15 +9,23 @@ vi.mock("mediabunny", () => {
   return {
     ALL_FORMATS: "all",
     BlobSource: vi.fn().mockImplementation((f: File) => ({ file: f })),
-    Input: vi.fn().mockImplementation(() => ({
-      getPrimaryVideoTrack: vi.fn().mockResolvedValue({
-        canDecode: vi.fn().mockResolvedValue(true),
-        computeDuration: vi.fn().mockResolvedValue(10),
-        getDisplayWidth: vi.fn().mockResolvedValue(1920),
-        getDisplayHeight: vi.fn().mockResolvedValue(1080),
-      }),
-      dispose: vi.fn(),
-    })),
+    AudioBufferSink: vi.fn().mockImplementation((track: { id: string }) => ({ track })),
+    Input: vi.fn().mockImplementation((opts: { source: { file: { name?: string } } }) => {
+      const name = opts?.source?.file?.name ?? "";
+      return {
+        getPrimaryVideoTrack: vi.fn().mockResolvedValue({
+          canDecode: vi.fn().mockResolvedValue(true),
+          computeDuration: vi.fn().mockResolvedValue(10),
+          getDisplayWidth: vi.fn().mockResolvedValue(1920),
+          getDisplayHeight: vi.fn().mockResolvedValue(1080),
+        }),
+        // Only the file standing in for the camera recording carries the mic.
+        getPrimaryAudioTrack: vi.fn().mockResolvedValue(
+          name.includes("mic") ? { id: "mic-track", canDecode: vi.fn().mockResolvedValue(true) } : null,
+        ),
+        dispose: vi.fn(),
+      };
+    }),
     CanvasSink: vi.fn().mockImplementation(() => ({
       // Yields frames on an FPS grid starting at the frame covering `start`.
       canvases: (start = 0) => {
@@ -132,5 +140,40 @@ describe("decode", () => {
     await prepareFrame(8);
     expect(stats.seeks).toBe(1);
     expect(stats.framesDecoded).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("audio routing", () => {
+  const silentScreen = () => new File([new Uint8Array(2048)], "screen.webm", { type: "video/webm" });
+  const micRecording = () => new File([new Uint8Array(2048)], "mic-camera.webm", { type: "video/webm" });
+
+  it("a screen recording on its own has no audio", async () => {
+    const { loadClip } = await loadFresh();
+    const { getAudioSinkTrackId } = await import("./audio");
+    await loadClip(silentScreen());
+    // getDisplayMedia captures with audio:false, so this is expected...
+    expect(getAudioSinkTrackId()).toBeNull();
+  });
+
+  it("takes audio from the camera recording, where the mic actually is", async () => {
+    const mod = await loadFresh();
+    const { getAudioSinkTrackId } = await import("./audio");
+    await mod.loadClip(silentScreen());
+    // ...and this is the step that was missing: narration was recorded into the
+    // camera blob and then never read back.
+    await mod.setAudioBlob(micRecording());
+    expect(getAudioSinkTrackId()).toBe("mic-track");
+  });
+
+  it("does not leak one take's audio into the next", async () => {
+    const mod = await loadFresh();
+    const { getAudioSinkTrackId } = await import("./audio");
+    await mod.loadClip(silentScreen());
+    await mod.setAudioBlob(micRecording());
+    expect(getAudioSinkTrackId()).toBe("mic-track");
+
+    // Importing a silent clip afterwards must not keep playing the old mic.
+    await mod.loadClip(silentScreen());
+    expect(getAudioSinkTrackId()).toBeNull();
   });
 });

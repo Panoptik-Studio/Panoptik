@@ -9,17 +9,26 @@ import type { Project } from "@panoptik/schema";
 import { AudioBufferSink, type InputAudioTrack } from "mediabunny";
 
 let audioSink: AudioBufferSink | null = null;
+let audioTrackId: string | null = null;
 
 export function setAudioSink(track: InputAudioTrack | null) {
   if (!track) {
     audioSink = null;
+    audioTrackId = null;
     return;
   }
   try {
     audioSink = new AudioBufferSink(track);
+    audioTrackId = (track as unknown as { id?: string }).id ?? "audio";
   } catch {
     audioSink = null;
+    audioTrackId = null;
   }
+}
+
+/** Which track the audio is currently coming from. Exposed for tests. */
+export function getAudioSinkTrackId(): string | null {
+  return audioTrackId;
 }
 
 export async function getAudioBuffer(_project: Project): Promise<AudioBuffer | null> {

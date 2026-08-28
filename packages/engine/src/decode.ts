@@ -54,6 +54,35 @@ let desiredTime = 0;
 let pump: Promise<void> | null = null;
 let facecamUrl: string | null = null;
 
+let audioInput: Input | null = null;
+
+/**
+ * Take the project's audio from a different file than its video.
+ *
+ * A screen recording is captured with `audio: false` — the microphone is muxed
+ * into the camera recording instead. Without this the audio sink would be read
+ * from the screen file, which never has an audio track, so narration was
+ * recorded and then silently dropped on import.
+ */
+export async function setAudioBlob(blob: Blob | null): Promise<void> {
+  if (audioInput) {
+    try {
+      audioInput.dispose();
+    } catch {
+      /* already disposed */
+    }
+    audioInput = null;
+  }
+  if (!blob || blob.size === 0) return;
+  try {
+    audioInput = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
+    const track = await audioInput.getPrimaryAudioTrack();
+    if (track && (await track.canDecode())) setAudioSink(track);
+  } catch {
+    /* keep whatever the clip itself provided */
+  }
+}
+
 /**
  * Mint the facecam's object URL here so teardown can revoke it alongside the
  * clip's — otherwise every re-import pins another full recording in memory.
@@ -263,6 +292,14 @@ async function teardown(): Promise<void> {
   setCurrentFrame(null);
   setAudioSink(null);
   setFacecamBlob(null);
+  if (audioInput) {
+    try {
+      audioInput.dispose();
+    } catch {
+      /* already disposed */
+    }
+    audioInput = null;
+  }
   if (objectUrl) {
     URL.revokeObjectURL(objectUrl);
     objectUrl = null;

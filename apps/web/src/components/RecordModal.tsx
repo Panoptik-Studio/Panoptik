@@ -446,10 +446,16 @@ export function RecordModal() {
         throw new Error(`Camera recording is empty (${facecamBlob.size} bytes). Check camera permissions.`);
       }
       const { engine } = await import("@/lib/engineProvider");
+      const hasFacecamMedia = facecamBlob.size > 0;
       const project = await engine.loadRecording(
         layout === "cameraOnly" ? facecamBlob : screenBlob,
-        layout === "screenAndCamera" && facecamBlob.size > 0 ? facecamBlob : null,
-        null,
+        // Only a screen+camera take gets a picture-in-picture.
+        layout === "screenAndCamera" && hasFacecamMedia ? facecamBlob : null,
+        // The mic is muxed into the camera recording for every layout, so that
+        // is where the narration lives — including a screen-only take, whose
+        // "facecam" blob is audio with no video. cameraOnly already has it in
+        // the clip itself.
+        layout !== "cameraOnly" && hasFacecamMedia ? facecamBlob : null,
       );
       // Carry the chosen shape and corner through to the composed frame, so the
       // exported video puts the camera where the recorder UI said it would.

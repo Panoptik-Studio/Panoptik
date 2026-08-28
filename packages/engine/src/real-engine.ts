@@ -8,6 +8,7 @@ import type { MediaEngine } from "./index";
 import {
   loadClip as decodeLoadClip,
   prepareFrame as decodePrepareFrame,
+  setAudioBlob,
   setFacecamBlob,
 } from "./decode";
 import { renderFrame } from "./render";
@@ -27,7 +28,7 @@ export function createRealEngine(): MediaEngine {
     renderFrame(ctx, project, t) {
       renderFrame(ctx, project, t);
     },
-    async loadRecording(screen: Blob, facecam: Blob | null, _audio: Blob | null): Promise<Project> {
+    async loadRecording(screen: Blob, facecam: Blob | null, audio: Blob | null): Promise<Project> {
       // Capture/ingest boundary: B's record.ts captures blobs, we demux screen blob as clip.
       const screenFile = new File([screen], "screen.webm", { type: screen.type || "video/webm" });
       const proj = await decodeLoadClip(screenFile);
@@ -35,6 +36,9 @@ export function createRealEngine(): MediaEngine {
       // facecam URL and drops its cached <video>.
       const facecamSrc = setFacecamBlob(facecam);
       if (facecamSrc) proj.facecam.src = facecamSrc;
+      // The screen track is captured silently; the microphone rides along with
+      // the camera recording, so the audio has to be read from there.
+      if (audio) await setAudioBlob(audio);
       await decodePrepareFrame(0);
       return proj;
     },
