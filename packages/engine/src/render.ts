@@ -548,42 +548,46 @@ function drawFacecam(
 
   if (effectiveSize <= 0.001 || opacity <= 0.01) return;
 
-  const activeSrc = decodedFacecamSrc?.() ?? null;
-  const isDecodedSourceMatch = !activeSrc || fc.src === activeSrc;
+  let source: CanvasImageSource | null = null;
+  let aspect = 16 / 9;
 
-  // Prefer the decoded camera frame when the segment matches the decoded take.
-  let source: CanvasImageSource | null = isDecodedSourceMatch ? decodedFacecam?.() ?? null : null;
-  let aspect = source ? decodedFacecamAspect?.() ?? 16 / 9 : 16 / 9;
+  const video = getFacecamVideo(fc.src);
+  if (video) {
+    const dur = video.duration;
+    const target = Number.isFinite(dur) && dur > 0 ? Math.min(facecamT, dur - 1e-3) : facecamT;
 
+    if (isPlaying) {
+      if (video.paused) {
+        video.currentTime = target;
+        video.play().catch(() => {});
+      } else if (Math.abs(video.currentTime - target) > 0.3) {
+        video.currentTime = target;
+      }
+      if (speed && video.playbackRate !== speed) {
+        video.playbackRate = speed;
+      }
+    } else {
+      if (!video.paused) {
+        video.pause();
+      }
+      if (!video.seeking && Math.abs(video.currentTime - target) > 0.05) {
+        video.currentTime = target;
+      }
+    }
+
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      source = video;
+      aspect = video.videoWidth / video.videoHeight;
+    }
+  }
+
+  // Fallback to decoded frame source (used during export / headless mode)
   if (!source) {
-    const video = getFacecamVideo(fc.src);
-    if (video) {
-      const dur = video.duration;
-      const target = Number.isFinite(dur) && dur > 0 ? Math.min(facecamT, dur - 1e-3) : facecamT;
-
-      if (isPlaying) {
-        if (video.paused) {
-          video.currentTime = target;
-          video.play().catch(() => {});
-        } else if (Math.abs(video.currentTime - target) > 0.3) {
-          video.currentTime = target;
-        }
-        if (speed && video.playbackRate !== speed) {
-          video.playbackRate = speed;
-        }
-      } else {
-        if (!video.paused) {
-          video.pause();
-        }
-        if (!video.seeking && Math.abs(video.currentTime - target) > 0.05) {
-          video.currentTime = target;
-        }
-      }
-
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        source = video;
-        aspect = video.videoWidth / video.videoHeight;
-      }
+    const activeSrc = decodedFacecamSrc?.() ?? null;
+    const isDecodedSourceMatch = !activeSrc || fc.src === activeSrc;
+    if (isDecodedSourceMatch) {
+      source = decodedFacecam?.() ?? null;
+      aspect = source ? decodedFacecamAspect?.() ?? 16 / 9 : 16 / 9;
     }
   }
 
