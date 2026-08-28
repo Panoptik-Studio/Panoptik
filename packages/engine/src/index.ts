@@ -11,6 +11,8 @@ import type { ExportOpts, Project } from "@panoptik/schema";
 export interface MediaEngine {
   /** Seek + decode the frame at `t` into an internal cache. Call before renderFrame. */
   prepareFrame(t: number): Promise<void>;
+  /** Decode clip + facecam together for a complete frame. */
+  prepareAllFrames(t: number): Promise<void>;
   /** Sync draw of cached frame + full composition. Preview and export share this. */
   renderFrame(ctx: CanvasRenderingContext2D, project: Project, t: number): void;
   loadClip(file: File): Promise<Project>;

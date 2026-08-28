@@ -30,6 +30,9 @@ export function createRealEngine(): MediaEngine {
       // camera pixels over a fresh screen.
       return prepareAllFrames(t);
     },
+    async prepareAllFrames(t: number): Promise<void> {
+      return prepareAllFrames(t);
+    },
     renderFrame(ctx, project, t) {
       renderFrame(ctx, project, t);
     },
