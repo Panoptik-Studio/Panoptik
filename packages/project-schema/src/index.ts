@@ -43,26 +43,81 @@ export type ClickEvent = {
 /** "source" keeps the clip's own shape, so nothing is letterboxed. */
 export type AspectPreset = "source" | "16:9" | "9:16" | "1:1" | "4:3";
 
-export type Project = {
+export type Media = { src: string; duration: number; width: number; height: number };
+
+export type Segment = {
   id: string;
-  clip: { src: string; duration: number; width: number; height: number };
-  /**
-   * Where the audio lives, when that is not the clip itself. A screen recording
-   * is captured silently and the microphone is muxed into the camera take, so
-   * playback has to read audio from there.
-   */
-  audioSrc?: string | null;
-  zoomPoints: ZoomPoint[]; // committed — THE ONLY input to the camera transform
-  stagedZoomPoints: ZoomPoint[]; // ghosts
+  srcStart: number;
+  srcEnd: number;
+  speed: number;
+  stagePadding: number;
+  aspectPreset: AspectPreset;
+  background: Background;
+  facecam: Facecam;
+  zoomPoints: ZoomPoint[];
+  stagedZoomPoints: ZoomPoint[];
   textOverlays: TextOverlay[];
   stagedTextOverlays: TextOverlay[];
   captions: Caption[];
   stagedCaptions: Caption[];
-  background: Background;
-  facecam: Facecam;
-  clickLog: ClickEvent[];
-  aspectPreset: AspectPreset;
 };
+
+export type Project = {
+  id: string;
+  media: Media;
+  audioSrc?: string | null;
+  segments: Segment[];
+  clickLog: ClickEvent[];
+};
+
+export function migrateProject(raw: unknown): Project {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  if (Array.isArray(r.segments) && r.media && typeof r.media === "object") {
+    return raw as Project; // already v1.2
+  }
+  const clip = (r.clip ?? {}) as Record<string, unknown>;
+  const media: Media = {
+    src: String(clip.src ?? ""),
+    duration: num(clip.duration, 0),
+    width: num(clip.width, 1920),
+    height: num(clip.height, 1080),
+  };
+  const fc = (r.facecam ?? {}) as Record<string, unknown>;
+  const baseZoom = (r.zoomPoints ?? []) as ZoomPoint[];
+  const seg: Segment = {
+    id: "s1",
+    srcStart: 0,
+    srcEnd: media.duration,
+    speed: num(r.playbackRate, 1, 0.25, 3),
+    stagePadding: num(r.stagePadding, 0, 0, 48),
+    aspectPreset: (r.aspectPreset as AspectPreset) ?? "source",
+    background: (r.background as Background) ?? { kind: "solid", color: "#000000" },
+    facecam: {
+      src: fc.src ? String(fc.src) : null,
+      x: num(fc.x, 0.8, 0, 1),
+      y: num(fc.y, 0.8, 0, 1),
+      size: num(fc.size, 0.2, 0.02, 1),
+      shape: fc.shape === "circle" || fc.shape === "square" ? (fc.shape as Facecam["shape"]) : "square",
+    },
+    zoomPoints: baseZoom.map((z) => ({ ...z })),
+    stagedZoomPoints: ((r.stagedZoomPoints ?? []) as ZoomPoint[]).map((z) => ({ ...z })),
+    textOverlays: ((r.textOverlays ?? []) as TextOverlay[]).map((o) => ({ ...o })),
+    stagedTextOverlays: ((r.stagedTextOverlays ?? []) as TextOverlay[]).map((o) => ({ ...o })),
+    captions: ((r.captions ?? []) as Caption[]).map((c) => ({ ...c })),
+    stagedCaptions: ((r.stagedCaptions ?? []) as Caption[]).map((c) => ({ ...c })),
+  };
+  return {
+    id: String(r.id ?? crypto.randomUUID()),
+    media,
+    audioSrc: r.audioSrc ? String(r.audioSrc) : null,
+    segments: [seg],
+    clickLog: ((r.clickLog ?? []) as ClickEvent[]).map((e) => ({ ...e })),
+  };
+}
+
+function num(v: unknown, fallback: number, min = -Infinity, max = Infinity): number {
+  return typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+}
 
 export type ExportOpts = {
   format: "mp4" | "webm";
