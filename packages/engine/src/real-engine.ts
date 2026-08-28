@@ -86,11 +86,22 @@ export function createRealEngine(): MediaEngine {
         return proj.segments[0]?.facecam.src ?? null;
       });
 
-      // project.json is same-origin but not something we produced this session,
-      // so its values are validated before they reach the renderer. The saved
-      // edits (annotations, settings) are re-applied per-segment over the
-      // freshly re-opened media.
-      return mergeSavedProject(proj, saved.project, segmentFacecamSrcs);
+      // Background images come back as blobs and get fresh object URLs here.
+      // sanitize rejects the src stored in JSON, so this is the only way one
+      // reaches the renderer.
+      // One URL per distinct blob: segments that shared an image on save come
+      // back sharing the same Blob, and should share its URL too.
+      const urlForBlob = new Map<Blob, string>();
+      const backgroundImageUrls = (saved.backgroundImages ?? []).map((blob) => {
+        if (!blob) return null;
+        let url = urlForBlob.get(blob);
+        if (!url) {
+          url = URL.createObjectURL(blob);
+          urlForBlob.set(blob, url);
+        }
+        return url;
+      });
+      return mergeSavedProject(proj, saved.project, segmentFacecamSrcs, backgroundImageUrls);
     },
     async getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
       return audioGetBuffer(project);

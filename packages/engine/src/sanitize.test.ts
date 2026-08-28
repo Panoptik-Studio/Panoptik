@@ -44,6 +44,49 @@ describe("mergeSavedProject", () => {
     expect(out.segments[0]!.facecam.x).toBeCloseTo(0.1);
   });
 
+  it("takes an image background's source from storage, never from the JSON", () => {
+    // Same rule as every other media source. The src in project.json is a dead
+    // object URL after a reload, and a hand-edited file could point it anywhere,
+    // so the only accepted value is the one minted from the blob read back out
+    // of OPFS and passed in here.
+    const out = mergeSavedProject(
+      fresh(),
+      {
+        segments: [{ background: { kind: "image", src: "https://attacker.example/track.png", fit: "cover" } }],
+      } as unknown as Partial<Project>,
+      ["blob:restored-bg"],
+    );
+    expect(out.segments[0]!.background).toEqual({
+      kind: "image",
+      src: "blob:restored-bg",
+      fit: "cover",
+    });
+  });
+
+  it("drops an image background when its file is gone", () => {
+    // Nothing was restored for this segment, so there is no legitimate source.
+    // Falling back beats rendering a placeholder fill for the whole video.
+    const out = mergeSavedProject(
+      fresh(),
+      {
+        segments: [{ background: { kind: "image", src: "blob:long-gone", fit: "cover" } }],
+      } as unknown as Partial<Project>,
+      [null],
+    );
+    expect(out.segments[0]!.background.kind).not.toBe("image");
+  });
+
+  it("only accepts the two known image fits", () => {
+    const out = mergeSavedProject(
+      fresh(),
+      {
+        segments: [{ background: { kind: "image", src: "x", fit: "url(evil)" } }],
+      } as unknown as Partial<Project>,
+      ["blob:restored-bg"],
+    );
+    expect(out.segments[0]!.background).toMatchObject({ fit: "cover" });
+  });
+
   it("rejects colours that are not plain hex", () => {
     // These land in an inline CSS gradient in the preview, where url() fetches.
     for (const bad of [

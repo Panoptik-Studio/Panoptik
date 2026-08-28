@@ -131,6 +131,52 @@ export async function saveProject(
     }
   };
 
+  // ── Background images ──
+  //
+  // Deliberately above the includeMedia gate. Media is only copied on a
+  // project's first save, but a background is picked long after that, so
+  // gating these behind it meant a chosen image was never stored and quietly
+  // vanished on reload.
+  //
+  // One file per distinct source, not per segment: applying one image to every
+  // clip would otherwise store the same picture once per segment. Files whose
+  // segment no longer uses an image are removed, so switching back to a colour
+  // does not leave the picture behind forever.
+  const bgFileFor = new Map<string, number>();
+  for (let i = 0; i < project.segments.length; i++) {
+    const bg = project.segments[i]?.background;
+    const name = `bg-${i}.bin`;
+    const isOwnCopy = bg?.kind === "image" && bg.src.startsWith("blob:") && !bgFileFor.has(bg.src);
+
+    if (!isOwnCopy) {
+      // Either not an image any more, or a duplicate of one already written.
+      await projectDir.removeEntry(name).catch(() => {});
+      continue;
+    }
+    const src = (bg as { src: string }).src;
+    try {
+      const blob = await (await fetch(src)).blob();
+      // Autosave runs on a debounce during editing; rewriting a large picture
+      // every time would thrash OPFS for no gain. Size is enough to tell an
+      // unchanged file from a newly chosen one.
+      const existing = await projectDir
+        .getFileHandle(name)
+        .then((h) => h.getFile())
+        .catch(() => null);
+      if (!existing || existing.size !== blob.size) {
+        const handle = await projectDir.getFileHandle(name, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      }
+      bgFileFor.set(src, i);
+    } catch {
+      /* the URL was revoked before the save ran; it falls back on load */
+    }
+  }
+
+  if (!includeMedia) return;
+
   // Save clip blob if it's a blob URL
   if (project.media.src.startsWith("blob:")) {
     if (includeMedia) {
@@ -157,6 +203,8 @@ export async function loadProjectRecord(id: string): Promise<{
   audio: Blob | null;
   facecamTakes?: Map<string, Blob>;
   segmentFacecamTakes?: (string | null)[];
+  /** Per-segment background image, index-aligned with project.segments. */
+  backgroundImages?: (Blob | null)[];
   history?: Project[];
   historyIndex?: number;
 } | null> {
@@ -174,12 +222,10 @@ export async function loadProjectRecord(id: string): Promise<{
       const histJson = await (await (await dir.getFileHandle("history.json")).getFile()).text();
       const parsed = JSON.parse(histJson);
       if (Array.isArray(parsed.history)) {
-        const hist = parsed.history.map(migrateProject);
-        history = hist;
-        historyIndex =
-          typeof parsed.historyIndex === "number"
-            ? parsed.historyIndex
-            : hist.length - 1;
+        history = parsed.history.map((h: unknown) => migrateProject(h));
+      }
+      if (typeof parsed.historyIndex === "number") {
+        historyIndex = parsed.historyIndex;
       }
     } catch {
       /* history file is optional */
@@ -216,6 +262,37 @@ export async function loadProjectRecord(id: string): Promise<{
       facecamTakes.set("facecam.webm", primaryFacecamBlob);
     }
 
+    // Indexed to match project.segments, so a restored background lands on the
+    // segment it belonged to. Segments that shared one image share one stored
+    // file, so they resolve to the first segment that used it — and to the same
+    // Blob object, which lets the caller mint a single URL for all of them.
+    const imageSrcOf = (i: number): string | null => {
+      const bg = project.segments[i]?.background;
+      return bg?.kind === "image" ? bg.src : null;
+    };
+    const fileCache = new Map<number, Blob | null>();
+    const readOnce = async (i: number): Promise<Blob | null> => {
+      if (!fileCache.has(i)) fileCache.set(i, await read(`bg-${i}.bin`));
+      return fileCache.get(i) ?? null;
+    };
+
+    const backgroundImages: (Blob | null)[] = [];
+    for (let i = 0; i < project.segments.length; i++) {
+      const src = imageSrcOf(i);
+      if (!src) {
+        backgroundImages.push(null);
+        continue;
+      }
+      let owner = i;
+      for (let j = 0; j < i; j++) {
+        if (imageSrcOf(j) === src) {
+          owner = j;
+          break;
+        }
+      }
+      backgroundImages.push(await readOnce(owner));
+    }
+
     return {
       project,
       media: await read("clip.webm"),
@@ -223,6 +300,7 @@ export async function loadProjectRecord(id: string): Promise<{
       audio: await read("audio.webm"),
       facecamTakes,
       segmentFacecamTakes,
+      backgroundImages,
       history,
       historyIndex,
     };

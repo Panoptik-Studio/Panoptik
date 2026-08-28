@@ -21,7 +21,7 @@ import { registerAacEncoder } from "@mediabunny/aac-encoder";
 import type { ExportOpts, Project } from "@panoptik/schema";
 import { presetAspect } from "./layout";
 import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator } from "./decode";
-import { renderFrame } from "./render";
+import { ensureBackgroundImages, renderFrame } from "./render";
 import { applyVolume, concatAudio, mixAudio, sliceAndStretchAudio } from "./timeStretch";
 import { projectDuration, segmentDuration } from "./timeline";
 
@@ -99,7 +99,12 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
   if (typeof window !== "undefined") (window as unknown as { __isExporting?: boolean }).__isExporting = true;
   // Reset sequential iterator so a second export starts from 0, not EOS.
   try {
-    await resetExportIterator();
+    // Image backgrounds decode up front. renderFrame is synchronous, so an image
+  // that is not ready by the time the loop starts would be missing from the
+  // exported frames while still showing in the preview.
+  await ensureBackgroundImages(project);
+
+  await resetExportIterator();
     // The camera has its own iterator and must rewind with the screen.
     await resetFacecamExportIterator();
   } catch { /* ignore */ }

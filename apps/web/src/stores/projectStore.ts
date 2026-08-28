@@ -53,7 +53,18 @@ function pushHistoryAndSet(
   set: (partial: Partial<ProjectStore>) => void,
   extra: Partial<ProjectStore> = {},
 ): void {
+  // A staged theme is visible but not approved, so it must not ride into
+  // history on an unrelated commit — that is what silently turned a previewed
+  // theme into the one Discard later restored.
+  const pre = (extra.preStageBackgrounds ?? state.preStageBackgrounds) as
+    | Record<string, Background>
+    | undefined;
   const snap = structuredClone(project);
+  if (pre && Object.keys(pre).length > 0) {
+    snap.segments = snap.segments.map((seg) =>
+      pre[seg.id] ? { ...seg, background: pre[seg.id]! } : seg,
+    );
+  }
   const history = [
     ...state.history.slice(0, state.historyIndex + 1),
     snap,
@@ -105,6 +116,17 @@ interface ProjectStore {
   selectedSegmentIds: string[];
   selectedZoomId: string | null;
   pendingBackgroundBadge: boolean;
+  /**
+   * Background each segment had before the current staged theme, by segment id.
+   *
+   * The background is the one staged edit with nowhere to live: zooms, text and
+   * captions each have their own staged* array, while a theme is written
+   * straight onto the committed field with only a badge to say it is pending.
+   * Without a record of what it replaced, Discard had to guess from history —
+   * and any unrelated commit in between would bake the unapproved theme in.
+   * Transient: never written to storage.
+   */
+  preStageBackgrounds: Record<string, Background>;
   whisperProgress: number | null; // null = idle, -1 = transcribing, 0-100 = model loading
   /** 0..1 while an export runs, null when idle. Non-null locks the editor. */
   exportProgress: number | null;
@@ -217,6 +239,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   selectedSegmentIds: [],
   selectedZoomId: null,
   pendingBackgroundBadge: false,
+  preStageBackgrounds: {},
   whisperProgress: null,
   exportProgress: null,
   persistStatus: "idle",
@@ -268,6 +291,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       isPlaying: false,
       selectedZoomId: null,
       pendingBackgroundBadge: false,
+  preStageBackgrounds: {},
       selectedSegmentId: firstSegId,
       selectedSegmentIds: firstSegId ? [firstSegId] : [],
     });
@@ -286,6 +310,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       selectedSegmentId: null,
       selectedSegmentIds: [],
       pendingBackgroundBadge: false,
+  preStageBackgrounds: {},
       exportProgress: null,
     }),
 
@@ -717,13 +742,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         idSet.has(seg.id) ? { ...seg, background: bg } : seg,
       ),
     };
-    pushHistoryAndSet(project, state, set, { pendingBackgroundBadge: false });
+    pushHistoryAndSet(project, state, set, {
+      pendingBackgroundBadge: false,
+      preStageBackgrounds: {},
+    });
   },
 
   stageBackground: (bg) => {
     const state = get();
     if (!state.project || state.selectedSegmentIds.length === 0) return;
     const idSet = new Set(state.selectedSegmentIds);
+    // Remember what each segment looked like before the first staged theme, so
+    // Discard can put it back exactly. Restaging keeps the original entry.
+    const preStageBackgrounds = { ...state.preStageBackgrounds };
+    for (const seg of state.project.segments) {
+      if (idSet.has(seg.id) && !(seg.id in preStageBackgrounds)) {
+        preStageBackgrounds[seg.id] = seg.background;
+      }
+    }
     const project = {
       ...state.project,
       segments: state.project.segments.map((seg) =>
@@ -731,7 +767,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       ),
     };
     // Staged background applies immediately to visual + sets badge
-    set({ project, pendingBackgroundBadge: true });
+    set({ project, pendingBackgroundBadge: true, preStageBackgrounds });
   },
 
   // ── Staging diff ──
@@ -789,41 +825,38 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       stagedCaptions: [],
     }));
     if (!project) return;
-    pushHistoryAndSet(project, state, set, { pendingBackgroundBadge: false });
+    // The staged theme is the committed one now, so it must reach history.
+    pushHistoryAndSet(project, state, set, {
+      pendingBackgroundBadge: false,
+      preStageBackgrounds: {},
+    });
   },
 
   clearStaged: () => {
     const state = get();
     if (!state.project || !state.selectedSegmentId) return;
-    // Revert background to last committed if pending
-    let revertedBg = selectedSegment(state)?.background;
-    if (
-      state.pendingBackgroundBadge &&
-      state.historyIndex >= 0 &&
-      state.history[state.historyIndex]
-    ) {
-      const histSeg = state.history[state.historyIndex]!.segments.find(
-        (seg) => seg.id === state.selectedSegmentId,
-      );
-      if (histSeg) revertedBg = histSeg.background;
-    }
+    const pre = state.preStageBackgrounds;
     const project = {
       ...state.project,
-      segments: state.project.segments.map((seg) =>
-        seg.id === state.selectedSegmentId
-          ? {
-              ...seg,
-              stagedZoomPoints: [],
-              stagedTextOverlays: [],
-              stagedCaptions: [],
-              ...(revertedBg !== undefined
-                ? { background: revertedBg }
-                : {}),
-            }
-          : seg,
-      ),
+      segments: state.project.segments.map((seg) => {
+        // Every segment carrying a staged theme goes back, not only the one
+        // currently selected: a theme can be staged across a multi-clip
+        // selection, or staged on one clip and discarded from another, and
+        // both used to leave the unapproved theme applied for good.
+        const background = seg.id in pre ? pre[seg.id]! : seg.background;
+        if (seg.id !== state.selectedSegmentId) {
+          return background === seg.background ? seg : { ...seg, background };
+        }
+        return {
+          ...seg,
+          background,
+          stagedZoomPoints: [],
+          stagedTextOverlays: [],
+          stagedCaptions: [],
+        };
+      }),
     };
-    set({ project, pendingBackgroundBadge: false });
+    set({ project, pendingBackgroundBadge: false, preStageBackgrounds: {} });
   },
 
   // ── Undo / redo ──
