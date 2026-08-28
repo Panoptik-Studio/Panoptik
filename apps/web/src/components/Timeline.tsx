@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
+import { useTimelineThumbnails } from "@/lib/useTimelineThumbnails";
 import {
   segmentDuration,
   projectDuration,
@@ -22,6 +23,32 @@ const DIAMOND_SIZE = 10;
 const SHELL_MIN_H = 140;
 const SHELL_MAX_H = 420;
 const SHELL_DEFAULT_H = 220;
+
+function drawRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, y, w, h, radius);
+  } else {
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + w - radius, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+    ctx.lineTo(x + w, y + h - radius);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    ctx.lineTo(x + radius, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  }
+}
 
 function fmtTime(t: number): string {
   const m = Math.floor(t / 60);
@@ -57,6 +84,11 @@ export function Timeline() {
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
   const exportProgress = useProjectStore((s) => s.exportProgress);
   const [showSpeed, setShowSpeed] = useState(false);
+
+  const { getThumbnail, version: thumbVersion } = useTimelineThumbnails(
+    project?.media?.src,
+    project?.media?.duration,
+  );
 
   // On-timeline duration across all segments.
   const duration = project ? Math.max(projectDuration(project), 0.001) : 0.001;
@@ -118,34 +150,114 @@ export function Timeline() {
     }
 
     // Segment filmstrip blocks
+    const TRACK_Y = 36;
     let acc = 0;
     for (const seg of project?.segments ?? []) {
       const d = segmentDuration(seg);
       const x0 = timeToX(acc);
       const x1 = timeToX(acc + d);
+      const segW = Math.max(1, x1 - x0);
       const selected = seg.id === selectedSegmentId;
-      ctx.fillStyle = selected ? "rgba(0,112,243,0.10)" : "#f2f2f2";
-      ctx.fillRect(x0 + 4, 36, Math.max(1, x1 - x0 - 8), TRACK_HEIGHT);
-      ctx.strokeStyle = selected ? "#0070f3" : "#d4d4d4";
-      ctx.strokeRect(x0 + 0.5, 36, x1 - x0, TRACK_HEIGHT);
-      // filmstrip placeholder tiles (real frame thumbnails are a follow-up)
-      const T = Math.max(1, Math.floor((x1 - x0) / 24));
-      ctx.fillStyle = "#1a1a1a";
-      for (let i = 0; i < T; i++) {
-        const cx = x0 + (i + 0.5) * ((x1 - x0) / T);
-        ctx.fillRect(cx - 4, 40, 8, 28);
+
+      // 1. Clip filmstrip to the rounded segment block so thumbnails stay neat
+      ctx.save();
+      drawRoundRect(ctx, x0, TRACK_Y, segW, TRACK_HEIGHT, 4);
+      ctx.clip();
+
+      // Base background
+      ctx.fillStyle = "#f0f2f5";
+      ctx.fillRect(x0, TRACK_Y, segW, TRACK_HEIGHT);
+
+      // Tile thumbnails across the segment
+      const tileH = TRACK_HEIGHT;
+      const tileW = 54; // ~16:9 proportion for 36px height
+      const numTiles = Math.max(1, Math.ceil(segW / tileW));
+
+      for (let i = 0; i < numTiles; i++) {
+        const tx = x0 + i * tileW;
+        const currentTileW = Math.min(tileW, x1 - tx);
+        if (currentTileW <= 0) continue;
+
+        // Calculate the timestamp corresponding to the center of this thumbnail tile
+        const progress = Math.max(0, Math.min(1, (tx + currentTileW / 2 - x0) / segW));
+        const srcT = seg.srcStart + progress * (seg.srcEnd - seg.srcStart);
+
+        const thumb = getThumbnail(srcT);
+        if (thumb) {
+          // Draw extracted video frame thumbnail
+          ctx.drawImage(thumb, 0, 0, thumb.width, thumb.height, tx, TRACK_Y, currentTileW, tileH);
+        } else {
+          // Clean, modern placeholder tile (sleek neutral with subtle filmstrip mark)
+          ctx.fillStyle = i % 2 === 0 ? "#f0f2f5" : "#e8ebed";
+          ctx.fillRect(tx, TRACK_Y, currentTileW, tileH);
+
+          // Subtle placeholder frame outline
+          if (currentTileW >= 20) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.03)";
+            ctx.fillRect(tx + 4, TRACK_Y + 4, currentTileW - 8, tileH - 8);
+          }
+        }
+
+        // Subtle frame separator between thumbnail tiles
+        if (i > 0) {
+          ctx.strokeStyle = "rgba(0, 0, 0, 0.08)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(tx + 0.5, TRACK_Y);
+          ctx.lineTo(tx + 0.5, TRACK_Y + tileH);
+          ctx.stroke();
+        }
       }
+
+      // If selected, apply a subtle blue tint over the segment
       if (selected) {
-        ctx.fillStyle = "#0070f3";
-        ctx.font = "9px monospace";
-        ctx.fillText(`${String(seg.speed).replace(/\.?0$/, "")}x`, x0 + 8, 50);
+        ctx.fillStyle = "rgba(0, 112, 243, 0.10)";
+        ctx.fillRect(x0, TRACK_Y, segW, TRACK_HEIGHT);
       }
-      // split boundary between segments
-      ctx.strokeStyle = "#999";
-      ctx.beginPath();
-      ctx.moveTo(x1 + 0.5, 36);
-      ctx.lineTo(x1 + 0.5, 36 + TRACK_HEIGHT);
-      ctx.stroke();
+
+      ctx.restore();
+
+      // 2. Outer segment stroke
+      if (selected) {
+        ctx.strokeStyle = "#0070f3";
+        ctx.lineWidth = 2;
+        drawRoundRect(ctx, x0 + 1, TRACK_Y + 1, Math.max(1, segW - 2), TRACK_HEIGHT - 2, 4);
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = "#d4d4d4";
+        ctx.lineWidth = 1;
+        drawRoundRect(ctx, x0 + 0.5, TRACK_Y + 0.5, Math.max(1, segW - 1), TRACK_HEIGHT - 1, 4);
+        ctx.stroke();
+      }
+
+      // 3. Speed badge
+      if (seg.speed !== 1) {
+        const speedText = `${String(seg.speed).replace(/\.?0$/, "")}x`;
+        ctx.font = "bold 9px monospace";
+        const textMetrics = ctx.measureText(speedText);
+        const badgeW = textMetrics.width + 8;
+        const badgeH = 14;
+        const badgeX = x0 + 4;
+        const badgeY = TRACK_Y + 4;
+
+        ctx.fillStyle = selected ? "#0070f3" : "rgba(30, 30, 30, 0.85)";
+        drawRoundRect(ctx, badgeX, badgeY, badgeW, badgeH, 3);
+        ctx.fill();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(speedText, badgeX + 4, badgeY + 10);
+      }
+
+      // 4. Split boundary between segments
+      if (acc + d < duration) {
+        ctx.strokeStyle = "#888888";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x1 + 0.5, TRACK_Y - 2);
+        ctx.lineTo(x1 + 0.5, TRACK_Y + TRACK_HEIGHT + 2);
+        ctx.stroke();
+      }
+
       acc += d;
     }
 
@@ -172,7 +284,7 @@ export function Timeline() {
         ctx.restore();
       }
     }
-  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedZoomId, timeToX]);
+  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedZoomId, thumbVersion, getThumbnail, timeToX]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (isDraggingPlayhead || draggingDiamond) return;
