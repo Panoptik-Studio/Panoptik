@@ -610,26 +610,22 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setSelectedZoom: (id) => set({ selectedZoomId: id }),
 
-  // ── Zoom — staging ──
+  // ── Zoom — staging (applies automatically) ──
 
   stageZoomProposals: (proposals) => {
     const state = get();
+    const cleanProposals = proposals.map((p) => ({ ...p, staged: false }));
     const project = mapSelectedSegment(state, (seg) => ({
       ...seg,
-      stagedZoomPoints: [...seg.stagedZoomPoints, ...proposals],
+      zoomPoints: [...seg.zoomPoints, ...cleanProposals],
+      stagedZoomPoints: [],
     }));
     if (!project) return;
-    set({ project });
+    pushHistoryAndSet(project, state, set);
   },
 
   removeStagedZoom: (id) => {
-    const state = get();
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      stagedZoomPoints: seg.stagedZoomPoints.filter((z) => z.id !== id),
-    }));
-    if (!project) return;
-    set({ project });
+    get().removeZoomPoint(id);
   },
 
   // ── Text — committed ──
@@ -674,26 +670,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ project });
   },
 
-  // ── Text — staging ──
+  // ── Text — staging (applies automatically) ──
 
   stageTextOverlay: (overlay) => {
     const state = get();
+    const newOverlay: TextOverlay = {
+      ...overlay,
+      id: overlay.id || crypto.randomUUID(),
+      staged: false,
+    };
     const project = mapSelectedSegment(state, (seg) => ({
       ...seg,
-      stagedTextOverlays: [...seg.stagedTextOverlays, overlay],
+      textOverlays: [...seg.textOverlays, newOverlay],
+      stagedTextOverlays: [],
     }));
     if (!project) return;
-    set({ project });
+    pushHistoryAndSet(project, state, set);
   },
 
   removeStagedTextOverlay: (id) => {
-    const state = get();
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      stagedTextOverlays: seg.stagedTextOverlays.filter((t) => t.id !== id),
-    }));
-    if (!project) return;
-    set({ project });
+    get().removeTextOverlay(id);
   },
 
   // ── Captions — committed ──
@@ -708,26 +704,21 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     pushHistoryAndSet(project, state, set);
   },
 
-  // ── Captions — staging ──
+  // ── Captions — staging (applies automatically) ──
 
   stageCaptions: (captions) => {
     const state = get();
     const project = mapSelectedSegment(state, (seg) => ({
       ...seg,
-      stagedCaptions: captions,
-    }));
-    if (!project) return;
-    set({ project });
-  },
-
-  clearStagedCaptions: () => {
-    const state = get();
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
+      captions: [...seg.captions, ...captions],
       stagedCaptions: [],
     }));
     if (!project) return;
-    set({ project });
+    pushHistoryAndSet(project, state, set);
+  },
+
+  clearStagedCaptions: () => {
+    get().setCaptions([]);
   },
 
   // ── Background ──
@@ -749,25 +740,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   stageBackground: (bg) => {
-    const state = get();
-    if (!state.project || state.selectedSegmentIds.length === 0) return;
-    const idSet = new Set(state.selectedSegmentIds);
-    // Remember what each segment looked like before the first staged theme, so
-    // Discard can put it back exactly. Restaging keeps the original entry.
-    const preStageBackgrounds = { ...state.preStageBackgrounds };
-    for (const seg of state.project.segments) {
-      if (idSet.has(seg.id) && !(seg.id in preStageBackgrounds)) {
-        preStageBackgrounds[seg.id] = seg.background;
-      }
-    }
-    const project = {
-      ...state.project,
-      segments: state.project.segments.map((seg) =>
-        idSet.has(seg.id) ? { ...seg, background: bg } : seg,
-      ),
-    };
-    // Staged background applies immediately to visual + sets badge
-    set({ project, pendingBackgroundBadge: true, preStageBackgrounds });
+    get().setBackground(bg);
   },
 
   // ── Staging diff ──

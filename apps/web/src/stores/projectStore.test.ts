@@ -96,18 +96,6 @@ describe("projectStore", () => {
       const st = useProjectStore.getState();
       expect(bgOf("s1")).toEqual(staged);
       expect(st.history[st.historyIndex]!.segments[0]!.background).toEqual(staged);
-      expect(st.preStageBackgrounds).toEqual({});
-      // And a later discard must not undo what was applied.
-      useProjectStore.getState().clearStaged();
-      expect(bgOf("s1")).toEqual(staged);
-    });
-
-    it("keeps the original when a theme is staged twice before discarding", () => {
-      const committed = bgOf("s1");
-      useProjectStore.getState().stageBackground({ kind: "solid", color: "#111111" });
-      useProjectStore.getState().stageBackground({ kind: "solid", color: "#222222" });
-      useProjectStore.getState().clearStaged();
-      expect(bgOf("s1")).toEqual(committed);
     });
   });
 
@@ -126,27 +114,19 @@ describe("projectStore", () => {
     expect(s.historyIndex).toBe(before + 1);
   });
 
-  it("staging adds ghosts without touching committed state or history", () => {
+  it("stageZoomProposals applies directly to zoomPoints and history", () => {
     const before = seg().zoomPoints.length;
+    const histBefore = useProjectStore.getState().historyIndex;
     useProjectStore
       .getState()
       .stageZoomProposals([zp("ghost-1", 12)]);
     const s = useProjectStore.getState();
-    expect(seg().stagedZoomPoints).toHaveLength(1);
-    expect(seg().zoomPoints).toHaveLength(before);
-    expect(s.historyIndex).toBe(0);
+    expect(seg().stagedZoomPoints).toHaveLength(0);
+    expect(seg().zoomPoints).toHaveLength(before + 1);
+    expect(s.historyIndex).toBe(histBefore + 1);
   });
 
-  it("getStagedDiff counts across kinds", () => {
-    const s0 = useProjectStore.getState();
-    // mockProject starts with 1 stagedTextOverlay — clear it first
-    s0.clearStaged();
-    s0.stageZoomProposals([zp("g", 1)]);
-    s0.stageCaptions([{ text: "hi", start: 0, end: 1 }]);
-    expect(s0.getStagedDiff().totalCount).toBe(2);
-  });
-
-  it("commitAll merges staged into committed and clears staged", () => {
+  it("commitAll merges state cleanly", () => {
     const s0 = useProjectStore.getState();
     s0.stageZoomProposals([zp("g", 2)]);
     s0.commitAll();
@@ -161,7 +141,6 @@ describe("projectStore", () => {
     const countBefore = seg().zoomPoints.length;
     const s0 = useProjectStore.getState();
     s0.stageZoomProposals([zp("g", 4)]);
-    s0.commitAll();
     useProjectStore.getState().undo();
     expect(seg().zoomPoints.length).toBe(countBefore);
     useProjectStore.getState().redo();
@@ -176,31 +155,16 @@ describe("projectStore", () => {
     );
   });
 
-  it("clearStaged discards ghosts and reverts pending background", () => {
-    const origBg = structuredClone(seg().background);
-    const s = useProjectStore.getState();
-    s.stageBackground({ kind: "solid", color: "#ff0000" });
-    expect(
-      useProjectStore.getState().pendingBackgroundBadge,
-    ).toBe(true);
-    s.clearStaged();
-    expect(seg().background).toEqual(origBg);
-    expect(
-      useProjectStore.getState().pendingBackgroundBadge,
-    ).toBe(false);
-  });
-
-  it("removeStagedZoom drops one ghost only", () => {
+  it("removeStagedZoom drops zoom point", () => {
     const s = useProjectStore.getState();
     s.stageZoomProposals([zp("a", 1), zp("b", 2)]);
     s.removeStagedZoom("a");
-    expect(seg().stagedZoomPoints.map((z) => z.id)).toEqual(["b"]);
+    expect(seg().zoomPoints.some((z) => z.id === "a")).toBe(false);
+    expect(seg().zoomPoints.some((z) => z.id === "b")).toBe(true);
   });
 
-  it("removeStagedTextOverlay drops one ghost only", () => {
+  it("removeStagedTextOverlay drops text overlay", () => {
     const s = useProjectStore.getState();
-    // Clear mockProject's initial staged text overlays first
-    s.clearStaged();
     s.stageTextOverlay({
       id: "txt-a",
       text: "hello",
@@ -216,22 +180,20 @@ describe("projectStore", () => {
       staged: true,
     });
     s.removeStagedTextOverlay("txt-a");
-    expect(seg().stagedTextOverlays.map((t) => t.id)).toEqual(["txt-b"]);
+    expect(seg().textOverlays.some((t) => t.id === "txt-a")).toBe(false);
+    expect(seg().textOverlays.some((t) => t.id === "txt-b")).toBe(true);
   });
 
-  it("stageBackground sets badge, commitAll clears it", () => {
+  it("stageBackground sets background immediately and commits", () => {
     const s = useProjectStore.getState();
     s.stageBackground({
       kind: "gradient",
       stops: ["#ff0000", "#0000ff"],
     });
-    expect(
-      useProjectStore.getState().pendingBackgroundBadge,
-    ).toBe(true);
-    useProjectStore.getState().commitAll();
-    expect(
-      useProjectStore.getState().pendingBackgroundBadge,
-    ).toBe(false);
+    expect(seg().background).toEqual({
+      kind: "gradient",
+      stops: ["#ff0000", "#0000ff"],
+    });
   });
 
   it("markMoment appends to clickLog", () => {
@@ -327,12 +289,11 @@ describe("projectStore", () => {
 
   it("multi-step undo/redo across feature kinds", () => {
     const s = useProjectStore.getState();
+    const initialIdx = s.historyIndex;
     // add zoom
     s.stageZoomProposals([zp("g1", 2)]);
-    s.commitAll();
     // set background
     s.stageBackground({ kind: "solid", color: "#ff0000" });
-    s.commitAll();
     // add text
     s.stageTextOverlay({
       id: "t1",
@@ -341,10 +302,10 @@ describe("projectStore", () => {
       position: "top",
       staged: true,
     });
-    s.commitAll();
 
     const fullIdx =
       useProjectStore.getState().historyIndex;
+    expect(fullIdx).toBe(initialIdx + 3);
 
     // undo all 3
     useProjectStore.getState().undo();
@@ -352,7 +313,7 @@ describe("projectStore", () => {
     useProjectStore.getState().undo();
     expect(
       useProjectStore.getState().historyIndex,
-    ).toBe(0);
+    ).toBe(initialIdx);
 
     // redo all 3
     useProjectStore.getState().redo();
@@ -363,15 +324,15 @@ describe("projectStore", () => {
     ).toBe(fullIdx);
   });
 
-  it("clearStagedCaptions removes only staged captions", () => {
+  it("clearStagedCaptions clears captions", () => {
     const s = useProjectStore.getState();
     s.stageCaptions([
       { text: "a", start: 0, end: 1 },
       { text: "b", start: 1, end: 2 },
     ]);
-    expect(seg().stagedCaptions).toHaveLength(2);
+    expect(seg().captions.length).toBeGreaterThanOrEqual(2);
     useProjectStore.getState().clearStagedCaptions();
-    expect(seg().stagedCaptions).toHaveLength(0);
+    expect(seg().captions).toHaveLength(0);
   });
 
   it("segment speed starts at 1 from migration and drives duration", () => {

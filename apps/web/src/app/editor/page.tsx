@@ -17,7 +17,6 @@ import { ProjectBrowser } from "@/components/ProjectBrowser";
 import { RecordModal } from "@/components/RecordModal";
 import { ReshootModal } from "@/components/ReshootModal";
 import { StageControls } from "@/components/StageControls";
-import { StagingPanel } from "@/components/StagingPanel";
 import { Timeline } from "@/components/Timeline";
 import { ToolTrace } from "@/components/ToolTrace";
 import { Toolbar } from "@/components/Toolbar";
@@ -57,9 +56,8 @@ export default function EditorPage() {
           <Timeline />
         </main>
 
-        {/* Right — tabbed inspector (Staging + active tab) */}
+        {/* Right — tabbed inspector */}
         <aside className="flex w-[340px] shrink-0 flex-col overflow-y-auto border-l bg-white" style={{ borderColor: "#ebebeb", scrollbarGutter: "stable" }}>
-          <StagingPanel />
           {activeTab === "media" && <ProjectBrowser />}
           {activeTab === "zoom" && (
             <>
