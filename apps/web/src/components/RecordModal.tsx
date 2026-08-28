@@ -570,29 +570,34 @@ export function RecordModal() {
         isRecording={state === "recording"}
         onStop={handleStop}
       />
-      <div
-        className="flex w-full max-w-[1120px] max-h-[94vh] flex-col overflow-hidden rounded-[18px] border shadow-[0_24px_80px_rgba(0,0,0,0.6),0_1px_0_rgba(255,255,255,0.06)_inset]"
-        style={{ background: "#ffffff", borderColor: "#ebebeb", boxShadow: "0 0 0 1px rgba(0,0,0,0.08) inset, 0px 8px 32px rgba(0,0,0,0.12)" }}
-      >
+      <div className="pk-shadow-xl flex max-h-[94vh] w-full max-w-[1120px] flex-col overflow-hidden rounded-[var(--radius-pk-card)] border border-pk-hairline bg-pk-surface">
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b px-5 py-3.5" style={{ borderColor: "#ebebeb", background: "#ffffff" }}>
+        <div className="flex shrink-0 items-center justify-between border-b border-pk-hairline bg-pk-surface px-5 py-3.5">
           <div className="flex items-center gap-3">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: "#171717", color: "white" }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
+            <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-pk-inner)] bg-pk-ink-strong text-white">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
             </div>
             <div>
-              <h2 className="pk-panel-title leading-none" style={{ fontSize: 14 }}>Record</h2>
-              <p className="pk-help" style={{ fontSize: 11 }}>Screen + camera · Local only · No upload</p>
+              <h2 className="pk-panel-title leading-none">Record</h2>
+              <p className="pk-help mt-1">Screen + camera · Local only · No upload</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {state === "recording" && (
-              <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium tabular-nums" style={{ borderColor: "rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.12)", color: "#FCA5A5" }}>
-                <span className="h-2 w-2 animate-pulse rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
+              <span className="pk-chip pk-chip-red hidden tabular-nums sm:inline-flex">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-pk-red" />
                 {formatTimer(elapsed)} · {layout === "cameraOnly" ? "Camera" : layout === "screenOnly" ? "Screen" : "Screen + Cam"}
               </span>
             )}
-            <button onClick={handleClose} disabled={state === "recording" || state === "countingDown"} className="flex h-8 w-8 items-center justify-center rounded-lg border text-sm transition hover:bg-white/[0.06] disabled:opacity-40" style={{ borderColor: "#ebebeb", color: "#4d4d4d" }}>✕</button>
+            <button
+              onClick={handleClose}
+              disabled={state === "recording" || state === "countingDown"}
+              className="pk-icon-btn"
+              title="Close"
+              aria-label="Close"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
           </div>
         </div>
 
@@ -613,22 +618,22 @@ export function RecordModal() {
               <>
                 {/* fake screen — gradient card */}
                 <div className="absolute inset-0 flex items-center justify-center p-10">
-                  <div className="flex h-full max-h-[480px] w-full max-w-[880px] flex-col overflow-hidden rounded-xl border shadow-2xl" style={{ background: "#0F1012", borderColor: "rgba(255,255,255,0.08)" }}>
-                    <div className="flex h-7 items-center gap-1.5 border-b px-3" style={{ background: "#1A1C21", borderColor: "rgba(255,255,255,0.06)" }}>
+                  <div className="flex h-full max-h-[480px] w-full max-w-[880px] flex-col overflow-hidden rounded-[var(--radius-pk-card)] border shadow-2xl" style={{ background: "#0F1012", borderColor: "rgba(255,255,255,0.08)" }}>
+                    <div className="relative flex h-7 items-center gap-1.5 border-b px-3" style={{ background: "#1A1C21", borderColor: "rgba(255,255,255,0.06)" }}>
                       <span className="h-2.5 w-2.5 rounded-full" style={{ background: "#EF4444" }} />
                       <span className="h-2.5 w-2.5 rounded-full" style={{ background: "#F59E0B" }} />
                       <span className="h-2.5 w-2.5 rounded-full" style={{ background: "#10B981" }} />
-                      <span className="ml-3 text-[10px] font-mono" style={{ color: "#888" }}>screen preview — select a window after clicking Record</span>
+                      <span className="pk-ui pointer-events-none absolute left-1/2 -translate-x-1/2 text-[10px] text-white/45">screen preview — select a window after clicking Record</span>
                     </div>
                     <div className="flex flex-1 items-center justify-center p-6">
                       <div className="text-center">
                         <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: "#d3e5ff", color: "#0070f3", border: "1px solid #d3e5ff" }}>
                           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21l8-10 4 4" /></svg>
                         </div>
-                        <p className="text-xs font-medium" style={{ color: "#4d4d4d" }}>Your screen will appear here</p>
-                        <p className="mt-1 text-[11px]" style={{ color: "#888" }}>Pick a window or tab</p>
+                        <p className="pk-ui text-[13px] font-medium text-white/85">Your screen will appear here</p>
+                        <p className="pk-ui mt-1 text-[11px] text-white/45">Pick a window or tab</p>
                         {wantsCameraSlot && pipSupported && (
-                          <p className="mx-auto mt-2 max-w-[34ch] text-[11px] leading-4" style={{ color: "#666" }}>
+                          <p className="pk-ui mx-auto mt-2.5 max-w-[34ch] text-[11px] leading-4 text-white/40">
                             Sharing the entire screen also captures the floating camera,
                             which records as a black box. Your camera is composited
                             separately, so share a single window or tab instead.
@@ -657,21 +662,21 @@ export function RecordModal() {
                   width: Math.round(camSize * 1080),
                   height: Math.round(camSize * 1080),
                   borderRadius: shape === "circle" ? "50%" : 12,
-                  borderColor: pipHasVideo ? "#ffffff" : "#ebebeb",
+                  borderColor: pipHasVideo ? "#ffffff" : "var(--color-pk-hairline)",
                   boxShadow: pipHasVideo ? "0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.9) inset" : "0 4px 16px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.06) inset",
                 }}
               >
                 {/* Backdrop, always mounted: whatever the video is doing, the
                     slot reads as a camera rather than a black hole. */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#fafafa] p-4 text-center">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full border bg-white" style={{ borderColor: "#ebebeb" }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.7"><path d="M16 16l4 4M2 12a10 10 0 1 0 20 0 10 10 0 0 0-20 0z" /><path d="M10 10a2 2 0 1 1 4 0 2 2 0 0 1-4 0z" /></svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-pk-canvas p-4 text-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-pk-hairline bg-white">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-pk-faint)" strokeWidth="1.7"><path d="M16 16l4 4M2 12a10 10 0 1 0 20 0 10 10 0 0 0-20 0z" /><path d="M10 10a2 2 0 1 1 4 0 2 2 0 0 1-4 0z" /></svg>
                   </div>
-                  <p className="text-[11px] font-medium" style={{ color: "#4d4d4d" }}>
+                  <p className="pk-ui text-[11px] font-medium text-pk-body">
                     {pipHasVideo ? "Starting camera…" : "No camera"}
                   </p>
                   {!pipHasVideo && (
-                    <p className="font-mono text-[10px]" style={{ color: "#888" }}>Enable camera or check permissions</p>
+                    <p className="pk-help text-[10px]">Enable camera or check permissions</p>
                   )}
                 </div>
                 {pipHasVideo && (
@@ -716,7 +721,7 @@ export function RecordModal() {
                 <div
                   key={countdown}
                   className="flex h-24 w-24 items-center justify-center rounded-full text-5xl font-black text-white shadow-2xl animate-[ping_700ms_ease-out]"
-                  style={{ background: "#171717", boxShadow: "0 0 48px var(--color-accent-glow)", animation: "countPulse 700ms ease-out" }}
+                  style={{ background: "var(--color-pk-ink-strong)", boxShadow: "0 0 48px var(--color-accent-glow)", animation: "countPulse 700ms ease-out" }}
                 >
                   {countdown}
                 </div>
@@ -763,8 +768,10 @@ export function RecordModal() {
                 }}
               >
                 <div className="flex items-center justify-between border-b px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
-                  <span className="text-[11px] font-semibold tracking-wide" style={{ color: "#4d4d4d" }}>Teleprompter — drag to move</span>
-                  <button onClick={() => setTeleOpen(false)} className="rounded-md px-2 py-1 text-xs hover:bg-white/10" style={{ color: "#4d4d4d" }}>✕</button>
+                  <span className="pk-glass-label">Teleprompter — drag to move</span>
+                  <button onClick={() => setTeleOpen(false)} className="pk-glass-btn h-6 w-6 !p-0" title="Close teleprompter" aria-label="Close teleprompter">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                  </button>
                 </div>
                 <div className="relative h-[180px] overflow-hidden">
                   <div className="absolute inset-0 overflow-hidden px-5 py-4">
@@ -773,15 +780,15 @@ export function RecordModal() {
                 </div>
                 <div className="flex items-center justify-between gap-2 border-t px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.08)", background: "rgba(0,0,0,0.35)" }}>
                   <div className="flex items-center gap-1.5">
-                    <button onClick={() => setTeleOffset((o) => Math.max(0, o - 60))} className="rounded-md border px-2 py-1 text-xs hover:bg-white/10" style={{ borderColor: "#ebebeb", color: "white" }}>Rewind</button>
-                    <button onClick={() => setTelePlaying((p) => !p)} className="rounded-md px-2.5 py-1 text-xs font-medium text-white transition-colors" style={{ background: telePlaying ? "#E11D48" : "#171717" }} onMouseEnter={(e) => { if (!telePlaying) e.currentTarget.style.background = "#0070f3"; }} onMouseLeave={(e) => { if (!telePlaying) e.currentTarget.style.background = "#171717"; }}>{telePlaying ? "Pause" : "Play"}</button>
-                    <button onClick={() => setTeleOffset((o) => o + 60)} className="rounded-md border px-2 py-1 text-xs hover:bg-white/10" style={{ borderColor: "#ebebeb", color: "white" }}>Forward</button>
+                    <button onClick={() => setTeleOffset((o) => Math.max(0, o - 60))} className="pk-glass-btn">Rewind</button>
+                    <button onClick={() => setTelePlaying((p) => !p)} className="pk-glass-btn" data-active={telePlaying}>{telePlaying ? "Pause" : "Play"}</button>
+                    <button onClick={() => setTeleOffset((o) => o + 60)} className="pk-glass-btn">Forward</button>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <button onClick={() => setTeleSpeed((s) => Math.max(0.1, +(s - 0.1).toFixed(1)))} className="h-6 w-6 rounded-md border text-xs hover:bg-white/10" style={{ borderColor: "#ebebeb", color: "white" }}>−</button>
+                    <button onClick={() => setTeleSpeed((s) => Math.max(0.1, +(s - 0.1).toFixed(1)))} className="pk-glass-btn h-6 w-6 !p-0" aria-label="Slower">−</button>
                     <span className="min-w-[36px] text-center font-mono text-xs text-white">{teleSpeed.toFixed(1)}×</span>
-                    <button onClick={() => setTeleSpeed((s) => Math.min(2, +(s + 0.1).toFixed(1)))} className="h-6 w-6 rounded-md border text-xs hover:bg-white/10" style={{ borderColor: "#ebebeb", color: "white" }}>+</button>
-                    <button onClick={() => setTeleOffset(0)} className="ml-1 rounded-md border px-2 py-1 text-[11px] hover:bg-white/10" style={{ borderColor: "#ebebeb", color: "white" }}>Reset</button>
+                    <button onClick={() => setTeleSpeed((s) => Math.min(2, +(s + 0.1).toFixed(1)))} className="pk-glass-btn h-6 w-6 !p-0" aria-label="Faster">+</button>
+                    <button onClick={() => setTeleOffset(0)} className="pk-glass-btn ml-1">Reset</button>
                   </div>
                 </div>
               </div>
@@ -789,7 +796,7 @@ export function RecordModal() {
 
             {/* Floating layout switcher — idle only, centered bottom — reference pattern: grid pill, blur, icons */}
             {state === "idle" && (
-              <div className="absolute bottom-6 left-1/2 z-10 grid -translate-x-1/2 grid-flow-col auto-cols-fr gap-0 rounded-[16px] border p-1 shadow-[0_8px_24px_rgba(0,0,0,0.12)] backdrop-blur-[6px]" style={{ background: "rgba(255,255,255,0.92)", borderColor: "#ebebeb" }}>
+              <div className="pk-shadow-md absolute bottom-6 left-1/2 z-10 grid -translate-x-1/2 grid-flow-col auto-cols-fr gap-1 rounded-[var(--radius-pk-card)] border border-pk-hairline bg-white/95 p-1.5 backdrop-blur-[6px]">
                 {([
                   ["screenOnly", "Screen only", "M1"],
                   ["screenAndCamera", "Screen + camera", "M2"],
@@ -800,15 +807,18 @@ export function RecordModal() {
                     <button
                       key={v}
                       onClick={() => setLayout(v)}
-                      className="pk-ui grid justify-items-center gap-[10px] rounded-[13px] border-0 px-4 pb-3 pt-[18px] text-[12px] font-medium leading-4 transition-colors"
-                      style={{ background: isActive ? "transparent" : "transparent", color: isActive ? "#171717" : "#888" }}
+                      className="pk-ui grid justify-items-center gap-[10px] rounded-[var(--radius-pk-btn)] border-0 px-4 pb-3 pt-[18px] text-[12px] font-medium leading-4 transition-colors hover:text-pk-blue"
+                      style={{
+                        background: isActive ? "var(--color-pk-blue-soft)" : "transparent",
+                        color: isActive ? "var(--color-pk-blue)" : "var(--color-pk-faint)",
+                      }}
+                      aria-pressed={isActive}
                     >
                       <span
-                        className="flex h-5 w-8 items-center justify-center rounded-lg p-1"
+                        className="flex h-5 w-8 items-center justify-center rounded-[7px] p-1"
                         style={{
-                          boxShadow: isActive ? "0 0 0 2px rgba(255,255,255,0.7), 0 0 0 1px #ebebeb" : "0 0 0 1px #ebebeb",
-                          background: isActive ? "#171717" : "#ffffff",
-                          filter: isActive ? "invert(1) brightness(1.175)" : "none",
+                          border: `1px solid ${isActive ? "var(--color-pk-blue)" : "var(--color-pk-hairline)"}`,
+                          background: "var(--color-pk-surface)",
                         }}
                       >
                         {v === "screenOnly" && <svg width="16" height="12" viewBox="0 0 24 16" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="1" y="1" width="22" height="12" rx="1.5" /></svg>}
@@ -824,19 +834,18 @@ export function RecordModal() {
           </div>
 
           {/* Controls bar */}
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-4 py-3" style={{ borderColor: "#ebebeb", background: "#ffffff" }}>
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-pk-hairline bg-pk-surface px-4 py-3">
             {/* Left: device & shape */}
             <div className="flex flex-wrap items-center gap-2">
               {/* Camera */}
-              <div className="flex items-center gap-1 rounded-full border px-1 py-1" style={{ background: "#fafafa", borderColor: "#ebebeb" }}>
+              <div className="flex items-center gap-1.5 rounded-[var(--radius-pk-btn)] border border-pk-hairline bg-pk-canvas p-1">
                 <button
                   onClick={() => setCameraEnabled((v) => !v)}
                   disabled={layout === "screenOnly"}
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-xs transition disabled:opacity-30"
-                  style={{ background: cameraEnabled && layout !== "screenOnly" ? "#171717" : "transparent", color: cameraEnabled ? "#ffffff" : "#888", border: `1px solid ${cameraEnabled ? "rgba(0,112,243,0.2)" : "transparent"}` }}
-                  onMouseEnter={(e) => { if (cameraEnabled && layout !== "screenOnly") e.currentTarget.style.background = "#0070f3"; }}
-                  onMouseLeave={(e) => { if (cameraEnabled && layout !== "screenOnly") e.currentTarget.style.background = "#171717"; }}
+                  className="pk-icon-btn h-7 w-7"
+                  data-active={cameraEnabled && layout !== "screenOnly"}
                   title={cameraEnabled ? "Camera on (click to mute)" : "Camera off"}
+                  aria-pressed={cameraEnabled}
                 >
                   {cameraEnabled ? (
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
@@ -848,12 +857,12 @@ export function RecordModal() {
                   value={selectedCam}
                   onChange={(e) => setSelectedCam(e.target.value)}
                   disabled={!cameras.length || !cameraEnabled}
-                  className="max-w-[130px] bg-transparent pr-6 text-xs outline-none disabled:opacity-40"
-                  style={{ color: "#4d4d4d" }}
+                  className="pk-select max-w-[150px] border-0 bg-transparent"
+                  aria-label="Camera device"
                 >
                   {cameras.length === 0 && <option>No cameras</option>}
                   {cameras.map((c) => (
-                    <option key={c.deviceId} value={c.deviceId} className="bg-gray-900">
+                    <option key={c.deviceId} value={c.deviceId}>
                       {c.label || `Camera ${c.deviceId.slice(0, 4)}`}
                     </option>
                   ))}
@@ -861,14 +870,13 @@ export function RecordModal() {
               </div>
 
               {/* Mic */}
-              <div className="flex items-center gap-1 rounded-full border px-1 py-1" style={{ background: "#fafafa", borderColor: "#ebebeb" }}>
+              <div className="flex items-center gap-1.5 rounded-[var(--radius-pk-btn)] border border-pk-hairline bg-pk-canvas p-1">
                 <button
                   onClick={() => setMicEnabled((v) => !v)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-xs transition"
-                  style={{ background: micEnabled ? "#171717" : "transparent", color: micEnabled ? "#ffffff" : "#888", border: `1px solid ${micEnabled ? "rgba(0,112,243,0.2)" : "transparent"}` }}
-                  onMouseEnter={(e) => { if (micEnabled) e.currentTarget.style.background = "#0070f3"; }}
-                  onMouseLeave={(e) => { if (micEnabled) e.currentTarget.style.background = "#171717"; }}
+                  className="pk-icon-btn h-7 w-7"
+                  data-active={micEnabled}
                   title={micEnabled ? "Mic on" : "Mic muted"}
+                  aria-pressed={micEnabled}
                 >
                   {micEnabled ? (
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" /><path d="M19 10a7 7 0 0 1-14 0" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
@@ -880,12 +888,12 @@ export function RecordModal() {
                   value={selectedMic}
                   onChange={(e) => setSelectedMic(e.target.value)}
                   disabled={!mics.length || !micEnabled}
-                  className="max-w-[130px] bg-transparent pr-6 text-xs outline-none disabled:opacity-40"
-                  style={{ color: "#4d4d4d" }}
+                  className="pk-select max-w-[150px] border-0 bg-transparent"
+                  aria-label="Microphone device"
                 >
                   {mics.length === 0 && <option>No mics</option>}
                   {mics.map((m) => (
-                    <option key={m.deviceId} value={m.deviceId} className="bg-gray-900">
+                    <option key={m.deviceId} value={m.deviceId}>
                       {m.label || `Mic ${m.deviceId.slice(0, 4)}`}
                     </option>
                   ))}
@@ -893,21 +901,21 @@ export function RecordModal() {
               </div>
 
               {/* Shape */}
-              <div className="hidden sm:flex items-center gap-1 rounded-full border p-1" style={{ background: "#fafafa", borderColor: "#ebebeb" }}>
-                <span className="px-2 text-[10px] font-semibold tracking-widest" style={{ color: "#888" }}>SHAPE</span>
-                <button onClick={() => setShape("square")} className={`rounded-full p-1.5 transition ${shape === "square" ? "text-white" : "hover:bg-white/10"}`} style={{ background: shape === "square" ? "#171717" : "transparent", color: shape === "square" ? "white" : "#4d4d4d" }} onMouseEnter={(e) => { if (shape === "square") e.currentTarget.style.background = "#0070f3"; }} onMouseLeave={(e) => { if (shape === "square") e.currentTarget.style.background = "#171717"; }} title="Square PiP">
+              <div className="hidden items-center gap-1.5 rounded-[var(--radius-pk-btn)] border border-pk-hairline bg-pk-canvas p-1 sm:flex">
+                <span className="pk-label pl-1.5">Shape</span>
+                <button onClick={() => setShape("square")} className="pk-icon-btn h-7 w-7" data-active={shape === "square"} title="Square camera" aria-pressed={shape === "square"}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2" /></svg>
                 </button>
-                <button onClick={() => setShape("circle")} className={`rounded-full p-1.5 transition ${shape === "circle" ? "text-white" : "hover:bg-white/10"}`} style={{ background: shape === "circle" ? "#171717" : "transparent", color: shape === "circle" ? "white" : "#4d4d4d" }} onMouseEnter={(e) => { if (shape === "circle") e.currentTarget.style.background = "#0070f3"; }} onMouseLeave={(e) => { if (shape === "circle") e.currentTarget.style.background = "#171717"; }} title="Circle PiP">
+                <button onClick={() => setShape("circle")} className="pk-icon-btn h-7 w-7" data-active={shape === "circle"} title="Circle camera" aria-pressed={shape === "circle"}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="8" /></svg>
                 </button>
               </div>
 
               {/* Camera position — where the bubble lands in the finished video */}
               {layout === "screenAndCamera" && cameraEnabled && (
-                <div className="hidden md:flex items-center gap-1 rounded-full border p-1" style={{ background: "#fafafa", borderColor: "#ebebeb" }}>
-                  <span className="px-2 text-[10px] font-semibold tracking-widest" style={{ color: "#888" }}>CAMERA</span>
-                  <div className="grid grid-cols-2 gap-[2px] rounded-md border p-[3px]" style={{ borderColor: "#ebebeb", background: "#ffffff" }}>
+                <div className="hidden items-center gap-2 rounded-[var(--radius-pk-btn)] border border-pk-hairline bg-pk-canvas p-1 md:flex">
+                  <span className="pk-label pl-1.5">Camera</span>
+                  <div className="grid grid-cols-2 gap-[3px] rounded-[7px] border border-pk-hairline bg-pk-surface p-[4px]">
                     {(["topLeft", "topRight", "bottomLeft", "bottomRight"] as const).map((c) => (
                       <button
                         key={c}
@@ -915,8 +923,10 @@ export function RecordModal() {
                         title={CORNER_LABELS[c]}
                         aria-label={CORNER_LABELS[c]}
                         aria-pressed={corner === c}
-                        className="h-[9px] w-[13px] rounded-[2px] transition-colors"
-                        style={{ background: corner === c ? "#171717" : "#ebebeb" }}
+                        className="h-[9px] w-[13px] rounded-[2px] transition-colors hover:opacity-80"
+                        style={{
+                          background: corner === c ? "var(--color-pk-ink-strong)" : "var(--color-pk-hairline)",
+                        }}
                       />
                     ))}
                   </div>
@@ -927,7 +937,7 @@ export function RecordModal() {
                     step={0.02}
                     value={camSize}
                     onChange={(e) => setCamSize(Number(e.target.value))}
-                    className="w-16 accent-[#171717]"
+                    className="pk-range w-16"
                     title="Camera size"
                     aria-label="Camera size"
                   />
@@ -959,21 +969,24 @@ export function RecordModal() {
                 </>
               )}
               {state === "countingDown" && (
-                <div className="pk-ui rounded-[13px] bg-white/10 px-5 py-2 text-xs font-medium tracking-widest text-white">COUNTDOWN…</div>
+                <div className="pk-chip pk-chip-red">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-pk-red" />
+                  Starting…
+                </div>
               )}
               {state === "recording" && (
                 <button onClick={handleStop} className="pk-btn pk-btn-ghost pk-btn-md">
-                  <span className="h-3 w-3 rounded-[3px] bg-red-600" />
+                  <span className="h-2.5 w-2.5 rounded-[3px] bg-pk-red" />
                   Stop & Import
                 </button>
               )}
               {state === "stopping" && (
-                <div className="pk-ui rounded-[13px] bg-white/10 px-5 py-2 text-xs font-medium text-white">Processing…</div>
+                <div className="pk-chip">Processing…</div>
               )}
             </div>
 
             {/* Right: hint */}
-            <div className="pk-ui hidden lg:flex items-center gap-2 text-[11px]" style={{ color: "#888" }}>
+            <div className="pk-help hidden items-center gap-2 lg:flex">
               {bubbleSuppressed ? (
                 <span>Floating camera closed — it would be captured in a full-screen share</span>
               ) : layout !== "screenOnly" && cameraEnabled ? (
@@ -985,33 +998,32 @@ export function RecordModal() {
               ) : (
                 <span>Local only</span>
               )}
-              <span className="h-1 w-1 rounded-full" style={{ background: "#888" }} />
+              <span className="h-1 w-1 rounded-full bg-pk-faint" />
               <span className="hidden sm:inline">No upload</span>
             </div>
           </div>
 
           {/* Teleprompter editor when open and idle (show textarea) */}
           {teleOpen && state === "idle" && (
-            <div className="border-t p-3" style={{ borderColor: "#ebebeb", background: "rgba(255,255,255,0.02)" }}>
+            <div className="border-t border-pk-hairline bg-pk-canvas p-3">
               <textarea
                 value={teleText}
                 onChange={(e) => setTeleText(e.target.value)}
                 placeholder="Paste your script here…"
                 rows={3}
-                className="w-full resize-none rounded-lg border bg-black/40 p-3 text-sm leading-relaxed outline-none placeholder:text-white/30"
-                style={{ borderColor: "#ebebeb", color: "white" }}
+                className="w-full resize-none rounded-[var(--radius-pk-inner)] border border-pk-hairline bg-pk-surface p-3 font-sans text-sm leading-relaxed text-pk-body outline-none transition placeholder:text-pk-faint focus:border-pk-blue"
               />
             </div>
           )}
 
           {error && (
-            <div className="border-t bg-red-500/10 px-4 py-2.5 text-xs" style={{ borderColor: "rgba(239,68,68,0.2)", color: "#FCA5A5" }}>
+            <div className="pk-ui border-t border-pk-hairline bg-[#fff1f4] px-4 py-2.5 text-xs font-medium text-pk-red">
               {error}
             </div>
           )}
 
-          <div className="pk-ui shrink-0 border-t px-4 py-2 text-center text-[11px]" style={{ borderColor: "#ebebeb", color: "#888" }}>
-            Press <span className="rounded border px-1 py-px font-mono text-[10px]" style={{ borderColor: "#ebebeb", background: "#fafafa" }}>E</span> camera · <span className="rounded border px-1 py-px font-mono text-[10px]" style={{ borderColor: "#ebebeb", background: "#fafafa" }}>D</span> mic · <span className="rounded border px-1 py-px font-mono text-[10px]" style={{ borderColor: "#ebebeb", background: "#fafafa" }}>Esc</span> close
+          <div className="pk-help shrink-0 border-t border-pk-hairline bg-pk-surface px-4 py-2.5 text-center">
+            Press <span className="pk-kbd">E</span> camera · <span className="pk-kbd">D</span> mic · <span className="pk-kbd">Esc</span> close
           </div>
         </div>
       </div>

@@ -183,6 +183,43 @@ body {
   }
   .pk-chip-blue { background: var(--color-pk-blue-soft); border-color: var(--color-pk-blue); color: var(--color-pk-blue); }
   .pk-chip-amber { background: #ffefcf; border-color: #ffe8c2; color: #ab570a; }
+  /* Recording state and errors. The old inline #FCA5A5 was a dark-theme colour
+     and sat unreadably on the white panel. */
+  .pk-chip-red { background: #fff1f4; border-color: #ffd9e1; color: var(--color-pk-red); }
+
+  /* Buttons that sit on the dark preview stage, where the light system
+     buttons would disappear. Same shape language, same blue hover. */
+  .pk-glass-btn {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 9px;
+    border: 1px solid rgb(255 255 255 / 18%);
+    background: rgb(255 255 255 / 8%);
+    color: #fff;
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+  }
+  .pk-glass-btn:hover:not(:disabled) { background: var(--color-pk-blue); border-color: var(--color-pk-blue); }
+  .pk-glass-btn[data-active="true"] { background: var(--color-pk-red); border-color: var(--color-pk-red); }
+  .pk-glass-label { font-family: var(--font-ui); font-size: 11px; font-weight: 600; color: rgb(255 255 255 / 70%); }
+
+  /* Keycap, for the shortcut hints. */
+  .pk-kbd {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1;
+    padding: 3px 5px;
+    border-radius: 5px;
+    border: 1px solid var(--color-pk-hairline);
+    background: var(--color-pk-canvas);
+    color: var(--color-pk-muted);
+  }
 
   .pk-select {
     font-family: var(--font-ui);
