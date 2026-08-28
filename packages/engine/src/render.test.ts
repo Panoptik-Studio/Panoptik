@@ -356,23 +356,26 @@ describe("facecam PiP placement", () => {
 
   it("keeps a bottom-right camera fully inside the canvas", () => {
     const size = 0.2;
-    // 16:9 canvas and 16:9 camera → height fraction equals the size fraction.
     const draw = drawnPiP({ src: "blob:cam", x: 0.97 - size, y: 0.97 - size, size, shape: "circle" });
     expect(draw).toBeDefined();
-    const [, , dx, dy, dw, dh] = draw as [string, unknown, number, number, number, number];
-    expect(dx + dw).toBeLessThanOrEqual(1920);
-    expect(dy + dh).toBeLessThanOrEqual(1080);
-    expect(dx).toBeGreaterThan(1920 * 0.5);
-    expect(dy).toBeGreaterThan(1080 * 0.5);
+    const dest = draw!.length === 10
+      ? { dx: draw[6] as number, dy: draw[7] as number, dw: draw[8] as number, dh: draw[9] as number }
+      : { dx: draw[2] as number, dy: draw[3] as number, dw: draw[4] as number, dh: draw[5] as number };
+    expect(dest.dx + dest.dw).toBeLessThanOrEqual(1920);
+    expect(dest.dy + dest.dw).toBeLessThanOrEqual(1080);
+    expect(dest.dx).toBeGreaterThan(1920 * 0.5);
+    expect(dest.dy).toBeGreaterThan(1080 * 0.5);
   });
 
   it("keeps a top-left camera fully inside the canvas", () => {
     const draw = drawnPiP({ src: "blob:cam", x: 0.03, y: 0.03, size: 0.2, shape: "square" });
-    const [, , dx, dy] = draw as [string, unknown, number, number, number, number];
-    expect(dx).toBeGreaterThanOrEqual(0);
-    expect(dy).toBeGreaterThanOrEqual(0);
-    expect(dx).toBeLessThan(1920 * 0.5);
-    expect(dy).toBeLessThan(1080 * 0.5);
+    const dest = draw.length === 10
+      ? { dx: draw[6] as number, dy: draw[7] as number, dw: draw[8] as number, dh: draw[9] as number }
+      : { dx: draw[2] as number, dy: draw[3] as number, dw: draw[4] as number, dh: draw[5] as number };
+    expect(dest.dx).toBeGreaterThanOrEqual(0);
+    expect(dest.dy).toBeGreaterThanOrEqual(0);
+    expect(dest.dx).toBeLessThan(1920 * 0.5);
+    expect(dest.dy).toBeLessThan(1080 * 0.5);
   });
 
   it("draws nothing when there is no camera track", () => {

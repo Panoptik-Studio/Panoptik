@@ -600,8 +600,9 @@ function drawFacecam(
 
   if (!source) return;
 
+  const PIP_ASPECT = 16 / 9;
   const pipW = Math.round(canvasW * effectiveSize);
-  const pipH = Math.round(pipW / aspect);
+  const pipH = Math.round(pipW / PIP_ASPECT);
   const x = Math.round(canvasW * effectiveX);
   const y = Math.round(canvasH * effectiveY);
   // Clamp inside canvas
@@ -642,14 +643,34 @@ function drawFacecam(
     }
   };
 
+  // Centered cover crop calculation for source image
+  const sw = (source as HTMLVideoElement).videoWidth || (source as HTMLCanvasElement).width || curW;
+  const sh = (source as HTMLVideoElement).videoHeight || (source as HTMLCanvasElement).height || curH;
+  const srcAspect = sw / sh;
+  const targetAspect = curW / curH;
+
+  let sx = 0,
+    sy = 0,
+    sCropW = sw,
+    sCropH = sh;
+  if (srcAspect > targetAspect) {
+    sCropW = sh * targetAspect;
+    sx = (sw - sCropW) / 2;
+  } else {
+    sCropH = sw / targetAspect;
+    sy = (sh - sCropH) / 2;
+  }
+
   ctx.save();
   ctx.globalAlpha = opacity;
   // Smoothly morphed rounded rect / circle clip
   buildPath();
   ctx.clip();
   try {
-    ctx.drawImage(source, clampedX, clampedY, pipW, pipH);
-  } catch { /* video frame not ready */ }
+    ctx.drawImage(source, sx, sy, sCropW, sCropH, bX, bY, curW, curH);
+  } catch {
+    /* video frame not ready */
+  }
   ctx.restore();
 
   // Subtle border — matches smoothly morphed clip shape
