@@ -209,12 +209,25 @@ export function Timeline() {
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     const timelineT = xToTime(x);
-    const resolved = project ? resolveSegment(project, timelineT) : null;
-    if (!resolved) return;
-    // updateZoomPoint targets the SELECTED segment, so select the dragged
-    // diamond's segment (matches the segment the pointer is over) before updating.
-    selectSegment(draggingDiamond.segmentId);
-    updateZoomPoint(draggingDiamond.id, { t: resolved.srcT });
+    const proj = project;
+    if (!proj) return;
+    // Derive srcT from the diamond's HOME segment, not from whatever segment the
+    // pointer happens to sit over. Find the home segment's on-timeline window and
+    // clamp the pointer's timeline x to it, so dragging across a boundary never
+    // writes an out-of-range srcT into the home segment (it clamps at the edge).
+    const home = proj.segments.find((seg) => seg.id === draggingDiamond.segmentId);
+    if (!home) return;
+    let segStart = 0;
+    for (const seg of proj.segments) {
+      if (seg.id === home.id) break;
+      segStart += segmentDuration(seg);
+    }
+    const segEnd = segStart + segmentDuration(home);
+    const clampedT = Math.max(segStart, Math.min(segEnd, timelineT));
+    const srcT = home.srcStart + (clampedT - segStart) * home.speed;
+    // updateZoomPoint targets the SELECTED segment, so select the home segment.
+    selectSegment(home.id);
+    updateZoomPoint(draggingDiamond.id, { t: srcT });
   }, [draggingDiamond, project, selectSegment, updateZoomPoint, xToTime]);
 
   const handleTimelinePointerDown = useCallback((e: React.PointerEvent) => {
