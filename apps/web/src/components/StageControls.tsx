@@ -37,6 +37,9 @@ export function StageControls() {
   const setBackground = useProjectStore((s) => s.setBackground);
   const setAspectPreset = useProjectStore((s) => s.setAspectPreset);
   const setFacecam = useProjectStore((s) => s.setFacecam);
+  const playbackRate = useProjectStore((s) => s.playbackRate);
+  const setPlaybackRate = useProjectStore((s) => s.setPlaybackRate);
+  const exportProgress = useProjectStore((s) => s.exportProgress);
 
   const camHeightFraction = (size: number) =>
     project ? (size * (project.clip.width / project.clip.height)) / CAMERA_ASPECT : size;
@@ -66,6 +69,39 @@ export function StageControls() {
           <button onClick={() => setStagePadding(stagePadding + 4)} className="pk-icon-btn h-7 w-7 text-xs">+</button>
         </div>
         <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>White space around video. 0 = edge-to-edge.</p>
+      </div>
+
+      {/* Speed — global, affects cam+screen together, preview & export */}
+      <div className="mb-4">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="pk-label">Speed</span>
+          <span className="pk-value" style={{ color: playbackRate !== 1 ? "#0070f3" : "#888" }}>{playbackRate.toFixed(2)}x</span>
+        </div>
+        <input
+          type="range"
+          min={0.25}
+          max={3}
+          step={0.05}
+          value={playbackRate}
+          onChange={(e) => setPlaybackRate(Number(e.target.value))}
+          className="pk-range flex-1"
+          disabled={exportProgress !== null}
+          aria-label="Video speed"
+        />
+        <div className="mt-2 grid grid-cols-4 gap-1.5">
+          {[0.5, 1, 1.5, 2].map((v) => (
+            <button
+              key={v}
+              onClick={() => setPlaybackRate(v)}
+              disabled={exportProgress !== null}
+              className="pk-seg"
+              data-active={playbackRate === v}
+            >
+              {v}x
+            </button>
+          ))}
+        </div>
+        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>0.25x–3x · affects preview & export · cam+screen synced</p>
       </div>
 
       {/* Aspect — controls black letterboxing */}
