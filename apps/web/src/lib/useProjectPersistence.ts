@@ -17,6 +17,36 @@ export const HISTORY_KEY_PREFIX = "panoptik:history:";
 /** Edits are frequent; rewriting the JSON on each one would thrash OPFS. */
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 
+/**
+ * Which project's media is already on disk.
+ *
+ * Module scope, not a ref: only one project is open at a time, but the actions
+ * below are used from panels while the effects run at the editor level. Held
+ * per-instance, a panel would start at null, conclude the open project was new
+ * and re-copy the whole video to OPFS every time it mounted.
+ */
+let mediaSavedFor: string | null = null;
+
+/**
+ * Does this project still need its media copied to OPFS?
+ *
+ * True only the first time a given project id is seen. Exported so the rule can
+ * be tested directly: the bug it guards against is a second consumer answering
+ * "yes" for a project whose media is already on disk, which re-copies the whole
+ * video.
+ */
+export function needsMediaCopy(projectId: string): boolean {
+  return mediaSavedFor !== projectId;
+}
+
+export function markMediaSaved(projectId: string): void {
+  mediaSavedFor = projectId;
+}
+
+export function forgetMediaSaved(): void {
+  mediaSavedFor = null;
+}
+
 function readSavedHistory(projectId: string): { history?: Project[]; historyIndex?: number } | null {
   if (typeof window === "undefined" || typeof localStorage === "undefined") return null;
   try {
@@ -43,8 +73,6 @@ export function useProjectPersistence() {
   const setProject = useProjectStore((s) => s.setProject);
   const setPersistStatus = useProjectStore((s) => s.setPersistStatus);
 
-  // The recording itself is copied once; later saves only rewrite the JSON.
-  const mediaSavedFor = useRef<string | null>(null);
   const restoreAttempted = useRef(false);
 
   // ── Reopen the last project on mount ──
@@ -60,7 +88,7 @@ export function useProjectPersistence() {
       .restoreProject(id)
       .then(async (restored) => {
         if (restored) {
-          mediaSavedFor.current = restored.id;
+          markMediaSaved(restored.id);
           const savedHistory = readSavedHistory(restored.id);
           if (savedHistory?.history && savedHistory.history.length > 0) {
             setProject(restored, savedHistory.history, savedHistory.historyIndex);
@@ -88,7 +116,7 @@ export function useProjectPersistence() {
   // ── Autosave ──
   useEffect(() => {
     if (!project) return;
-    const isNewProject = mediaSavedFor.current !== project.id;
+    const isNewProject = needsMediaCopy(project.id);
     const state = useProjectStore.getState();
 
     // Persist history to localStorage immediately
@@ -118,7 +146,7 @@ export function useProjectPersistence() {
             historyIndex: currentState.historyIndex,
           });
           if (isNewProject) {
-            mediaSavedFor.current = project.id;
+            markMediaSaved(project.id);
             localStorage.setItem(LAST_PROJECT_KEY, project.id);
           }
           setPersistStatus("saved");
@@ -131,11 +159,26 @@ export function useProjectPersistence() {
     return () => clearTimeout(timer);
   }, [project, setPersistStatus]);
 
+  // Actions live in their own hook so that a panel can use them without
+  // mounting a second copy of the effects above.
+  return useProjectActions();
+}
+
+/**
+ * The explicit project actions, safe to call from anywhere.
+ *
+ * Deliberately effect-free: mounting this does not start a restore or an
+ * autosave, so panels can use it without duplicating the editor's writes.
+ */
+export function useProjectActions() {
+  const setProject = useProjectStore((s) => s.setProject);
+  const setPersistStatus = useProjectStore((s) => s.setPersistStatus);
+
   /** Forget the current video entirely, on disk as well as in memory. */
   const removeProject = useCallback(async () => {
     const id = useProjectStore.getState().project?.id;
     useProjectStore.getState().clearProject();
-    mediaSavedFor.current = null;
+    forgetMediaSaved();
     localStorage.removeItem(LAST_PROJECT_KEY);
     if (!id) return;
     try {
@@ -153,7 +196,7 @@ export function useProjectPersistence() {
       try {
         const restored = await engine.restoreProject(id);
         if (restored) {
-          mediaSavedFor.current = restored.id;
+          markMediaSaved(restored.id);
           localStorage.setItem(LAST_PROJECT_KEY, restored.id);
           const savedHistory = readSavedHistory(restored.id);
           if (savedHistory?.history && savedHistory.history.length > 0) {

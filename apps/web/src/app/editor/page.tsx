@@ -25,7 +25,7 @@ import { useProjectPersistence } from "@/lib/useProjectPersistence";
 
 type LeftTab = "media" | "zoom" | "text" | "captions" | "camera" | "stage";
 export default function EditorPage() {
-  const [activeTab, setActiveTab] = React.useState<LeftTab>("zoom");
+  const [activeTab, setActiveTab] = React.useState<LeftTab>("media");
   // Above the tabs: the clip must come back on reload regardless of which
   // panel happens to be open.
   useProjectPersistence();

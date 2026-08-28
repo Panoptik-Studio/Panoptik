@@ -7,30 +7,30 @@
  */
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
-import { useProjectPersistence } from "@/lib/useProjectPersistence";
+import { useProjectActions } from "@/lib/useProjectPersistence";
 
 type SavedProject = { id: string; name: string };
-
-const LAST_PROJECT_KEY = "panoptik:lastProject";
-/** Edits are frequent; rewriting the JSON on every one would thrash OPFS. */
-const AUTOSAVE_DEBOUNCE_MS = 1200;
 
 async function opfs() {
   return import("@panoptik/engine");
 }
 
 function formatBytes(n: number): string {
-  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+  // Below half a megabyte, rounding to MB just reads "0 MB".
+  if (n < 1e6) return `${Math.max(1, Math.round(n / 1e3))} KB`;
+  return `${Math.round(n / 1e6)} MB`;
 }
 
 export function ProjectBrowser() {
   const project = useProjectStore((s) => s.project);
   const status = useProjectStore((s) => s.persistStatus);
-  // Restore and autosave run at the editor level; this panel drives the
-  // explicit actions and reports what they are doing.
-  const { removeProject, openProject } = useProjectPersistence();
+  // Actions only. Restore and autosave run once at the editor level — calling
+  // the full persistence hook here mounted a second autosave, which saw an
+  // unfamiliar project id and re-copied the whole video to OPFS on every mount.
+  const { removeProject, openProject } = useProjectActions();
 
   const [saved, setSaved] = useState<SavedProject[]>([]);
   const [usage, setUsage] = useState<string | null>(null);
@@ -51,10 +51,20 @@ export function ProjectBrowser() {
     }
   }, []);
 
-  // Re-list whenever the loaded project changes, so a new save shows up.
   useEffect(() => {
     refresh();
-  }, [refresh, project?.id, status]);
+  }, [refresh, project?.id]);
+
+  // Re-list when a save completes, so a new project appears. Keyed on the
+  // transition rather than on `status` itself: status cycles through saving and
+  // saved on every autosave, and listing OPFS on each of those meant walking
+  // the directory several times per edit.
+  const prevStatus = useRef(status);
+  useEffect(() => {
+    const justSaved = prevStatus.current !== "saved" && status === "saved";
+    prevStatus.current = status;
+    if (justSaved) refresh();
+  }, [status, refresh]);
 
   const handleDelete = useCallback(async () => {
     setConfirmDelete(false);
@@ -133,30 +143,39 @@ export function ProjectBrowser() {
         </p>
       )}
 
-      {saved.length > 0 && (
+      {(saved.length > 0 || usage) && (
         <div className="mt-3 border-t pt-3" style={{ borderColor: "#ebebeb" }}>
-          <p className="pk-label mb-1.5">Saved on this device</p>
-          <select
-            onChange={(e) => {
-              if (e.target.value) openProject(e.target.value);
-              e.target.value = "";
-            }}
-            disabled={status === "restoring"}
-            className="pk-select w-full"
-            defaultValue=""
-          >
-            <option value="" disabled>
-              Open a project…
-            </option>
-            {saved.map((sp) => (
-              <option key={sp.id} value={sp.id}>
-                {sp.id === project?.id ? "● " : ""}
-                {sp.name || sp.id.slice(0, 8)}
-              </option>
-            ))}
-          </select>
+          {saved.length > 0 && (
+            <>
+              <p className="pk-label mb-1.5">Saved on this device</p>
+              <select
+                onChange={(e) => {
+                  const id = e.target.value;
+                  e.target.value = "";
+                  if (id) openProject(id);
+                }}
+                disabled={status === "restoring"}
+                className="pk-select w-full"
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  Open a project…
+                </option>
+                {saved.map((sp) => {
+                  const isOpen = sp.id === project?.id;
+                  return (
+                    <option key={sp.id} value={sp.id} disabled={isOpen}>
+                      {isOpen ? "● " : ""}
+                      {sp.name || sp.id.slice(0, 8)}
+                      {isOpen ? " (open)" : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </>
+          )}
           {usage && (
-            <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>
+            <p className={`pk-help ${saved.length > 0 ? "mt-1.5" : ""}`} style={{ fontSize: 11 }}>
               Using {usage} of browser storage.
             </p>
           )}
