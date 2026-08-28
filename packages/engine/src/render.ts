@@ -106,6 +106,37 @@ export function getCameraTransform(points: ZoomPoint[], t: number): Transform {
 // Alias for spec naming — same deterministic function
 export const getCameraStateAtTime = getCameraTransform;
 
+/**
+ * Resolves camera zoom & pan transforms globally across the entire project timeline.
+ * Converts segment-relative source keyframes into on-timeline time so that zooms spanning
+ * or overlapping across multiple clip cuts continue smoothly across clip boundaries.
+ */
+export function getProjectCameraTransform(project: Project, timelineT: number): Transform {
+  let segStart = 0;
+  const allTimelinePoints: ZoomPoint[] = [];
+
+  for (const seg of project.segments) {
+    const d = segmentDuration(seg);
+    for (const zp of seg.zoomPoints) {
+      if (zp.staged) continue;
+      const speed = Math.max(0.1, seg.speed);
+      const durTimeline = Math.max(zp.dur, 0.001) / speed;
+      const holdTimeline = (zp.hold ?? 2.0) / speed;
+      const tTimeline = segStart + (zp.t - seg.srcStart) / speed;
+      allTimelinePoints.push({
+        ...zp,
+        t: tTimeline,
+        dur: durTimeline,
+        hold: holdTimeline,
+      });
+    }
+    segStart += d;
+  }
+
+  if (allTimelinePoints.length === 0) return IDENTITY;
+  return getCameraTransform(allTimelinePoints, timelineT);
+}
+
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
@@ -220,7 +251,11 @@ export function renderFrame(
   const paddingPx = (seg.stagePadding ?? 0) * (h / 1080) * 1.5;
   const rect = frameRect(w, h, media, seg.aspectPreset, paddingPx);
   if (currentFrame) {
-    const camTransform = options?.cameraOverride ?? (options?.isPlaying === false ? IDENTITY : getCameraTransform(seg.zoomPoints, srcT));
+    const camTransform =
+      options?.cameraOverride ??
+      (options?.isPlaying === false
+        ? IDENTITY
+        : getProjectCameraTransform(project, timelineT));
     const view = cameraViewport(rect, camTransform);
     ctx.save();
     // Clip with rounded corners when padded, or standard rect

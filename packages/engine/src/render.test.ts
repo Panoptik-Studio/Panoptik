@@ -4,6 +4,7 @@ import {
   canvasToFrame,
   frameToCanvas,
   getCameraTransform,
+  getProjectCameraTransform,
   IDENTITY,
   renderFrame,
   resolveInterpolatedFacecam,
@@ -98,6 +99,70 @@ describe("getCameraTransform", () => {
     const mid = getCameraTransform([z], 0.25); // 25% linear would be 1.25, eased is less (ease in)
     expect(mid.scale).toBeLessThan(1.25 + 0.1);
     expect(mid.scale).toBeGreaterThan(1);
+  });
+});
+
+describe("getProjectCameraTransform across multi-clip boundaries", () => {
+  it("zoom in clip 1 continues holding and easing out smoothly into clip 2", () => {
+    const proj: Project = {
+      id: "p1",
+      name: "Test",
+      media: { width: 1920, height: 1080, duration: 10, fps: 30 },
+      segments: [
+        {
+          id: "seg1",
+          srcStart: 0,
+          srcEnd: 5,
+          speed: 1,
+          aspectPreset: "source",
+          facecam: { src: null, x: 0.8, y: 0.8, size: 0.2, shape: "circle" },
+          background: { kind: "solid", color: "#000" },
+          stagePadding: 0,
+          zoomPoints: [
+            zp({ id: "z1", t: 3.5, to: { scale: 2.2, x: 0.3, y: 0.3 }, dur: 0.5, hold: 2.0, ease: "linear" }),
+          ],
+          stagedZoomPoints: [],
+          textOverlays: [],
+          captions: [],
+        },
+        {
+          id: "seg2",
+          srcStart: 5,
+          srcEnd: 10,
+          speed: 1,
+          aspectPreset: "source",
+          facecam: { src: null, x: 0.8, y: 0.8, size: 0.2, shape: "circle" },
+          background: { kind: "solid", color: "#000" },
+          stagePadding: 0,
+          zoomPoints: [],
+          stagedZoomPoints: [],
+          textOverlays: [],
+          captions: [],
+        },
+      ],
+    };
+
+    // Before zoom in Clip 1
+    expect(getProjectCameraTransform(proj, 3.0)).toEqual(IDENTITY);
+
+    // Zoom in finishes at t=4.0 (3.5 + 0.5), holds at 2.2x until 4.0 + 2.0 = 6.0
+    expect(getProjectCameraTransform(proj, 4.2).scale).toBeCloseTo(2.2);
+
+    // Across the split boundary at t=5.0 (Clip 2 begins): still holds at 2.2x!
+    const atSplit = getProjectCameraTransform(proj, 5.0);
+    expect(atSplit.scale).toBeCloseTo(2.2);
+    expect(atSplit.x).toBeCloseTo(0.3);
+
+    // At t=5.8 (still in hold window inside Clip 2): holds at 2.2x
+    expect(getProjectCameraTransform(proj, 5.8).scale).toBeCloseTo(2.2);
+
+    // At t=6.25 (midway through zoom out in Clip 2): smoothly easing out (between 2.2 and 1.0)
+    const midEaseOut = getProjectCameraTransform(proj, 6.25);
+    expect(midEaseOut.scale).toBeLessThan(2.2);
+    expect(midEaseOut.scale).toBeGreaterThan(1.0);
+
+    // At t=6.6 (after zoom out ends at 6.5 in Clip 2): settled at 1.0x
+    expect(getProjectCameraTransform(proj, 6.6)).toEqual(IDENTITY);
   });
 });
 

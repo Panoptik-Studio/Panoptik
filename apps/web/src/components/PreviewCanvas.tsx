@@ -24,6 +24,7 @@ import {
   frameRect,
   frameToCanvas,
   getCameraTransform,
+  getProjectCameraTransform,
   outputSize,
   projectDuration,
   resolveInterpolatedFacecam,
@@ -78,7 +79,7 @@ function canvasGeometry(
     paddingPx,
   );
   // When paused, zoom out to 100% full scale so all zoom ticks are clearly visible
-  const cam = isPlaying === false ? IDENTITY : getCameraTransform(seg.zoomPoints, srcT);
+  const cam = isPlaying === false ? IDENTITY : getProjectCameraTransform(project, t);
   const view = cameraViewport(rect, cam);
   return { rect, view, srcT, radius: Math.max(10, rect.w * 0.014) };
 }
