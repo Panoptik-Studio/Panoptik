@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { makeBuffer, timeStretch } from "./timeStretch";
+import { concatAudio, makeBuffer, makeMock, sliceAndStretchAudio, timeStretch } from "./timeStretch";
+import type { Segment } from "@panoptik/schema";
 
 function mockAudioBuffer(sampleRate: number, channels: Float32Array[]) {
   return {
@@ -75,5 +76,44 @@ describe("timeStretch (pitch-preserving WSOLA)", () => {
     expect(b.length).toBe(1000);
     expect(b.numberOfChannels).toBe(1);
     expect(b.getChannelData(0).length).toBe(1000);
+  });
+});
+
+describe("segment-windowed audio (sliceAndStretchAudio / concatAudio)", () => {
+  const seg = (srcStart: number, srcEnd: number, speed: number): Segment => ({
+    id: "s", srcStart, srcEnd, speed, stagePadding: 0,
+    aspectPreset: "source", background: { kind: "solid", color: "#000" },
+    facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+    zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
+    captions: [], stagedCaptions: [],
+  });
+
+  it("slices exactly [srcStart, srcEnd) in seconds", () => {
+    const src = makeMock(48000, 48000); // 1s
+    const out = sliceAndStretchAudio(src, seg(0.25, 0.75, 1));
+    expect(out.duration).toBeCloseTo(0.5, 3);
+    expect(out.getChannelData(0).length).toBe(Math.round(0.5 * 48000));
+  });
+
+  it("clamps an out-of-range window to silence rather than exploding", () => {
+    const src = makeMock(4800, 48000);
+    const out = sliceAndStretchAudio(src, seg(99, 100, 1));
+    expect(Number.isFinite(out.duration)).toBe(true);
+    expect(out.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("stretches each slice by its own speed and concatenates in order", () => {
+    // Two segments: 0→1s at 2x (0.5s out) then 1→2s at 1x (1.0s out).
+    const src = makeMock(96000, 48000); // 2s
+    const parts = [sliceAndStretchAudio(src, seg(0, 1, 2)), sliceAndStretchAudio(src, seg(1, 2, 1))];
+    const out = concatAudio(parts);
+    expect(out.duration).toBeCloseTo(0.5 + 1.0, 2);
+    expect(out.sampleRate).toBe(48000);
+    expect(out.numberOfChannels).toBe(1);
+  });
+
+  it("concatAudio returns a single part untouched", () => {
+    const p = makeMock(100, 48000);
+    expect(concatAudio([p])).toBe(p);
   });
 });

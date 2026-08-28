@@ -9,7 +9,13 @@
  *
  * Pure TS, no DOM/WebAPI needed — runs under node for tests and in the browser
  * for export.
+ *
+ * Plus the per-segment windowing helpers export uses: slice a source
+ * AudioBuffer into its segment's [srcStart, srcEnd) range, time-stretch that
+ * slice by the segment's speed, and concatenate the stretched parts so the
+ * final exported audio matches the timeline length.
  */
+import type { Segment } from "@panoptik/schema";
 
 /** Build a DOM-free AudioBuffer, using the native ctor when available. */
 export function makeBuffer(
@@ -169,4 +175,69 @@ export function timeStretch(buffer: AudioBuffer, rate: number): AudioBuffer {
   }
 
   return makeBuffer(nCh, outLen, sr, channels);
+}
+
+/** Build a silent mono AudioBuffer of `length` frames at 48kHz — test helper. */
+export function makeMock(length: number, sampleRate = 48000, numberOfChannels = 1): AudioBuffer {
+  const channels: Float32Array[] = Array.from(
+    { length: numberOfChannels },
+    () => new Float32Array(length),
+  );
+  return makeBuffer(numberOfChannels, length, sampleRate, channels);
+}
+
+/**
+ * Slice the source window [srcStart*sr, srcEnd*sr) out of `buffer`.
+ * Degenerate and out-of-range windows come back as one silent sample so
+ * downstream timeStretch never has to divide a zero-length input.
+ */
+export function sliceSegment(
+  buffer: AudioBuffer,
+  srcStart: number,
+  srcEnd: number,
+): AudioBuffer {
+  const sr = buffer.sampleRate;
+  const from = Math.max(0, Math.round(srcStart * sr));
+  const to = Math.min(buffer.length, Math.round(srcEnd * sr));
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+    const silent = new Float32Array(1);
+    return makeBuffer(buffer.numberOfChannels, 1, sr, Array.from({ length: buffer.numberOfChannels }, () => silent));
+  }
+  const channels: Float32Array[] = [];
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    channels.push(buffer.getChannelData(ch)!.slice(from, to));
+  }
+  return makeBuffer(buffer.numberOfChannels, to - from, sr, channels);
+}
+
+/** Slice a segment's source range out of the clip's audio, then stretch it by `seg.speed`. */
+export function sliceAndStretchAudio(buffer: AudioBuffer, seg: Segment): AudioBuffer {
+  return timeStretch(sliceSegment(buffer, seg.srcStart, seg.srcEnd), seg.speed);
+}
+
+/** Concatenate audio parts end-to-end at the first part's sample rate. */
+export function concatAudio(parts: AudioBuffer[]): AudioBuffer {
+  if (parts.length === 0) return makeMock(1);
+  if (parts.length === 1) return parts[0]!;
+  const sampleRate = parts[0]!.sampleRate;
+  const numberOfChannels = Math.max(...parts.map((p) => p.numberOfChannels));
+  const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
+  const channels: Float32Array[] = Array.from(
+    { length: numberOfChannels },
+    () => new Float32Array(totalLength),
+  );
+  let offset = 0;
+  for (const part of parts) {
+    for (let ch = 0; ch < numberOfChannels; ch++) {
+      const src = ch < part.numberOfChannels ? part.getChannelData(ch) : null;
+      if (src) channels[ch]!.set(src, offset);
+    }
+    offset += part.length;
+  }
+  return makeBuffer(numberOfChannels, totalLength, sampleRate, channels);
+}
+
+/** Total duration of the concatenation of `parts` — handy for tests. */
+export function concatDurations(parts: AudioBuffer[]): number {
+  return concatAudio(parts).duration;
 }

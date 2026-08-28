@@ -386,12 +386,21 @@ export async function loadClip(file: File): Promise<Project> {
   objectUrl = URL.createObjectURL(file);
   return {
     id: crypto.randomUUID(),
-    clip: { src: objectUrl, duration, width: displayWidth, height: displayHeight },
-    zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
-    captions: [], stagedCaptions: [],
-    background: { kind: "solid", color: "#000000" },
-    facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
-    clickLog: [], aspectPreset: "source",
+    media: { src: objectUrl, duration, width: displayWidth, height: displayHeight },
+    audioSrc: null,
+    segments: [{
+      id: crypto.randomUUID(),
+      srcStart: 0,
+      srcEnd: duration,
+      speed: 1,
+      stagePadding: 0,
+      aspectPreset: "source",
+      background: { kind: "solid", color: "#000000" },
+      facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+      zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
+      captions: [], stagedCaptions: [],
+    }],
+    clickLog: [],
   };
 }
 

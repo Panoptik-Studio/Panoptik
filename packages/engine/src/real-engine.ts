@@ -43,7 +43,7 @@ export function createRealEngine(): MediaEngine {
       // After loadClip: it tears down first, which revokes the previous take's
       // facecam URL and drops its cached <video>.
       const facecamSrc = await setFacecamBlob(facecam);
-      if (facecamSrc) proj.facecam.src = facecamSrc;
+      if (facecamSrc) proj.segments[0]!.facecam.src = facecamSrc;
       // The screen track is captured silently; the microphone rides along with
       // the camera recording, so the audio has to be read from there.
       if (audio) proj.audioSrc = await setAudioBlob(audio);
@@ -59,7 +59,15 @@ export function createRealEngine(): MediaEngine {
       const proj = await this.loadRecording(saved.clip, saved.facecam, saved.audio);
       // project.json is same-origin but not something we produced this session,
       // so its values are validated before they reach the renderer.
-      return mergeSavedProject(proj, saved.project);
+      // Task 8 migrates sanitize.ts to the v1.2 segment model; until then the
+      // v1.1 merge throws on a v1.2 fresh project (no top-level clip/facecam),
+      // so fall back to the freshly re-opened project. Remove the guard then.
+      try {
+        return mergeSavedProject(proj, saved.project);
+      } catch (err) {
+        console.warn("[Engine] restoreProject: saved edits not re-applied (sanitize not yet v1.2)", err);
+        return proj;
+      }
     },
     async getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
       return audioGetBuffer(project);

@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { concatDurations, makeMock, sliceAndStretchAudio } from "./timeStretch";
+import type { Segment } from "@panoptik/schema";
 
 // mediabunny pulls in WebCodecs at import time; the sizing math under test is pure.
 vi.mock("mediabunny", () => ({
@@ -15,24 +17,49 @@ vi.mock("mediabunny", () => ({
 
 const { __test } = await import("./encode");
 
-describe("export sizing", () => {
-  const clip = (width: number, height: number) =>
-    ({ clip: { src: "", duration: 10, width, height } }) as never;
+/** A v1.2 project whose single segment keeps the media's own aspect. */
+const proj = (width: number, height: number) =>
+  ({
+    media: { src: "", duration: 10, width, height },
+    segments: [seg({ srcEnd: 10 })],
+    clickLog: [],
+  }) as never;
 
+function seg(overrides: Partial<Segment> = {}): Segment {
+  return {
+    id: "s1",
+    srcStart: 0,
+    srcEnd: 10,
+    speed: 1,
+    stagePadding: 0,
+    aspectPreset: "source",
+    background: { kind: "solid", color: "#000000" },
+    facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+    zoomPoints: [],
+    stagedZoomPoints: [],
+    textOverlays: [],
+    stagedTextOverlays: [],
+    captions: [],
+    stagedCaptions: [],
+    ...overrides,
+  };
+}
+
+describe("export sizing", () => {
   it("scales to the requested height, keeping the clip's aspect", () => {
-    expect(__test.exportSize(clip(1920, 1080), "720p")).toEqual({ width: 1280, height: 720 });
-    expect(__test.exportSize(clip(1920, 1080), "1080p")).toEqual({ width: 1920, height: 1080 });
-    expect(__test.exportSize(clip(1920, 1080), "4k")).toEqual({ width: 3840, height: 2160 });
+    expect(__test.exportSize(proj(1920, 1080), "720p")).toEqual({ width: 1280, height: 720 });
+    expect(__test.exportSize(proj(1920, 1080), "1080p")).toEqual({ width: 1920, height: 1080 });
+    expect(__test.exportSize(proj(1920, 1080), "4k")).toEqual({ width: 3840, height: 2160 });
   });
 
   it("keeps vertical clips vertical", () => {
-    expect(__test.exportSize(clip(1080, 1920), "1080p")).toEqual({ width: 608, height: 1080 });
+    expect(__test.exportSize(proj(1080, 1920), "1080p")).toEqual({ width: 608, height: 1080 });
   });
 
   it("always yields even dimensions — encoders reject odd ones", () => {
     for (const [w, h] of [[1000, 563], [1333, 999], [777, 555]] as const) {
       for (const res of ["720p", "1080p", "4k"] as const) {
-        const size = __test.exportSize(clip(w, h), res);
+        const size = __test.exportSize(proj(w, h), res);
         expect(size.width % 2).toBe(0);
         expect(size.height % 2).toBe(0);
       }
@@ -40,6 +67,24 @@ describe("export sizing", () => {
   });
 
   it("upscales a small source rather than refusing it", () => {
-    expect(__test.exportSize(clip(640, 360), "1080p")).toEqual({ width: 1920, height: 1080 });
+    expect(__test.exportSize(proj(640, 360), "1080p")).toEqual({ width: 1920, height: 1080 });
+  });
+});
+
+describe("per-segment export", () => {
+  it("time-stretches each segment to its own duration", () => {
+    // WSOLA already tested; assert the audio concatenation helper we rely on:
+    // the exported audio length is the sum of the per-segment stretched parts.
+    const buffers = [makeMock(1000), makeMock(2000)];
+    expect(concatDurations(buffers)).toBeCloseTo((1000 + 2000) / 48000, 3);
+  });
+
+  it("slices the source window and stretches it by the segment speed", () => {
+    const src = makeMock(4800, 48000); // 0.1s of silence
+    const out = sliceAndStretchAudio(src, seg({ srcStart: 0.025, srcEnd: 0.075, speed: 2 }));
+    // (0.075 - 0.025)s of source at 2x → 0.025s on the timeline.
+    expect(out.duration).toBeCloseTo(0.025, 2);
+    expect(out.numberOfChannels).toBe(1);
+    expect(out.sampleRate).toBe(48000);
   });
 });

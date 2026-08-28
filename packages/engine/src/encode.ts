@@ -21,9 +21,10 @@ import type { ExportOpts, Project } from "@panoptik/schema";
 import { presetAspect } from "./layout";
 import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator } from "./decode";
 import { renderFrame } from "./render";
-import { timeStretch } from "./timeStretch";
+import { concatAudio, sliceAndStretchAudio } from "./timeStretch";
+import { projectDuration, segmentDuration } from "./timeline";
 
-/** Long-edge pixel height for each preset; width follows the clip's aspect. */
+/** Long-edge pixel height for each preset; width follows the media's aspect. */
 const RESOLUTION_HEIGHTS: Record<ExportOpts["resolution"], number> = {
   "720p": 720,
   "1080p": 1080,
@@ -59,8 +60,10 @@ function emitProgress(value: number): void {
  * Odd sizes are rejected outright by several encoders.
  */
 function exportSize(project: Project, resolution: ExportOpts["resolution"]) {
-  // The preset decides the frame's shape; the resolution decides its height.
-  const aspect = presetAspect(project.aspectPreset, project.clip.width, project.clip.height);
+  // The active segment's preset decides the frame's shape; the resolution
+  // decides its height. "source" defers to the media, so it never bars.
+  const seg = project.segments[0];
+  const aspect = presetAspect(seg?.aspectPreset ?? "source", project.media);
   const height = RESOLUTION_HEIGHTS[resolution];
   const width = Math.round(height * aspect);
   return { width: width - (width % 2), height: height - (height % 2) };
@@ -82,21 +85,7 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
   try {
     const { width, height } = exportSize(project, opts.resolution);
     const requestedIsMp4 = opts.format === "mp4";
-    // PlaybackRate from opts or persisted store (0.25–3, cam+screen together)
-    let playbackRate = opts.playbackRate ?? 1;
-    if (!opts.playbackRate) {
-      try {
-        const v = Number(typeof localStorage !== "undefined" ? localStorage.getItem("panoptik:playbackRate") : null);
-        if (Number.isFinite(v) && v >= 0.25 && v <= 3) playbackRate = v;
-        else {
-          const g = (globalThis as unknown as { localStorage?: Storage }).localStorage?.getItem("panoptik:playbackRate");
-          const gv = Number(g);
-          if (Number.isFinite(gv) && gv >= 0.25 && gv <= 3) playbackRate = gv;
-        }
-      } catch { /* ignore */ }
-    }
-    playbackRate = Math.min(3, Math.max(0.25, Math.round(playbackRate * 20) / 20));
-    console.log("[Export] playbackRate", playbackRate);
+    console.log("[Export]", project.segments.map((s) => `seg ${s.id} ${s.srcStart}-${s.srcEnd} @${s.speed}x`).join(" | "));
 
     // Need audioBuffer early to decide container when aac not encodable.
     // For maximal compatibility: mp4+avc+aac is the gold standard for every
@@ -191,14 +180,17 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
       console.warn("[Export] no encodable audio codec -> silent. Try WebM on Linux.");
     }
 
-    // Pitch-preserving time-stretch for speed. The old path used
-    // AudioBufferSourceNode.playbackRate (vari-speed), which raised the pitch
-    // like a chipmunk — only the preview's <audio> element preserved pitch.
+    // Pitch-preserving per-segment time-stretch. The old path stretched the
+    // whole clip by a single playbackRate (and before that used vari-speed
+    // playbackRate, which raised pitch like a chipmunk). Speed is now per
+    // segment: each segment's source window is sliced out and stretched to its
+    // own timeline length, then concatenated so the muxed audio matches video.
     let spedAudioBuffer: AudioBuffer | null = audioBuffer;
-    if (audioBuffer && playbackRate !== 1) {
+    if (audioBuffer) {
       try {
-        spedAudioBuffer = timeStretch(audioBuffer, playbackRate);
-        console.log("[Export] pitch-preserving time-stretch", { from: audioBuffer.duration.toFixed(2), to: spedAudioBuffer.duration.toFixed(2), rate: playbackRate, ch: spedAudioBuffer.numberOfChannels, sr: spedAudioBuffer.sampleRate });
+        const parts = project.segments.map((seg) => sliceAndStretchAudio(audioBuffer, seg));
+        spedAudioBuffer = concatAudio(parts);
+        console.log("[Export] per-segment audio windows", { parts: parts.length, from: audioBuffer.duration.toFixed(2), to: spedAudioBuffer.duration.toFixed(2), segments: project.segments.map((s) => `${s.srcStart}-${s.srcEnd}@${s.speed}x`) });
       } catch (e) {
         console.warn("[Export] audio time-stretch failed, using original", e);
         spedAudioBuffer = audioBuffer;
@@ -207,28 +199,37 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
 
     await output.start();
 
-    const duration = Math.max(0, project.clip.duration / playbackRate);
-    const totalFrames = Math.max(1, Math.ceil(duration * EXPORT_FPS));
+    const totalTimeline = projectDuration(project);
     const frameDuration = 1 / EXPORT_FPS;
 
     try {
-      for (let i = 0; i < totalFrames; i++) {
-        const tEff = i / EXPORT_FPS;
-        const tSrc = tEff * playbackRate;
-        // Decode before composing: renderFrame draws whatever frame is current,
-        // so without awaiting here every output frame would be the same picture.
-        // Use prepareAllFrames so cam+screen stay synced at speed (facecam pump now fixed for holes, no more scan-to-EOF stall at 2.7s)
-        if (i % 60 === 0) console.log("[Export] frame", i, "/", totalFrames, "tEff", tEff.toFixed(2), "tSrc", tSrc.toFixed(2));
-        await prepareAllFrames(tSrc);
-        renderFrame(ctx as unknown as CanvasRenderingContext2D, project, tSrc);
-        // Awaited so encoder backpressure actually throttles us rather than
-        // queueing the whole clip into memory.
-        await videoSource.add(tEff, frameDuration);
-        if (i % EXPORT_FPS === 0) emitProgress(i / totalFrames);
+      // Temporal mapping: renderFrame resolves the active segment from timeline
+      // time, so we step each segment at its own speed and feed it the absolute
+      // timeline cursor. Frames decode at source time (srcT) which changes with
+      // segment speed; present times are timeline time.
+      let timelineCursor = 0;
+      for (const seg of project.segments) {
+        const dur = segmentDuration(seg);
+        const totalFrames = Math.max(1, Math.ceil(dur * EXPORT_FPS));
+        for (let i = 0; i < totalFrames; i++) {
+          const tEff = i / EXPORT_FPS;
+          const srcT = seg.srcStart + tEff * seg.speed;
+          // Decode before composing: renderFrame draws whatever frame is current,
+          // so without awaiting here every output frame would be the same picture.
+          // Use prepareAllFrames so cam+screen stay synced at speed (facecam pump now fixed for holes, no more scan-to-EOF stall at 2.7s)
+          if (i % 60 === 0) console.log("[Export] frame", i, "/", totalFrames, "seg", seg.id, "tEff", tEff.toFixed(2), "srcT", srcT.toFixed(2));
+          await prepareAllFrames(srcT);
+          renderFrame(ctx as unknown as CanvasRenderingContext2D, project, timelineCursor + tEff);
+          // Awaited so encoder backpressure actually throttles us rather than
+          // queueing the whole clip into memory.
+          await videoSource.add(timelineCursor + tEff, frameDuration);
+          if (i % EXPORT_FPS === 0) emitProgress(totalTimeline > 0 ? (timelineCursor + tEff) / totalTimeline : i / totalFrames);
+        }
+        timelineCursor += dur;
       }
 
       if (audioSource && spedAudioBuffer) {
-        console.log("[Export] adding audio buffer to muxer", spedAudioBuffer.duration.toFixed(2), "s", "rate", playbackRate);
+        console.log("[Export] adding audio buffer to muxer", spedAudioBuffer.duration.toFixed(2), "s");
         await audioSource.add(spedAudioBuffer);
         console.log("[Export] audio added");
       } else {
