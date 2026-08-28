@@ -381,7 +381,7 @@ function drawFacecamGridGuides(
   fc: Facecam,
 ) {
   const pipW = canvasW * fc.size;
-  const pipH = pipW / (16 / 9);
+  const pipH = pipW;
 
   ctx.save();
   // 3x3 Grid Guidelines:
@@ -415,7 +415,7 @@ function drawFacecamGridGuides(
 
       if (typeof ctx.roundRect === "function") {
         ctx.beginPath();
-        ctx.roundRect(gx, gy, pipW, pipH, fc.shape === "circle" ? pipW / 2 : 10);
+        ctx.roundRect(gx, gy, pipW, pipH, fc.shape === "circle" ? pipW / 2 : Math.round(pipW * 0.16));
         ctx.fill();
         ctx.stroke();
       } else {
@@ -799,7 +799,7 @@ export function PreviewCanvas() {
         const cw = canvas.width;
         const ch = canvas.height;
         const pipW = cw * resolved.size;
-        const pipH = pipW / (16 / 9);
+        const pipH = pipW;
         const fx = cw * resolved.x;
         const fy = ch * resolved.y;
         if (px >= fx && px <= fx + pipW && py >= fy && py <= fy + pipH) {
@@ -836,7 +836,7 @@ export function PreviewCanvas() {
         const ch = canvas.height;
         const fc = active.seg.facecam;
         const pipW = cw * fc.size;
-        const pipH = pipW / (16 / 9);
+        const pipH = pipW;
         const off = facecamDragOffset.current;
         if (!off) return;
         let fx = px - off.dx;
@@ -912,7 +912,7 @@ export function PreviewCanvas() {
           const cw = canvas.width;
           const ch = canvas.height;
           const pipW = cw * resolved.size;
-          const pipH = pipW / (16 / 9);
+          const pipH = pipW;
           const fx = cw * resolved.x;
           const fy = ch * resolved.y;
           if (hx >= fx && hx <= fx + pipW && hy >= fy && hy <= fy + pipH) {
@@ -974,7 +974,7 @@ export function PreviewCanvas() {
         const cw = canvas.width;
         const ch = canvas.height;
         const pipW = cw * resolved.size;
-        const pipH = pipW / (16 / 9);
+        const pipH = pipW;
         const fx = cw * resolved.x;
         const fy = ch * resolved.y;
         if (px >= fx && px <= fx + pipW && py >= fy && py <= fy + pipH) {

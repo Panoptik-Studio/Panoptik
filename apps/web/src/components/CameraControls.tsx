@@ -272,7 +272,7 @@ export function CameraControls() {
   const hasCameraTrack = !!seg.facecam.src;
 
   const camHeightFraction = (size: number) =>
-    (size * (project.media.width / project.media.height)) / CAMERA_ASPECT;
+    size * (project.media.width / project.media.height);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

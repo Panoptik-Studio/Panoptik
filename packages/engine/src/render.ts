@@ -608,27 +608,18 @@ function drawFacecam(
 
   if (!source) return;
 
-  const PIP_ASPECT = 16 / 9;
-  const pipW = Math.round(canvasW * effectiveSize);
-  const pipH = Math.round(pipW / PIP_ASPECT);
+  const curW = Math.round(canvasW * effectiveSize);
+  const curH = curW;
   const x = Math.round(canvasW * effectiveX);
   const y = Math.round(canvasH * effectiveY);
   // Clamp inside canvas
-  const clampedX = clamp(x, 0, Math.max(0, canvasW - pipW));
-  const clampedY = clamp(y, 0, Math.max(0, canvasH - pipH));
+  const bX = clamp(x, 0, Math.max(0, canvasW - curW));
+  const bY = clamp(y, 0, Math.max(0, canvasH - curH));
 
   const shapeProgress = resolved?.shapeProgress ?? (fc.shape === "circle" ? 1 : 0);
-  const minDim = Math.min(pipW, pipH);
-  const curW = pipW + (minDim - pipW) * shapeProgress;
-  const curH = pipH + (minDim - pipH) * shapeProgress;
-  const rSquare = 12;
-  const rCircle = minDim / 2;
-  const curR = Math.min(Math.min(curW, curH) / 2, rSquare + (rCircle - rSquare) * shapeProgress);
-
-  const cX = clampedX + pipW / 2;
-  const cY = clampedY + pipH / 2;
-  const bX = cX - curW / 2;
-  const bY = cY - curH / 2;
+  const rSquare = Math.round(curW * 0.16);
+  const rCircle = curW / 2;
+  const curR = Math.min(curW / 2, rSquare + (rCircle - rSquare) * shapeProgress);
 
   const buildPath = () => {
     ctx.beginPath();

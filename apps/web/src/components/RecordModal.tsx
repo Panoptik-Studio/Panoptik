@@ -43,7 +43,7 @@ const CAMERA_ASPECT = 16 / 9;
  * *width*, so converting to a height fraction goes through both aspects.
  */
 export function facecamHeightFraction(size: number, canvasAspect: number): number {
-  return (size * canvasAspect) / CAMERA_ASPECT;
+  return size * canvasAspect;
 }
 
 /**
