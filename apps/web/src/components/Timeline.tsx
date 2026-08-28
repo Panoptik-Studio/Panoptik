@@ -96,6 +96,30 @@ export function Timeline() {
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
   const exportProgress = useProjectStore((s) => s.exportProgress);
   const [showSpeed, setShowSpeed] = useState(false);
+  const speedHideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseEnterSpeed = () => {
+    if (exportProgress !== null) return;
+    if (speedHideTimerRef.current) {
+      clearTimeout(speedHideTimerRef.current);
+      speedHideTimerRef.current = null;
+    }
+    setShowSpeed(true);
+  };
+
+  const handleMouseLeaveSpeed = () => {
+    if (speedHideTimerRef.current) clearTimeout(speedHideTimerRef.current);
+    speedHideTimerRef.current = setTimeout(() => {
+      setShowSpeed(false);
+    }, 1000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (speedHideTimerRef.current) clearTimeout(speedHideTimerRef.current);
+    };
+  }, []);
+
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -450,6 +474,10 @@ export function Timeline() {
   const handleTimelinePointerDown = useCallback((e: React.PointerEvent) => {
     if (contextMenu) setContextMenu(null);
     if (!scrollRef.current || draggingDiamond) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('#facecam-transition-popover, #timeline-context-menu, input, button')) {
+      return;
+    }
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     const px = timeToX(currentTime);
@@ -470,10 +498,10 @@ export function Timeline() {
       return;
     }
 
-    // If near playhead (20px), drag playhead; otherwise seek and start dragging
-    if (Math.abs(x - px) < 20 || (e.target as HTMLElement).closest('.playhead, .timeline-canvas, .timeline-scroll-area')) {
+    // If near playhead (20px) or on canvas, drag playhead; otherwise seek and start dragging
+    if (Math.abs(x - px) < 20 || target.closest('.playhead, .timeline-canvas')) {
       setIsDraggingPlayhead(true);
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      target.setPointerCapture?.(e.pointerId);
       seek(xToTime(x));
       e.preventDefault();
     }
@@ -603,47 +631,94 @@ export function Timeline() {
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Volume"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></button>
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Split at playhead" disabled={exportProgress !== null} onClick={() => splitAt(currentTime)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="6.5" height="14" rx="1.5" /><rect x="14.5" y="5" width="6.5" height="14" rx="1.5" /><line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2.5 2" strokeWidth="1.6" /></svg></button>
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Mosaic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></button>
-          <div className="relative" onMouseEnter={() => exportProgress === null && setShowSpeed(true)} onMouseLeave={() => setShowSpeed(false)}>
-            <button className="pk-icon-btn ctrl-btn h-8 w-8 relative" title={`Speed ${segSpeed}x`} disabled={!canSpeed}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{segSpeed !== 1 && <span className="absolute -right-1 -top-1 rounded-full bg-[#0070f3] px-1 py-0.5 text-[9px] font-bold leading-none text-white">{segSpeed}x</span>}</button>
+          <div
+            className="relative"
+            onMouseEnter={handleMouseEnterSpeed}
+            onMouseLeave={handleMouseLeaveSpeed}
+          >
+            <button
+              className="pk-icon-btn ctrl-btn h-8 w-8 relative"
+              title={`Speed ${segSpeed}x`}
+              disabled={!canSpeed}
+              onClick={() => {
+                if (!canSpeed) return;
+                if (speedHideTimerRef.current) clearTimeout(speedHideTimerRef.current);
+                setShowSpeed((s) => !s);
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              {segSpeed !== 1 && (
+                <span className="absolute -right-1 -top-1 rounded-full bg-[#0070f3] px-1 py-0.5 text-[9px] font-bold leading-none text-white">
+                  {segSpeed}x
+                </span>
+              )}
+            </button>
             {showSpeed && exportProgress === null && (
-              <div className="absolute bottom-full left-1/2 z-30 mb-2 flex -translate-x-1/2 flex-col items-center gap-1.5 rounded-xl border bg-white p-2 shadow-vercel-3" style={{ borderColor: "#ebebeb", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
-                <div className="flex gap-1">
-                  {[0.5, 1, 1.5, 2, 3].map((v) => (
-                    <button key={v} onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: v })} className="pk-seg min-w-[44px] text-xs" data-active={segSpeed === v}>{v}x</button>
-                  ))}
+              <div
+                className="absolute bottom-full left-1/2 z-30 pb-2 -translate-x-1/2"
+                onMouseEnter={handleMouseEnterSpeed}
+                onMouseLeave={handleMouseLeaveSpeed}
+              >
+                <div
+                  className="flex flex-col items-center gap-1.5 rounded-xl border bg-white p-2 shadow-vercel-3 animate-in fade-in zoom-in-95 duration-100"
+                  style={{ borderColor: "#ebebeb", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}
+                >
+                  <div className="flex gap-1">
+                    {[0.5, 1, 1.5, 2, 3].map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => {
+                          if (selectedSegmentId) updateSegment(selectedSegmentId, { speed: v });
+                        }}
+                        className="pk-seg min-w-[44px] text-xs"
+                        data-active={segSpeed === v}
+                      >
+                        {v}x
+                      </button>
+                    ))}
+                  </div>
+                  {(() => {
+                    const segIdx = project?.segments.findIndex((s) => s.id === selectedSegmentId) ?? -1;
+                    const prevSeg = segIdx > 0 ? project?.segments[segIdx - 1] : null;
+                    const nextSeg = segIdx >= 0 && segIdx < (project?.segments.length ?? 0) - 1 ? project?.segments[segIdx + 1] : null;
+                    if (!prevSeg && !nextSeg) return null;
+                    return (
+                      <div className="flex w-full gap-1">
+                        {prevSeg && (
+                          <button
+                            onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: prevSeg.speed })}
+                            disabled={segSpeed === prevSeg.speed}
+                            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[#e5e5e5] bg-[#fafafa] py-1 text-[10px] font-medium text-[#555] transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3] disabled:opacity-40"
+                            title={`Match speed from previous clip (${prevSeg.speed}x)`}
+                          >
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="9 14 4 9 9 4" />
+                              <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+                            </svg>
+                            <span>Prev ({prevSeg.speed}x)</span>
+                          </button>
+                        )}
+                        {nextSeg && (
+                          <button
+                            onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: nextSeg.speed })}
+                            disabled={segSpeed === nextSeg.speed}
+                            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[#e5e5e5] bg-[#fafafa] py-1 text-[10px] font-medium text-[#555] transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3] disabled:opacity-40"
+                            title={`Match speed from next clip (${nextSeg.speed}x)`}
+                          >
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="15 14 20 9 15 4" />
+                              <path d="M4 20v-7a4 4 0 0 1 4-4h12" />
+                            </svg>
+                            <span>Next ({nextSeg.speed}x)</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
-                {(() => {
-                  const segIdx = project?.segments.findIndex((s) => s.id === selectedSegmentId) ?? -1;
-                  const prevSeg = segIdx > 0 ? project?.segments[segIdx - 1] : null;
-                  const nextSeg = segIdx >= 0 && segIdx < (project?.segments.length ?? 0) - 1 ? project?.segments[segIdx + 1] : null;
-                  if (!prevSeg && !nextSeg) return null;
-                  return (
-                    <div className="flex w-full gap-1">
-                      {prevSeg && (
-                        <button
-                          onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: prevSeg.speed })}
-                          disabled={segSpeed === prevSeg.speed}
-                          className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[#e5e5e5] bg-[#fafafa] py-1 text-[10px] font-medium text-[#555] transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3] disabled:opacity-40"
-                          title={`Match speed from previous clip (${prevSeg.speed}x)`}
-                        >
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
-                          <span>Prev ({prevSeg.speed}x)</span>
-                        </button>
-                      )}
-                      {nextSeg && (
-                        <button
-                          onClick={() => selectedSegmentId && updateSegment(selectedSegmentId, { speed: nextSeg.speed })}
-                          disabled={segSpeed === nextSeg.speed}
-                          className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[#e5e5e5] bg-[#fafafa] py-1 text-[10px] font-medium text-[#555] transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3] disabled:opacity-40"
-                          title={`Match speed from next clip (${nextSeg.speed}x)`}
-                        >
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
-                          <span>Next ({nextSeg.speed}x)</span>
-                        </button>
-                      )}
-                    </div>
-                  );
-                })()}
               </div>
             )}
           </div>
@@ -791,10 +866,13 @@ export function Timeline() {
               className="absolute z-40 w-[240px] rounded-2xl border bg-white p-3 shadow-vercel-4 animate-in fade-in zoom-in-95 duration-100"
               style={{
                 left: transitionPopover.x,
-                top: Math.max(10, FACECAM_TRACK_Y - 145),
+                top: Math.max(10, FACECAM_TRACK_Y - 155),
                 borderColor: "#ebebeb",
                 boxShadow: "0 12px 36px rgba(0,0,0,0.18)",
               }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerMove={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-2 flex items-center justify-between">
@@ -858,10 +936,19 @@ export function Timeline() {
               {(() => {
                 const targetSeg = project.segments.find((s) => s.id === transitionPopover.targetSegId);
                 const dur = targetSeg?.facecam.transitionDuration ?? 0.45;
+                const setDuration = (val: number) => {
+                  updateSegment(transitionPopover.targetSegId, {
+                    facecam: {
+                      ...(targetSeg?.facecam ?? { x: 0.8, y: 0.8, size: 0.22, src: null }),
+                      transitionDuration: Math.max(0.05, Math.min(1.0, Number(val.toFixed(2)))),
+                    },
+                  });
+                };
+
                 return (
                   <div className="mt-2 border-t border-[#f0f0f0] pt-2">
-                    <div className="mb-1 flex items-center justify-between text-[11px]">
-                      <span className="text-[#666]">Duration</span>
+                    <div className="mb-1.5 flex items-center justify-between text-[11px]">
+                      <span className="text-[#666]">Transition Duration</span>
                       <span className="font-mono font-bold text-[#0070f3]">{dur.toFixed(2)}s</span>
                     </div>
                     <input
@@ -870,17 +957,29 @@ export function Timeline() {
                       max={1.0}
                       step={0.05}
                       value={dur}
-                      onChange={(e) => {
-                        const nextDur = Number(e.target.value);
-                        updateSegment(transitionPopover.targetSegId, {
-                          facecam: {
-                            ...(targetSeg?.facecam ?? { x: 0.8, y: 0.8, size: 0.22, src: null }),
-                            transitionDuration: nextDur,
-                          },
-                        });
-                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onChange={(e) => setDuration(Number(e.target.value))}
                       className="pk-range w-full"
                     />
+                    <div className="mt-1.5 flex items-center justify-between gap-1">
+                      {[
+                        { label: "0.2s", val: 0.2 },
+                        { label: "0.45s", val: 0.45 },
+                        { label: "0.8s", val: 0.8 },
+                      ].map((p) => (
+                        <button
+                          key={p.val}
+                          onClick={() => setDuration(p.val)}
+                          className={`flex-1 rounded-md border py-0.5 text-[10px] font-medium transition-all ${
+                            Math.abs(dur - p.val) < 0.03
+                              ? "border-[#0070f3] bg-[#f0f7ff] font-bold text-[#0070f3]"
+                              : "border-[#e5e5e5] bg-[#fafafa] text-[#666] hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3]"
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 );
               })()}

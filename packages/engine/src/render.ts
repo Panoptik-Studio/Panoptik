@@ -213,16 +213,24 @@ export function resolveInterpolatedFacecam(
   project: Project,
   timelineT: number,
   seg: Segment,
-): { x: number; y: number; size: number; shape: "circle" | "square"; opacity: number } {
+): {
+  x: number;
+  y: number;
+  size: number;
+  shape: "circle" | "square";
+  shapeProgress: number;
+  opacity: number;
+} {
   const current = seg.facecam;
   const shape = current.shape === "circle" ? "circle" : "square";
+  const defaultProgress = shape === "circle" ? 1 : 0;
   if (!current.src) {
-    return { x: current.x, y: current.y, size: 0, shape, opacity: 0 };
+    return { x: current.x, y: current.y, size: 0, shape, shapeProgress: defaultProgress, opacity: 0 };
   }
 
   const segIdx = project.segments.findIndex((s) => s.id === seg.id);
   if (segIdx <= 0) {
-    return { x: current.x, y: current.y, size: current.size, shape, opacity: 1 };
+    return { x: current.x, y: current.y, size: current.size, shape, shapeProgress: defaultProgress, opacity: 1 };
   }
 
   const prevSeg = project.segments[segIdx - 1]!;
@@ -236,7 +244,7 @@ export function resolveInterpolatedFacecam(
   const timeInSeg = timelineT - segStartT;
 
   if (transitionType === "cut" || timeInSeg >= dur || timeInSeg < 0) {
-    return { x: current.x, y: current.y, size: current.size, shape, opacity: 1 };
+    return { x: current.x, y: current.y, size: current.size, shape, shapeProgress: defaultProgress, opacity: 1 };
   }
 
   const tFrac = Math.max(0, Math.min(1, timeInSeg / dur));
@@ -249,6 +257,7 @@ export function resolveInterpolatedFacecam(
       y: current.y,
       size: current.size * eased,
       shape,
+      shapeProgress: defaultProgress,
       opacity: eased,
     };
   }
@@ -263,6 +272,10 @@ export function resolveInterpolatedFacecam(
   }
 
   const prev = prevSeg.facecam;
+  const prevProgress = (prev.shape ?? "square") === "circle" ? 1 : 0;
+  const currProgress = (current.shape ?? "square") === "circle" ? 1 : 0;
+  const shapeProgress = Math.max(0, Math.min(1, prevProgress + (currProgress - prevProgress) * eased));
+
   const x = prev.x + (current.x - prev.x) * eased;
   const y = prev.y + (current.y - prev.y) * eased;
   const size = prev.size + (current.size - prev.size) * eased;
@@ -272,6 +285,7 @@ export function resolveInterpolatedFacecam(
     y,
     size: Math.max(0.01, size),
     shape,
+    shapeProgress,
     opacity: transitionType === "fade" ? 0.3 + 0.7 * eased : 1,
   };
 }

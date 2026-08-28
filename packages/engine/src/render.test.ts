@@ -6,6 +6,7 @@ import {
   getCameraTransform,
   IDENTITY,
   renderFrame,
+  resolveInterpolatedFacecam,
   setCurrentFrame,
 } from "./render";
 import { migrateProject, type Facecam, type Segment, type ZoomPoint, type Project } from "@panoptik/schema";
@@ -476,5 +477,102 @@ describe("renderFrame segment resolution", () => {
     expect(resolveSegment(p2, 3)!.segment.id).toBe("b");
     const { ctx } = makeCtx();
     renderFrame(ctx, p2, 3); // must not throw and must use segment b's facecam
+  });
+});
+
+describe("resolveInterpolatedFacecam smooth size & position transitions", () => {
+  const baseProject: Project = {
+    id: "p-fc",
+    media: { src: "video.mp4", duration: 10, width: 1920, height: 1080 },
+    segments: [
+      {
+        id: "seg-1",
+        srcStart: 0,
+        srcEnd: 5,
+        speed: 1,
+        stagePadding: 0,
+        aspectPreset: "16:9",
+        zoomPoints: [],
+        stagedZoomPoints: [],
+        textOverlays: [],
+        stagedTextOverlays: [],
+        captions: [],
+        stagedCaptions: [],
+        background: { kind: "solid", color: "#000000" },
+        facecam: { src: "cam.webm", x: 0.75, y: 0.75, size: 0.22, shape: "square" },
+      },
+      {
+        id: "seg-2",
+        srcStart: 5,
+        srcEnd: 10,
+        speed: 1,
+        stagePadding: 0,
+        aspectPreset: "16:9",
+        zoomPoints: [],
+        stagedZoomPoints: [],
+        textOverlays: [],
+        stagedTextOverlays: [],
+        captions: [],
+        stagedCaptions: [],
+        background: { kind: "solid", color: "#000000" },
+        facecam: {
+          src: "cam.webm",
+          x: 0.60,
+          y: 0.60,
+          size: 0.38,
+          shape: "square",
+          transition: "smooth",
+          transitionDuration: 0.6,
+        },
+      },
+    ],
+  };
+
+  it("smoothly interpolates size between 2 clips across transition duration", () => {
+    const seg2 = baseProject.segments[1]!;
+
+    // At t = 5.0 (transition start), size starts near seg1's 0.22
+    const atStart = resolveInterpolatedFacecam(baseProject, 5.0, seg2);
+    expect(atStart.size).toBeCloseTo(0.22, 2);
+    expect(atStart.x).toBeCloseTo(0.75, 2);
+
+    // At t = 5.3 (halfway through 0.6s duration), size is smoothly halfway between 0.22 and 0.38 (~0.30)
+    const atMid = resolveInterpolatedFacecam(baseProject, 5.3, seg2);
+    expect(atMid.size).toBeGreaterThan(0.25);
+    expect(atMid.size).toBeLessThan(0.35);
+    expect(atMid.size).toBeCloseTo(0.30, 1);
+    expect(atMid.x).toBeGreaterThan(0.60);
+    expect(atMid.x).toBeLessThan(0.75);
+
+    // At t = 5.6 (duration completed), size reaches target 0.38
+    const atEnd = resolveInterpolatedFacecam(baseProject, 5.6, seg2);
+    expect(atEnd.size).toBeCloseTo(0.38, 2);
+    expect(atEnd.x).toBeCloseTo(0.60, 2);
+
+    // After duration (e.g. t = 7.0), size stays at target 0.38
+    const atLater = resolveInterpolatedFacecam(baseProject, 7.0, seg2);
+    expect(atLater.size).toBeCloseTo(0.38, 2);
+    expect(atLater.x).toBeCloseTo(0.60, 2);
+  });
+
+  it("instant cut transition does not interpolate size", () => {
+    const pCut = {
+      ...baseProject,
+      segments: [
+        baseProject.segments[0]!,
+        {
+          ...baseProject.segments[1]!,
+          facecam: {
+            ...baseProject.segments[1]!.facecam,
+            transition: "cut" as const,
+            transitionDuration: 0.5,
+          },
+        },
+      ],
+    };
+    const seg2 = pCut.segments[1]!;
+    const atStart = resolveInterpolatedFacecam(pCut, 5.1, seg2);
+    expect(atStart.size).toBeCloseTo(0.38, 2);
+    expect(atStart.x).toBeCloseTo(0.60, 2);
   });
 });

@@ -210,6 +210,19 @@ export function CameraControls() {
     setFacecam({ src: null });
   };
 
+  const updateCameraSize = (newSize: number) => {
+    const size = Math.max(0.1, Math.min(0.48, Number(newSize.toFixed(2))));
+    const hFrac = camHeightFraction(size);
+    const updates: Partial<Facecam> = { size };
+    if (seg.facecam.x > 0.4) {
+      updates.x = Number((0.97 - size).toFixed(4));
+    }
+    if (seg.facecam.y > 0.4) {
+      updates.y = Number((0.97 - hFrac).toFixed(4));
+    }
+    setFacecam(updates);
+  };
+
   return (
     <div className="pk-panel">
       {/* Top Header */}
@@ -407,7 +420,7 @@ export function CameraControls() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setFacecam({ size: Math.max(0.1, Number((seg.facecam.size - 0.02).toFixed(2))) })}
+                onClick={() => updateCameraSize(seg.facecam.size - 0.02)}
                 className="pk-icon-btn h-7 w-7 text-xs"
               >
                 −
@@ -418,20 +431,12 @@ export function CameraControls() {
                 max={0.48}
                 step={0.01}
                 value={seg.facecam.size}
-                onChange={(e) => {
-                  const size = Number(e.target.value);
-                  const hFrac = camHeightFraction(size);
-                  setFacecam({
-                    size,
-                    x: seg.facecam.x > 0.5 ? 0.97 - size : seg.facecam.x,
-                    y: seg.facecam.y > 0.5 ? 0.97 - hFrac : seg.facecam.y,
-                  });
-                }}
+                onChange={(e) => updateCameraSize(Number(e.target.value))}
                 className="pk-range flex-1"
                 aria-label="Camera size"
               />
               <button
-                onClick={() => setFacecam({ size: Math.min(0.48, Number((seg.facecam.size + 0.02).toFixed(2))) })}
+                onClick={() => updateCameraSize(seg.facecam.size + 0.02)}
                 className="pk-icon-btn h-7 w-7 text-xs"
               >
                 +
@@ -446,7 +451,7 @@ export function CameraControls() {
               ].map((p) => (
                 <button
                   key={p.val}
-                  onClick={() => setFacecam({ size: p.val })}
+                  onClick={() => updateCameraSize(p.val)}
                   className="pk-seg"
                   data-active={Math.abs(seg.facecam.size - p.val) < 0.02}
                 >
