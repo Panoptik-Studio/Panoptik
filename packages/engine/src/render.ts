@@ -5,7 +5,7 @@
  * text overlays → captions; staged text/captions drawn amber #f59e0b).
  * Keyframe semantics: at k.t ease FROM current state TO k.to over k.dur, then hold.
  */
-import { EASINGS, easeInOutCubic, lerp } from "@panoptik/utils";
+import { EASINGS, easeInOutCubic, easeOutCubic, lerp } from "@panoptik/utils";
 import type {
   Background,
   Facecam,
@@ -14,7 +14,7 @@ import type {
   ZoomPoint,
 } from "@panoptik/schema";
 import { frameRect } from "./layout";
-import { resolveSegment } from "./timeline";
+import { resolveSegment, segmentDuration } from "./timeline";
 
 export type Transform = { scale: number; x: number; y: number };
 export const IDENTITY: Transform = { scale: 1, x: 0.5, y: 0.5 };
@@ -198,14 +198,82 @@ export function renderFrame(
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   }
 
-  // ── Layer 3: Facecam PiP (screen space, never zoomed) ──
-  drawFacecam(ctx, seg.facecam, srcT, w, h);
+  // ── Layer 3: Facecam PiP (screen space, smoothly animated across segment transitions) ──
+  const resolvedFc = resolveInterpolatedFacecam(project, timelineT, seg);
+  drawFacecam(ctx, seg.facecam, srcT, w, h, resolvedFc);
 
   // ── Layer 4: Text overlays ──
   drawTextOverlays(ctx, seg, srcT, w, h);
 
   // ── Layer 5: Captions ──
   drawCaptions(ctx, seg, srcT, w, h);
+}
+
+export function resolveInterpolatedFacecam(
+  project: Project,
+  timelineT: number,
+  seg: Segment,
+): { x: number; y: number; size: number; shape: "circle" | "square"; opacity: number } {
+  const current = seg.facecam;
+  const shape = current.shape === "circle" ? "circle" : "square";
+  if (!current.src) {
+    return { x: current.x, y: current.y, size: 0, shape, opacity: 0 };
+  }
+
+  const segIdx = project.segments.findIndex((s) => s.id === seg.id);
+  if (segIdx <= 0) {
+    return { x: current.x, y: current.y, size: current.size, shape, opacity: 1 };
+  }
+
+  const prevSeg = project.segments[segIdx - 1]!;
+  let segStartT = 0;
+  for (let i = 0; i < segIdx; i++) {
+    segStartT += segmentDuration(project.segments[i]!);
+  }
+
+  const transitionType = current.transition ?? "smooth";
+  const dur = Math.max(0.05, current.transitionDuration ?? 0.45);
+  const timeInSeg = timelineT - segStartT;
+
+  if (transitionType === "cut" || timeInSeg >= dur || timeInSeg < 0) {
+    return { x: current.x, y: current.y, size: current.size, shape, opacity: 1 };
+  }
+
+  const tFrac = Math.max(0, Math.min(1, timeInSeg / dur));
+
+  if (!prevSeg.facecam.src) {
+    // Facecam entering: scale up from 0 and fade in
+    const eased = easeOutCubic(tFrac);
+    return {
+      x: current.x,
+      y: current.y,
+      size: current.size * eased,
+      shape,
+      opacity: eased,
+    };
+  }
+
+  // Smooth ease between previous segment facecam and current segment facecam
+  let eased = easeInOutCubic(tFrac);
+  if (transitionType === "spring") {
+    // Punchy spring overshoot
+    eased = 1 + Math.sin(tFrac * Math.PI * 1.5) * Math.pow(1 - tFrac, 2) * 0.35;
+  } else if (transitionType === "slide") {
+    eased = easeOutCubic(tFrac);
+  }
+
+  const prev = prevSeg.facecam;
+  const x = prev.x + (current.x - prev.x) * eased;
+  const y = prev.y + (current.y - prev.y) * eased;
+  const size = prev.size + (current.size - prev.size) * eased;
+
+  return {
+    x,
+    y,
+    size: Math.max(0.01, size),
+    shape,
+    opacity: transitionType === "fade" ? 0.3 + 0.7 * eased : 1,
+  };
 }
 
 function drawBackground(
@@ -233,11 +301,9 @@ function drawBackground(
       const texW = (currentFrame as { width?: number }).width ?? w;
       const texH = (currentFrame as { height?: number }).height ?? h;
       // Fallback when CanvasImageSource is an OffscreenCanvas without width/height props read differently
-      const cw = (currentFrame as HTMLCanvasElement).width || w;
-      const ch = (currentFrame as HTMLCanvasElement).height || h;
-      const scale = Math.max(w / cw, h / ch);
-      const dw = cw * scale;
-      const dh = ch * scale;
+      const scale = Math.max(w / Math.max(texW, 1), h / Math.max(texH, 1));
+      const dw = texW * scale;
+      const dh = texH * scale;
       ctx.drawImage(currentFrame, (w - dw) / 2, (h - dh) / 2, dw, dh);
       ctx.restore();
       // Darken a bit so zooms remain readable
@@ -353,8 +419,15 @@ function drawFacecam(
   t: number,
   canvasW: number,
   canvasH: number,
+  resolved?: { x: number; y: number; size: number; shape: "circle" | "square"; opacity: number },
 ): void {
   if (!fc.src) return;
+  const effectiveSize = resolved ? resolved.size : fc.size;
+  const effectiveX = resolved ? resolved.x : fc.x;
+  const effectiveY = resolved ? resolved.y : fc.y;
+  const opacity = resolved ? resolved.opacity : 1;
+
+  if (effectiveSize <= 0.001 || opacity <= 0.01) return;
 
   // Prefer the decoded camera frame. It is stepped in lockstep with the clip,
   // so it stays in sync; the <video> fallback below only exists for projects
@@ -379,17 +452,18 @@ function drawFacecam(
     aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
   }
 
-  const pipW = Math.round(canvasW * fc.size);
+  const pipW = Math.round(canvasW * effectiveSize);
   const pipH = Math.round(pipW / aspect);
-  const x = Math.round(canvasW * fc.x);
-  const y = Math.round(canvasH * fc.y);
+  const x = Math.round(canvasW * effectiveX);
+  const y = Math.round(canvasH * effectiveY);
   // Clamp inside canvas
   const clampedX = clamp(x, 0, Math.max(0, canvasW - pipW));
   const clampedY = clamp(y, 0, Math.max(0, canvasH - pipH));
 
-  const shape = (fc as { shape?: string }).shape === "circle" ? "circle" : "square";
+  const shape = (resolved?.shape ?? fc.shape ?? "square") === "circle" ? "circle" : "square";
   const radius = shape === "circle" ? Math.min(pipW, pipH) / 2 : 12;
   ctx.save();
+  ctx.globalAlpha = opacity;
   // Rounded rect / circle clip — matches preview PiP (circle 50% vs square 12px)
   ctx.beginPath();
   if (shape === "circle") {
@@ -412,6 +486,7 @@ function drawFacecam(
   ctx.restore();
   // Subtle border — matches clip shape
   ctx.save();
+  ctx.globalAlpha = opacity;
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.lineWidth = 1.5;
   ctx.beginPath();

@@ -31,7 +31,15 @@ export type Background =
   | { kind: "gradient"; stops: [string, string] }
   | { kind: "blur" };
 
-export type Facecam = { src: string | null; x: number; y: number; size: number; shape?: "circle" | "square" }; // all normalized 0-1, shape for PiP
+export type Facecam = {
+  src: string | null;
+  x: number;
+  y: number;
+  size: number;
+  shape?: "circle" | "square";
+  transition?: "smooth" | "spring" | "fade" | "slide" | "cut";
+  transitionDuration?: number;
+}; // all normalized 0-1, shape for PiP
 
 export type ClickEvent = {
   t: number;

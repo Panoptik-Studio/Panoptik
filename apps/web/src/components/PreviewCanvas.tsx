@@ -25,6 +25,7 @@ import {
   getCameraTransform,
   outputSize,
   projectDuration,
+  resolveInterpolatedFacecam,
   resolveSegment,
 } from "@panoptik/engine";
 import type { Project, Segment, ZoomPoint } from "@panoptik/schema";
@@ -486,16 +487,17 @@ export function PreviewCanvas() {
       if (!canvas) return;
       const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
 
-      // Facecam hit test first — PiP is in screen space (full canvas), never zoomed
+      // Facecam hit test first — PiP is in screen space (full canvas), smoothly animated
       const active = resolveActive(state.project, state.currentTime);
       const fc = active.seg.facecam;
       if (fc.src) {
+        const resolved = resolveInterpolatedFacecam(state.project, state.currentTime, active.seg);
         const cw = canvas.width;
         const ch = canvas.height;
-        const pipW = cw * fc.size;
+        const pipW = cw * resolved.size;
         const pipH = pipW / (16 / 9);
-        const fx = cw * fc.x;
-        const fy = ch * fc.y;
+        const fx = cw * resolved.x;
+        const fy = ch * resolved.y;
         if (px >= fx && px <= fx + pipW && py >= fy && py <= fy + pipH) {
           e.preventDefault();
           canvas.setPointerCapture(e.pointerId);
@@ -562,12 +564,13 @@ export function PreviewCanvas() {
           const { x: hx, y: hy } = pointerToCanvas(canvas, e.clientX, e.clientY);
           const fc = active.seg.facecam;
           if (fc.src) {
+            const resolved = resolveInterpolatedFacecam(state.project, state.currentTime, active.seg);
             const cw = canvas.width;
             const ch = canvas.height;
-            const pipW = cw * fc.size;
+            const pipW = cw * resolved.size;
             const pipH = pipW / (16 / 9);
-            const fx = cw * fc.x;
-            const fy = ch * fc.y;
+            const fx = cw * resolved.x;
+            const fy = ch * resolved.y;
             if (hx >= fx && hx <= fx + pipW && hy >= fy && hy <= fy + pipH) {
               canvas.style.cursor = "grab";
               return;

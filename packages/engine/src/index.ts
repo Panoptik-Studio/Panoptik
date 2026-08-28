@@ -40,6 +40,7 @@ export {
   canvasToFrame,
   frameToCanvas,
   getCameraTransform,
+  resolveInterpolatedFacecam,
 } from "./render";
 export type { Transform, Viewport } from "./render";
 

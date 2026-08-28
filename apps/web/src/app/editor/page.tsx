@@ -6,6 +6,7 @@
 "use client";
 
 import * as React from "react";
+import { CameraControls } from "@/components/CameraControls";
 import { CaptionsPanel } from "@/components/CaptionsPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ExportLock } from "@/components/ExportLock";
@@ -67,7 +68,7 @@ export default function EditorPage() {
           )}
           {activeTab === "text" && <Inspector />}
           {activeTab === "captions" && <CaptionsSlot />}
-          {activeTab === "camera" && <StageControls />}
+          {activeTab === "camera" && <CameraControls />}
           {activeTab === "stage" && <StageControls />}
           {/* Export always reachable via header, but also show in media tab */}
           {activeTab === "media" && <ExportPanel />}
