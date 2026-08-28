@@ -1,6 +1,8 @@
 /**
  * StageControls — padding resizer + beautiful themes + aspect.
  * Vercel card-soft style, pill controls black→blue hover.
+ * Every setting edits the SELECTED segment (store actions all target it); a pill
+ * strip switches which segment the panel edits.
  */
 "use client";
 
@@ -31,18 +33,14 @@ const CAMERA_CORNERS = [
 
 export function StageControls() {
   const project = useProjectStore((s) => s.project);
-  const stagePadding = useProjectStore((s) => s.stagePadding);
+  const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
+  const selectSegment = useProjectStore((s) => s.selectSegment);
   const setStagePadding = useProjectStore((s) => s.setStagePadding);
   const stageBackground = useProjectStore((s) => s.stageBackground);
-  const setBackground = useProjectStore((s) => s.setBackground);
   const setAspectPreset = useProjectStore((s) => s.setAspectPreset);
   const setFacecam = useProjectStore((s) => s.setFacecam);
-  const playbackRate = useProjectStore((s) => s.playbackRate);
-  const setPlaybackRate = useProjectStore((s) => s.setPlaybackRate);
+  const updateSegment = useProjectStore((s) => s.updateSegment);
   const exportProgress = useProjectStore((s) => s.exportProgress);
-
-  const camHeightFraction = (size: number) =>
-    project ? (size * (project.clip.width / project.clip.height)) / CAMERA_ASPECT : size;
 
   if (!project) {
     return (
@@ -53,37 +51,73 @@ export function StageControls() {
     );
   }
 
+  const seg = project.segments.find((s) => s.id === selectedSegmentId) ?? null;
+
+  if (!seg) {
+    return (
+      <div className="pk-panel">
+        <h3 className="pk-panel-title mb-1">Stage</h3>
+        <p className="pk-help">Select a segment to edit its settings.</p>
+      </div>
+    );
+  }
+
+  const camHeightFraction = (size: number) =>
+    (size * (project.media.width / project.media.height)) / CAMERA_ASPECT;
+
   return (
     <div className="pk-panel">
       <h3 className="pk-panel-title mb-3">Stage</h3>
+
+      {/* Segment switcher — the panel edits the selected segment */}
+      <div className="mb-4">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="pk-label">Segment</span>
+          <span className="pk-value" style={{ color: "#888" }}>{seg.srcStart.toFixed(1)}–{seg.srcEnd.toFixed(1)}s · {seg.speed}x</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {project.segments.map((s, i) => (
+            <button
+              key={s.id}
+              onClick={() => selectSegment(s.id)}
+              className="pk-seg"
+              data-active={s.id === selectedSegmentId}
+              title={`Segment ${i + 1}: ${s.srcStart.toFixed(1)}–${s.srcEnd.toFixed(1)}s @${s.speed}x`}
+            >
+              Seg {i + 1}
+            </button>
+          ))}
+        </div>
+        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>Settings apply to the selected segment; others keep their own.</p>
+      </div>
 
       {/* Padding resizer — reduces white space around black video container, and black letterboxing is via aspect */}
       <div className="mb-4">
         <div className="mb-1.5 flex items-center justify-between">
           <span className="pk-label">Padding</span>
-          <span className="pk-value" style={{ color: "#0070f3" }}>{stagePadding}px</span>
+          <span className="pk-value" style={{ color: "#0070f3" }}>{seg.stagePadding}px</span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setStagePadding(stagePadding - 4)} className="pk-icon-btn h-7 w-7 text-xs">−</button>
-          <input type="range" min={0} max={48} step={4} value={stagePadding} onChange={(e) => setStagePadding(Number(e.target.value))} className="pk-range flex-1" />
-          <button onClick={() => setStagePadding(stagePadding + 4)} className="pk-icon-btn h-7 w-7 text-xs">+</button>
+          <button onClick={() => setStagePadding(seg.stagePadding - 4)} className="pk-icon-btn h-7 w-7 text-xs">−</button>
+          <input type="range" min={0} max={48} step={4} value={seg.stagePadding} onChange={(e) => setStagePadding(Number(e.target.value))} className="pk-range flex-1" />
+          <button onClick={() => setStagePadding(seg.stagePadding + 4)} className="pk-icon-btn h-7 w-7 text-xs">+</button>
         </div>
         <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>White space around video. 0 = edge-to-edge.</p>
       </div>
 
-      {/* Speed — global, affects cam+screen together, preview & export */}
+      {/* Speed — per selected segment, affects cam+screen together, preview & export */}
       <div className="mb-4">
         <div className="mb-1.5 flex items-center justify-between">
           <span className="pk-label">Speed</span>
-          <span className="pk-value" style={{ color: playbackRate !== 1 ? "#0070f3" : "#888" }}>{playbackRate.toFixed(2)}x</span>
+          <span className="pk-value" style={{ color: seg.speed !== 1 ? "#0070f3" : "#888" }}>{seg.speed.toFixed(2)}x</span>
         </div>
         <input
           type="range"
           min={0.25}
           max={3}
           step={0.05}
-          value={playbackRate}
-          onChange={(e) => setPlaybackRate(Number(e.target.value))}
+          value={seg.speed}
+          onChange={(e) => updateSegment(seg.id, { speed: Number(e.target.value) })}
           className="pk-range flex-1"
           disabled={exportProgress !== null}
           aria-label="Video speed"
@@ -92,10 +126,10 @@ export function StageControls() {
           {[0.5, 1, 1.5, 2].map((v) => (
             <button
               key={v}
-              onClick={() => setPlaybackRate(v)}
+              onClick={() => updateSegment(seg.id, { speed: v })}
               disabled={exportProgress !== null}
               className="pk-seg"
-              data-active={playbackRate === v}
+              data-active={seg.speed === v}
             >
               {v}x
             </button>
@@ -113,7 +147,7 @@ export function StageControls() {
               key={preset}
               onClick={() => setAspectPreset(preset)}
               className="pk-seg"
-              data-active={project.aspectPreset === preset}
+              data-active={seg.aspectPreset === preset}
             >
               {preset === "source" ? "Fit" : preset}
             </button>
@@ -122,21 +156,21 @@ export function StageControls() {
       </div>
 
       {/* Camera — only meaningful once a recording carried a facecam track */}
-      {project.facecam.src && (
+      {seg.facecam.src && (
         <div className="mb-4">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="pk-label">Camera</span>
             <span className="pk-help">
-              {Math.round(project.facecam.size * 100)}%
+              {Math.round(seg.facecam.size * 100)}%
             </span>
           </div>
           <div className="mb-2 grid grid-cols-4 gap-1.5">
             {CAMERA_CORNERS.map((c) => {
-              const size = project.facecam.size;
+              const size = seg.facecam.size;
               const target = c.at(size, camHeightFraction(size));
               const active =
-                Math.abs(project.facecam.x - target.x) < 0.02 &&
-                Math.abs(project.facecam.y - target.y) < 0.02;
+                Math.abs(seg.facecam.x - target.x) < 0.02 &&
+                Math.abs(seg.facecam.y - target.y) < 0.02;
               return (
                 <button
                   key={c.id}
@@ -158,15 +192,15 @@ export function StageControls() {
             min={0.1}
             max={0.4}
             step={0.01}
-            value={project.facecam.size}
+            value={seg.facecam.size}
             onChange={(e) => {
               const size = Number(e.target.value);
               // Keep the bubble pinned to whichever edge it is nearest as it grows.
               const hFrac = camHeightFraction(size);
               setFacecam({
                 size,
-                x: project.facecam.x > 0.5 ? 0.97 - size : project.facecam.x,
-                y: project.facecam.y > 0.5 ? 0.97 - hFrac : project.facecam.y,
+                x: seg.facecam.x > 0.5 ? 0.97 - size : seg.facecam.x,
+                y: seg.facecam.y > 0.5 ? 0.97 - hFrac : seg.facecam.y,
               });
             }}
             className="pk-range"
@@ -174,7 +208,7 @@ export function StageControls() {
           />
           <div className="mt-2 flex gap-1.5">
             {(["circle", "square"] as const).map((s) => {
-              const active = (project.facecam.shape ?? "square") === s;
+              const active = (seg.facecam.shape ?? "square") === s;
               return (
                 <button
                   key={s}
@@ -198,10 +232,10 @@ export function StageControls() {
             const isActive =
               t.bg.kind === "gradient"
                 // Both stops must match: Vercel and Ocean share their first one.
-                ? project.background.kind === "gradient" &&
-                  (project.background as { stops: [string, string] }).stops[0] === t.bg.stops![0] &&
-                  (project.background as { stops: [string, string] }).stops[1] === t.bg.stops![1]
-                : project.background.kind === "solid" && (project.background as { color: string }).color === t.bg.color;
+                ? seg.background.kind === "gradient" &&
+                  (seg.background as { stops: [string, string] }).stops[0] === t.bg.stops![0] &&
+                  (seg.background as { stops: [string, string] }).stops[1] === t.bg.stops![1]
+                : seg.background.kind === "solid" && (seg.background as { color: string }).color === t.bg.color;
             return (
               <button
                 key={t.name}

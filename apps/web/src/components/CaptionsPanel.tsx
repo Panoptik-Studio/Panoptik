@@ -11,6 +11,7 @@ import { postProcessCaptions } from "@/lib/captionChunker";
 
 export function CaptionsPanel() {
   const project = useProjectStore((s) => s.project);
+  const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
   const stageCaptions = useProjectStore((s) => s.stageCaptions);
   const clearStagedCaptions = useProjectStore((s) => s.clearStagedCaptions);
   const whisperProgress = useProjectStore((s) => s.whisperProgress);
@@ -39,7 +40,7 @@ export function CaptionsPanel() {
         audioBuffer = await engine.getAudioBuffer(project);
       } catch {
         try {
-          const response = await fetch(project.clip.src);
+          const response = await fetch(project.media.src);
           const arrayBuf = await response.arrayBuffer();
           const ctx = new AudioContext();
           try {
@@ -92,8 +93,19 @@ export function CaptionsPanel() {
       </div>
     );
 
-  const stagedCaptions = project.stagedCaptions;
-  const committedCaptions = project.captions;
+  const seg = project.segments.find((s) => s.id === selectedSegmentId) ?? null;
+
+  if (!seg) {
+    return (
+      <div className="pk-panel">
+        <h3 className="pk-panel-title mb-1">Captions</h3>
+        <p className="pk-help">Select a segment to generate captions into it.</p>
+      </div>
+    );
+  }
+
+  const stagedCaptions = seg.stagedCaptions;
+  const committedCaptions = seg.captions;
 
   return (
     <div className="pk-panel">

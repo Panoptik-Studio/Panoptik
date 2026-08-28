@@ -42,6 +42,7 @@ function Row({
 
 export function StagingPanel() {
   const project = useProjectStore((s) => s.project);
+  const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
   const pendingBackgroundBadge = useProjectStore((s) => s.pendingBackgroundBadge);
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
   const removeStagedTextOverlay = useProjectStore((s) => s.removeStagedTextOverlay);
@@ -51,7 +52,12 @@ export function StagingPanel() {
 
   if (!project) return null;
 
-  const { stagedZoomPoints, stagedTextOverlays, stagedCaptions } = project;
+  const seg = project.segments.find((s) => s.id === selectedSegmentId) ?? null;
+  const { stagedZoomPoints, stagedTextOverlays, stagedCaptions } = seg ?? {
+    stagedZoomPoints: [],
+    stagedTextOverlays: [],
+    stagedCaptions: [],
+  };
   const total =
     stagedZoomPoints.length +
     stagedTextOverlays.length +

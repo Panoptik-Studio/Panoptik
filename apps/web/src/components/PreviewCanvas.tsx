@@ -2,6 +2,10 @@
  * OWNER: DEV B — ROADMAP-B.md Task 2.2 + 2.4.
  * Interactive canvas: zoom click interaction, focal dot dragging, rAF playback loop.
  * Keyboard undo/redo (Cmd+Z / Cmd+Shift+Z).
+ * Per-segment: everything the preview draws resolves the ACTIVE segment at the
+ * playhead (renderFrame/compositing, audio speed, facecam, stage background);
+ * the canvas is sized to the SELECTED segment's preset so it stays stable across
+ * playback while other segments letterbox inside it.
  */
 "use client";
 
@@ -20,8 +24,10 @@ import {
   frameToCanvas,
   getCameraTransform,
   outputSize,
+  projectDuration,
+  resolveSegment,
 } from "@panoptik/engine";
-import type { Project, ZoomPoint } from "@panoptik/schema";
+import type { Project, Segment, ZoomPoint } from "@panoptik/schema";
 
 /** Preview compositing cap — matches the decode cap in the engine. */
 const MAX_CANVAS_WIDTH = 1920;
@@ -34,25 +40,40 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
+/** The segment active at on-timeline `t` + its source time, falling back to the
+ *  last segment at media.duration past the end (matches renderFrame). */
+function resolveActive(
+  project: Project,
+  t: number,
+): { seg: Segment; srcT: number } {
+  const r = resolveSegment(project, t);
+  if (r) return { seg: r.segment, srcT: r.srcT };
+  return {
+    seg: project.segments[project.segments.length - 1]!,
+    srcT: project.media.duration,
+  };
+}
+
 /**
  * Everything needed to place a focal handle: the letterboxed frame, the camera
  * resolved at `t`, and the marker radius. All in canvas backing pixels, which is
- * the space renderFrame draws in.
+ * the space renderFrame draws in. The active segment supplies the frame preset
+ * and its own zoomPoints so handles land exactly where the composite draws them.
  */
 function canvasGeometry(
   canvas: HTMLCanvasElement,
   project: Project,
   t: number,
 ) {
+  const { seg, srcT } = resolveActive(project, t);
   const rect = frameRect(
     canvas.width,
     canvas.height,
-    project.clip.width,
-    project.clip.height,
-    project.aspectPreset,
+    project.media,
+    seg.aspectPreset,
   );
-  const view = cameraViewport(rect, getCameraTransform(project.zoomPoints, t));
-  return { rect, view, radius: Math.max(10, rect.w * 0.014) };
+  const view = cameraViewport(rect, getCameraTransform(seg.zoomPoints, srcT));
+  return { rect, view, srcT, radius: Math.max(10, rect.w * 0.014) };
 }
 
 /** Pointer position in canvas backing pixels. */
@@ -64,10 +85,13 @@ function pointerToCanvas(canvas: HTMLCanvasElement, clientX: number, clientY: nu
   };
 }
 
-/** Zooms whose handle is on screen: near the playhead, plus the selected one. */
+/** Zooms whose handle is on screen: near the playhead, plus the selected one.
+ *  Handles belong to the active segment and their `t` is source-relative, so the
+ *  proximity window is measured against the active segment's srcT. */
 function editableZooms(project: Project, t: number, selectedId: string | null): ZoomPoint[] {
-  return [...project.zoomPoints, ...project.stagedZoomPoints].filter(
-    (z) => z.id === selectedId || Math.abs(z.t - t) <= MARKER_WINDOW,
+  const { seg, srcT } = resolveActive(project, t);
+  return [...seg.zoomPoints, ...seg.stagedZoomPoints].filter(
+    (z) => z.id === selectedId || Math.abs(z.t - srcT) <= MARKER_WINDOW,
   );
 }
 
@@ -102,7 +126,7 @@ function drawHandles(
   selectedId: string | null,
   draggingId: string | null,
 ): void {
-  const { rect, view, radius } = canvasGeometry(ctx.canvas, project, t);
+  const { rect, view, srcT, radius } = canvasGeometry(ctx.canvas, project, t);
   ctx.save();
   for (const z of editableZooms(project, t, selectedId)) {
     const p = frameToCanvas(rect, view, z.to.x * rect.w, z.to.y * rect.h);
@@ -110,7 +134,7 @@ function drawHandles(
     const color = z.staged ? "#f5a623" : "#0070f3";
     const r = active ? radius * 1.2 : radius;
     // Fade handles whose keyframe is further from the playhead.
-    ctx.globalAlpha = active ? 1 : Math.max(0.35, 1 - Math.abs(z.t - t) / MARKER_WINDOW);
+    ctx.globalAlpha = active ? 1 : Math.max(0.35, 1 - Math.abs(z.t - srcT) / MARKER_WINDOW);
 
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -148,15 +172,17 @@ export function PreviewCanvas() {
   // Selectors only — a full-store subscription would re-render this component
   // on every currentTime tick during playback.
   const project = useProjectStore((s) => s.project);
-  const stagePadding = useProjectStore((s) => s.stagePadding);
   const isPlaying = useProjectStore((s) => s.isPlaying);
   const currentTime = useProjectStore((s) => s.currentTime);
+  const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
+  const selectSegment = useProjectStore((s) => s.selectSegment);
   const addZoomPoint = useProjectStore((s) => s.addZoomPoint);
   const updateZoomPoint = useProjectStore((s) => s.updateZoomPoint);
   const setSelectedZoom = useProjectStore((s) => s.setSelectedZoom);
   const commitDrag = useProjectStore((s) => s.commitDrag);
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);
+  const setFacecam = useProjectStore((s) => s.setFacecam);
 
   // Dragging state — `moved` separates a click-to-select from a real drag.
   const [dragging, setDragging] = useState<{
@@ -206,13 +232,14 @@ export function PreviewCanvas() {
       // encoder and put the wrong pictures in the file.
       if (state.exportProgress !== null) return;
 
-      const playbackRate = state.playbackRate ?? 1;
-      const effectiveDuration = state.project.clip.duration / playbackRate;
+      // Playback advances on-timeline time in real seconds — the speed is
+      // embedded in each segment's width, not multiplied here.
+      const duration = projectDuration(state.project);
       if (state.isPlaying) {
-        const newTime = state.currentTime + dt * playbackRate;
-        if (newTime >= effectiveDuration) {
+        const newTime = state.currentTime + dt;
+        if (newTime >= duration) {
           state.pause();
-          state.setCurrentTime(effectiveDuration);
+          state.setCurrentTime(duration);
         } else {
           state.setCurrentTime(newTime);
         }
@@ -222,7 +249,15 @@ export function PreviewCanvas() {
 
       dirty = false;
       const tEff = useProjectStore.getState().currentTime;
-      const tSrc = tEff * (useProjectStore.getState().playbackRate ?? 1);
+      const active = resolveActive(state.project, tEff);
+      const tSrc = active.srcT;
+
+      // the audio element runs its own clock — keep its rate glued to the
+      // active segment's speed so it crosses boundaries with the playhead.
+      if (state.isPlaying) {
+        const audio = audioRef.current;
+        if (audio) audio.playbackRate = active.seg.speed;
+      }
 
       // Don't contend with export's pump — it drives desiredTime at 30fps
       const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
@@ -249,11 +284,12 @@ export function PreviewCanvas() {
           );
         }
       }
-      engine.renderFrame(ctx, state.project, tSrc);
+      engine.renderFrame(ctx, state.project, tEff);
       // Editor chrome on top of the composed frame — hidden during playback so
-      // the preview shows exactly what an export would. Use source time for handles.
+      // the preview shows exactly what an export would. On-timeline time: the
+      // active segment's handles resolve internally.
       if (!state.isPlaying) {
-        drawHandles(ctx, state.project, tSrc, state.selectedZoomId, draggingIdRef.current);
+        drawHandles(ctx, state.project, tEff, state.selectedZoomId, draggingIdRef.current);
       }
     };
 
@@ -272,32 +308,32 @@ export function PreviewCanvas() {
     if (!audio || !project) return;
     // A recording's audio is in a different file than its video: the screen is
     // captured silently and the mic rides with the camera take.
-    const src = project.audioSrc ?? project.clip.src;
+    const src = project.audioSrc ?? project.media.src;
     if (audio.src !== src) {
       audio.src = src;
       audio.load();
     }
-  }, [project?.audioSrc, project?.clip.src]);
+  }, [project?.audioSrc, project?.media.src]);
 
-  // Keep audio element's playbackRate in sync
-  const playbackRate = useProjectStore((s) => s.playbackRate);
+  // Keep the audio element pitch-preserved. The playbackRate itself follows the
+  // active segment's per-frame speed (set in the rAF loop and on play/scrub).
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio) return;
-    audio.playbackRate = playbackRate;
+    if (!audio || !project) return;
+    const active = resolveActive(project, currentTime);
+    audio.playbackRate = active.seg.speed;
     try { (audio as unknown as { preservesPitch: boolean }).preservesPitch = true; } catch { /* ignore */ }
     try { (audio as unknown as { mozPreservesPitch: boolean }).mozPreservesPitch = true; } catch { /* ignore */ }
     try { (audio as unknown as { webkitPreservesPitch: boolean }).webkitPreservesPitch = true; } catch { /* ignore */ }
-  }, [playbackRate]);
+  }, [project?.id]);
 
-  // Scrubbing while paused: follow the playhead (effective -> source)
+  // Scrubbing while paused: follow the playhead (on-timeline -> active srcT)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !project || isPlaying) return;
-    const rate = useProjectStore.getState().playbackRate ?? 1;
-    const tSrc = currentTime * rate;
-    if (Math.abs(audio.currentTime - tSrc) > 0.15) audio.currentTime = tSrc;
-  }, [currentTime, isPlaying, project, playbackRate]);
+    const { srcT } = resolveActive(project, currentTime);
+    if (Math.abs(audio.currentTime - srcT) > 0.15) audio.currentTime = srcT;
+  }, [currentTime, isPlaying, project]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -311,22 +347,27 @@ export function PreviewCanvas() {
     // without this resumes from wherever the element happened to be left — and
     // if that was the end of the clip, it plays nothing at all, which is why
     // sound came and went between takes of play/pause.
-    const rate = useProjectStore.getState().playbackRate ?? 1;
-    const target = useProjectStore.getState().currentTime * rate;
-    audio.playbackRate = rate;
-    if (Math.abs(audio.currentTime - target) > 0.15) audio.currentTime = target;
+    const state = useProjectStore.getState();
+    if (!state.project) return;
+    const active = resolveActive(state.project, state.currentTime);
+    audio.playbackRate = active.seg.speed;
+    if (Math.abs(audio.currentTime - active.srcT) > 0.15) audio.currentTime = active.srcT;
     audio.play().catch(() => {});
 
     // The canvas runs off rAF and the audio off its own clock, so they drift
-    // apart over a long clip unless they are pulled back together.
+    // apart over a long clip unless they are pulled back together. The active
+    // segment (and its speed) can change mid-play, so resolve on every tick.
     const id = window.setInterval(() => {
-      const now = useProjectStore.getState().currentTime * (useProjectStore.getState().playbackRate ?? 1);
-      if (!audio.paused && Math.abs(audio.currentTime - now) > 0.3) {
-        audio.currentTime = now;
+      const st = useProjectStore.getState();
+      if (!st.project) return;
+      const r = resolveActive(st.project, st.currentTime);
+      audio.playbackRate = r.seg.speed;
+      if (!audio.paused && Math.abs(audio.currentTime - r.srcT) > 0.3) {
+        audio.currentTime = r.srcT;
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [isPlaying, playbackRate]);
+  }, [isPlaying]);
 
   // ── Keyboard undo/redo + moment mark (Phase 2.4 + 3.3) ──
   useEffect(() => {
@@ -404,8 +445,13 @@ export function PreviewCanvas() {
 
       const { rect, view } = canvasGeometry(canvas, state.project, t);
       const f = canvasToFrame(rect, view, px, py);
+      // Zoom keyframes are source-relative, so the new point lands at the active
+      // segment's srcT. addZoomPoint targets the selected segment — point the
+      // selection at the playhead's segment so the keyframe lands where it shows.
+      const active = resolveActive(state.project, t);
+      if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
       addZoomPoint({
-        t,
+        t: active.srcT,
         to: {
           scale: DEFAULT_ZOOM_SCALE,
           x: clamp01(f.x / rect.w),
@@ -416,13 +462,12 @@ export function PreviewCanvas() {
         ease: "easeInOutCubic",
       });
     },
-    [addZoomPoint, setSelectedZoom],
+    [addZoomPoint, setSelectedZoom, selectSegment],
   );
 
   // ── Facecam PiP dragging ──
   const [draggingFacecam, setDraggingFacecam] = useState(false);
   const facecamDragOffset = useRef<{ dx: number; dy: number } | null>(null);
-  const setFacecam = useProjectStore((s) => s.setFacecam);
 
   // ── Focal handle dragging ──
   const handlePointerDown = useCallback(
@@ -435,7 +480,8 @@ export function PreviewCanvas() {
       const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
 
       // Facecam hit test first — PiP is in screen space (full canvas), never zoomed
-      const fc = state.project.facecam;
+      const active = resolveActive(state.project, state.currentTime);
+      const fc = active.seg.facecam;
       if (fc.src) {
         const cw = canvas.width;
         const ch = canvas.height;
@@ -464,10 +510,12 @@ export function PreviewCanvas() {
 
       e.preventDefault();
       canvas.setPointerCapture(e.pointerId);
+      // updateZoomPoint targets the selected segment — keep it at the playhead.
+      if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
       setSelectedZoom(hit.id);
       setDragging({ id: hit.id, moved: false });
     },
-    [setSelectedZoom],
+    [setSelectedZoom, selectSegment],
   );
 
   const handlePointerMove = useCallback(
@@ -477,12 +525,14 @@ export function PreviewCanvas() {
       const state = useProjectStore.getState();
       if (!state.project) return;
 
+      const active = resolveActive(state.project, state.currentTime);
+
       // Facecam drag — screen space, clamped to canvas edges
       if (draggingFacecam) {
         const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
         const cw = canvas.width;
         const ch = canvas.height;
-        const fc = state.project.facecam;
+        const fc = active.seg.facecam;
         const pipW = cw * fc.size;
         const pipH = pipW / (16 / 9);
         const off = facecamDragOffset.current;
@@ -499,7 +549,7 @@ export function PreviewCanvas() {
         // Hover affordance: facecam grab beats zoom grab beats crosshair
         if (!state.isPlaying) {
           const { x: hx, y: hy } = pointerToCanvas(canvas, e.clientX, e.clientY);
-          const fc = state.project.facecam;
+          const fc = active.seg.facecam;
           if (fc.src) {
             const cw = canvas.width;
             const ch = canvas.height;
@@ -526,8 +576,8 @@ export function PreviewCanvas() {
       }
 
       const zoom =
-        state.project.zoomPoints.find((z) => z.id === dragging.id) ??
-        state.project.stagedZoomPoints.find((z) => z.id === dragging.id);
+        active.seg.zoomPoints.find((z) => z.id === dragging.id) ??
+        active.seg.stagedZoomPoints.find((z) => z.id === dragging.id);
       if (!zoom) return;
 
       const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
@@ -570,10 +620,18 @@ export function PreviewCanvas() {
 
   useEffect(() => {
     if (!project) return;
-    // Shared with the exporter so the preview is the same frame the encoder gets.
-    const size = outputSize(project.clip.width, project.clip.height, project.aspectPreset, MAX_CANVAS_WIDTH);
+    // Sized to the SELECTED segment's preset so the preview stays stable during
+    // playback; other segments letterbox inside it (matching the exporter).
+    const seg =
+      project.segments.find((s) => s.id === selectedSegmentId) ??
+      project.segments[0];
+    const size = outputSize(
+      project.media,
+      seg?.aspectPreset ?? "source",
+      MAX_CANVAS_WIDTH,
+    );
     setCanvasSize({ w: size.width, h: size.height });
-  }, [project?.clip.width, project?.clip.height, project?.aspectPreset]);
+  }, [project, selectedSegmentId]);
 
   // ── Drop + click-to-import ──
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -675,13 +733,17 @@ export function PreviewCanvas() {
     );
   }
 
+  // The stage shows the ACTIVE segment's background and padding — as playback
+  // crosses into another segment the surroundings follow it.
+  const activeSeg = resolveActive(project, currentTime).seg;
+
   const stageStyle = (() => {
-    if (!project) return {};
-    if (project.background.kind === "gradient") {
-      const [a, b] = project.background.stops;
+    const bg = activeSeg.background;
+    if (bg.kind === "gradient") {
+      const [a, b] = bg.stops;
       return { background: `linear-gradient(135deg, ${a} 0%, ${b} 100%)` };
     }
-    if (project.background.kind === "solid") return { background: project.background.color };
+    if (bg.kind === "solid") return { background: bg.color };
     return { background: "linear-gradient(135deg, #007cf0 0%, #7928ca 45%, #ff4d4d 100%)" };
   })();
 
@@ -696,7 +758,7 @@ export function PreviewCanvas() {
       {/* Vercel mesh halo behind stage */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ background: "radial-gradient(700px 420px at 50% 38%, rgba(0,124,240,0.18) 0%, transparent 60%), radial-gradient(560px 360px at 82% 78%, rgba(255,0,128,0.12) 0%, transparent 62%)" }} />
       {/* Stage frame stays constant — padding shrinks the video inside, not the frame; stage locks to clip aspect so no crop/letterbox drift across viewports */}
-      <div className="relative flex max-h-[56vh] max-w-[64vw] items-center justify-center overflow-hidden rounded-xl border bg-white shadow-vercel-4 lg:max-h-[62vh]" style={{ borderColor: "#ebebeb", padding: stagePadding, aspectRatio: project ? `${project.clip.width} / ${project.clip.height}` : undefined, width: project ? `min(64vw, calc(62vh * ${project.clip.width / project.clip.height}))` as unknown as string : undefined, ...stageStyle }}>
+      <div className="relative flex max-h-[56vh] max-w-[64vw] items-center justify-center overflow-hidden rounded-xl border bg-white shadow-vercel-4 lg:max-h-[62vh]" style={{ borderColor: "#ebebeb", padding: activeSeg.stagePadding, aspectRatio: project ? `${project.media.width} / ${project.media.height}` : undefined, width: project ? `min(64vw, calc(62vh * ${project.media.width / project.media.height}))` as unknown as string : undefined, ...stageStyle }}>
         <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-black shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/10">
           <canvas
             ref={canvasRef}

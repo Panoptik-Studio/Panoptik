@@ -1,14 +1,19 @@
 /**
  * ZoomPanel — beautiful UI to add/manage zoom points.
  * Vercel card style, pill buttons black→blue, mono labels.
+ * Per-segment: lists and edits the SELECTED segment's zoom points; adding at the
+ * playhead resolves the active segment's source time and selects it.
  */
 "use client";
 
 import { useProjectStore } from "@/stores/projectStore";
+import { resolveSegment, sourceToTimeline } from "@panoptik/engine";
 
 export function ZoomPanel() {
   const project = useProjectStore((s) => s.project);
   const currentTime = useProjectStore((s) => s.currentTime);
+  const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
+  const selectSegment = useProjectStore((s) => s.selectSegment);
   const addZoomPoint = useProjectStore((s) => s.addZoomPoint);
   const removeZoomPoint = useProjectStore((s) => s.removeZoomPoint);
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
@@ -25,17 +30,35 @@ export function ZoomPanel() {
     );
   }
 
-  const allZooms = [...project.zoomPoints, ...project.stagedZoomPoints];
+  const seg = project.segments.find((s) => s.id === selectedSegmentId) ?? null;
+
+  if (!seg) {
+    return (
+      <div className="pk-panel">
+        <h3 className="pk-panel-title mb-1">Zoom</h3>
+        <p className="pk-help">Select a segment to edit its zooms.</p>
+      </div>
+    );
+  }
+
+  const allZooms = [...seg.zoomPoints, ...seg.stagedZoomPoints];
 
   return (
     <div className="pk-panel">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="pk-panel-title">Zoom</h3>
-        <span className="pk-chip">{allZooms.length} points</span>
+        <span className="pk-chip">{allZooms.length} points · Seg {project.segments.findIndex((s) => s.id === seg.id) + 1}</span>
       </div>
 
       <button
-        onClick={() => addZoomPoint({ t: currentTime, to: { scale: 2.2, x: 0.5, y: 0.5 }, dur: 0.7, ease: "easeInOutCubic" })}
+        onClick={() => {
+          const r = resolveSegment(project, currentTime);
+          if (!r) return;
+          // Keyframes are source-relative — land the new point at the active
+          // segment's srcT and select it so addZoomPoint writes there.
+          if (r.segment.id !== selectedSegmentId) selectSegment(r.segment.id);
+          addZoomPoint({ t: r.srcT, to: { scale: 2.2, x: 0.5, y: 0.5 }, dur: 0.7, ease: "easeInOutCubic" });
+        }}
         className="pk-btn pk-btn-primary pk-btn-md w-full"
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" /></svg>
@@ -56,7 +79,8 @@ export function ZoomPanel() {
                   // Land where the move has settled, otherwise the preview shows
                   // the camera mid-transition (or not moved at all) and edits
                   // look like they do nothing.
-                  seek(zp.t + zp.dur);
+                  const st = sourceToTimeline(project, seg.id, zp.t + zp.dur);
+                  if (st != null) seek(st);
                 }}
                 className={`pk-ui flex cursor-pointer items-center justify-between rounded-[12px] border px-3 py-2.5 transition-colors ${isSelected ? "text-white" : "hover:border-[#0070f3]"}`}
                 style={{ borderColor: isSelected ? "#1f1f1f" : "#ebebeb", background: isSelected ? "#1f1f1f" : "#f8f8f8" }}

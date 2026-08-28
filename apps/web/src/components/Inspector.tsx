@@ -2,10 +2,13 @@
  * OWNER: DEV A — ROADMAP-A.md Tasks 3.4/3.5.
  * Zoom inspector: depth / duration / easing / focal / delete for selectedZoomId
  * (a field in B's store — consume, never edit the store file).
+ * Zoom points live on the selected segment, so lookups and the seek-to-keyframe
+ * (on-timeline) both go through it.
  */
 "use client";
 
 import { useProjectStore } from "@/stores/projectStore";
+import { sourceToTimeline } from "@panoptik/engine";
 import type { ZoomPoint } from "@panoptik/schema";
 
 const EASE_OPTIONS: { value: string; label: string }[] = [
@@ -28,6 +31,7 @@ function Row({ label, value, children }: { label: string; value: string; childre
 
 export function Inspector() {
   const project = useProjectStore((s) => s.project);
+  const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
   const selectedZoomId = useProjectStore((s) => s.selectedZoomId);
   const updateZoomPoint = useProjectStore((s) => s.updateZoomPoint);
   const removeZoomPoint = useProjectStore((s) => s.removeZoomPoint);
@@ -38,9 +42,12 @@ export function Inspector() {
 
   if (!project) return null;
 
-  const zoom: ZoomPoint | undefined =
-    project.zoomPoints.find((z) => z.id === selectedZoomId) ??
-    project.stagedZoomPoints.find((z) => z.id === selectedZoomId);
+  const seg = project.segments.find((s) => s.id === selectedSegmentId);
+
+  const zoom: ZoomPoint | undefined = seg
+    ? seg.zoomPoints.find((z) => z.id === selectedZoomId) ??
+      seg.stagedZoomPoints.find((z) => z.id === selectedZoomId)
+    : undefined;
 
   if (!zoom) {
     return (
@@ -72,7 +79,13 @@ export function Inspector() {
             </span>
           )}
           <button
-            onClick={() => seek(zoom.t)}
+            onClick={() => {
+              // zoom.t is source-relative — land the playhead on the keyframe's
+              // on-timeline position in its segment.
+              if (!seg) return;
+              const st = sourceToTimeline(project, seg.id, zoom.t);
+              if (st != null) seek(st);
+            }}
             className="pk-chip"
             title="Move the playhead to this zoom"
           >
