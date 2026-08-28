@@ -40,7 +40,8 @@ export type ClickEvent = {
   type: "click" | "scroll" | "move" | "manual";
 };
 
-export type AspectPreset = "16:9" | "9:16" | "1:1" | "4:3";
+/** "source" keeps the clip's own shape, so nothing is letterboxed. */
+export type AspectPreset = "source" | "16:9" | "9:16" | "1:1" | "4:3";
 
 export type Project = {
   id: string;

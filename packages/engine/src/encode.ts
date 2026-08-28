@@ -18,6 +18,7 @@ import {
   type AudioCodec,
 } from "mediabunny";
 import type { ExportOpts, Project } from "@panoptik/schema";
+import { presetAspect } from "./layout";
 import { prepareFrame } from "./decode";
 import { renderFrame } from "./render";
 
@@ -48,7 +49,8 @@ function emitProgress(value: number): void {
  * Odd sizes are rejected outright by several encoders.
  */
 function exportSize(project: Project, resolution: ExportOpts["resolution"]) {
-  const aspect = project.clip.width / project.clip.height;
+  // The preset decides the frame's shape; the resolution decides its height.
+  const aspect = presetAspect(project.aspectPreset, project.clip.width, project.clip.height);
   const height = RESOLUTION_HEIGHTS[resolution];
   const width = Math.round(height * aspect);
   return { width: width - (width % 2), height: height - (height % 2) };

@@ -25,7 +25,7 @@ export { createRealEngine } from "./real-engine";
 
 // Camera geometry — shared so the editor's focal handles land exactly where
 // renderFrame draws them.
-export { frameRect } from "./layout";
+export { frameRect, outputSize, presetAspect } from "./layout";
 export type { Rect } from "./layout";
 export {
   cameraViewport,

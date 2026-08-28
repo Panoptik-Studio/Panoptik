@@ -71,15 +71,15 @@ export function StageControls() {
       {/* Aspect — controls black letterboxing */}
       <div className="mb-4">
         <p className="pk-label mb-1.5">Aspect</p>
-        <div className="grid grid-cols-4 gap-1.5">
-          {(["16:9", "9:16", "1:1", "4:3"] as const).map((preset) => (
+        <div className="grid grid-cols-5 gap-1.5">
+          {(["source", "16:9", "9:16", "1:1", "4:3"] as const).map((preset) => (
             <button
               key={preset}
               onClick={() => setAspectPreset(preset)}
               className="pk-seg"
               data-active={project.aspectPreset === preset}
             >
-              {preset}
+              {preset === "source" ? "Fit" : preset}
             </button>
           ))}
         </div>

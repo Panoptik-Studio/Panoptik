@@ -134,6 +134,9 @@ export function RecordModal() {
   // While a take is running the recorder closes the camera track, so the
   // effect that opened it must not also close it.
   const recordingOwnsCameraRef = useRef(false);
+  // Set when the floating bubble had to be closed because the whole screen is
+  // being captured and it would have been recorded.
+  const [bubbleSuppressed, setBubbleSuppressed] = useState(false);
 
   // Device prefs
   const [cameraEnabled, setCameraEnabled] = useState(true);
@@ -415,6 +418,18 @@ export function RecordModal() {
       elapsedRef.current = 0;
       setElapsed(0);
 
+      // Sharing a whole monitor captures the floating bubble along with it, so
+      // the take would show the camera twice: once burned into the screen
+      // track, once composited as the PiP. Close the bubble in that case — the
+      // camera is still recorded separately and composited on top.
+      const surface = handlesRef.current.screenStream
+        .getVideoTracks()[0]
+        ?.getSettings?.() as { displaySurface?: string } | undefined;
+      if (surface?.displaySurface === "monitor") {
+        closePipWindow();
+        setBubbleSuppressed(true);
+      }
+
       requestAnimationFrame(() => {
         if (screenLiveRef.current && handlesRef.current?.screenStream.getTracks().length)
           screenLiveRef.current.srcObject = handlesRef.current.screenStream;
@@ -478,6 +493,7 @@ export function RecordModal() {
       // The take released the camera track; hand ownership back so reopening
       // the recorder acquires a fresh one.
       recordingOwnsCameraRef.current = false;
+      setBubbleSuppressed(false);
       setCameraStream(null);
     }
   }, [setProject, layout, shape, corner, camSize, closePipWindow]);
@@ -918,7 +934,9 @@ export function RecordModal() {
 
             {/* Right: hint */}
             <div className="pk-ui hidden lg:flex items-center gap-2 text-[11px]" style={{ color: "#888" }}>
-              {layout !== "screenOnly" && cameraEnabled ? (
+              {bubbleSuppressed ? (
+                <span>Floating camera closed — it would be captured in a full-screen share</span>
+              ) : layout !== "screenOnly" && cameraEnabled ? (
                 pipSupported ? (
                   <span>Camera floats above other apps · share a window, not the whole screen</span>
                 ) : (

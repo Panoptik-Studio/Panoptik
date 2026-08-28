@@ -19,6 +19,7 @@ import {
   frameRect,
   frameToCanvas,
   getCameraTransform,
+  outputSize,
 } from "@panoptik/engine";
 import type { Project, ZoomPoint } from "@panoptik/schema";
 
@@ -272,24 +273,38 @@ export function PreviewCanvas() {
     }
   }, [project?.audioSrc, project?.clip.src]);
 
+  // Scrubbing while paused: follow the playhead.
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !project) return;
-    // Seamless seek when paused/scrubbing — don't thrash when playing (audio follows)
-    if (!isPlaying) {
-      const drift = Math.abs(audio.currentTime - currentTime);
-      if (drift > 0.15) audio.currentTime = currentTime;
-    }
+    if (!audio || !project || isPlaying) return;
+    if (Math.abs(audio.currentTime - currentTime) > 0.15) audio.currentTime = currentTime;
   }, [currentTime, isPlaying, project]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (isPlaying) {
-      audio.play().catch(() => {});
-    } else {
+    if (!isPlaying) {
       audio.pause();
+      return;
     }
+
+    // Line the element up with the playhead *before* starting. Pressing play
+    // without this resumes from wherever the element happened to be left — and
+    // if that was the end of the clip, it plays nothing at all, which is why
+    // sound came and went between takes of play/pause.
+    const target = useProjectStore.getState().currentTime;
+    if (Math.abs(audio.currentTime - target) > 0.15) audio.currentTime = target;
+    audio.play().catch(() => {});
+
+    // The canvas runs off rAF and the audio off its own clock, so they drift
+    // apart over a long clip unless they are pulled back together.
+    const id = window.setInterval(() => {
+      const now = useProjectStore.getState().currentTime;
+      if (!audio.paused && Math.abs(audio.currentTime - now) > 0.3) {
+        audio.currentTime = now;
+      }
+    }, 1000);
+    return () => clearInterval(id);
   }, [isPlaying]);
 
   // ── Keyboard undo/redo + moment mark (Phase 2.4 + 3.3) ──
@@ -534,12 +549,10 @@ export function PreviewCanvas() {
 
   useEffect(() => {
     if (!project) return;
-    const scale = Math.min(1, MAX_CANVAS_WIDTH / project.clip.width);
-    setCanvasSize({
-      w: Math.round(project.clip.width * scale),
-      h: Math.round(project.clip.height * scale),
-    });
-  }, [project]);
+    // Shared with the exporter so the preview is the same frame the encoder gets.
+    const size = outputSize(project.clip.width, project.clip.height, project.aspectPreset, MAX_CANVAS_WIDTH);
+    setCanvasSize({ w: size.width, h: size.height });
+  }, [project?.clip.width, project?.clip.height, project?.aspectPreset]);
 
   // ── Drop + click-to-import ──
   const fileInputRef = useRef<HTMLInputElement>(null);

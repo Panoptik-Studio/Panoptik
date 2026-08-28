@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameRect } from "./layout";
+import { frameRect, outputSize } from "./layout";
 
 describe("frameRect", () => {
   it("16:9 clip in 16:9 canvas fills it", () => {
@@ -44,5 +44,47 @@ describe("frameRect", () => {
     const r = frameRect(1920, 1080, 1920, 1080, "unknown");
     expect(r.w).toBe(1920);
     expect(r.h).toBe(1080);
+  });
+});
+
+describe("outputSize", () => {
+  // A 16:10 laptop screen — the case that produced black on all four sides,
+  // because the canvas took the clip's shape and was then letterboxed again.
+  const SCREEN_W = 1512;
+  const SCREEN_H = 982;
+
+  it("source keeps the clip's shape, so frameRect fills the frame", () => {
+    const { width, height } = outputSize(SCREEN_W, SCREEN_H, "source");
+    const r = frameRect(width, height, SCREEN_W, SCREEN_H, "source");
+    expect(r.x).toBeCloseTo(0, 0);
+    expect(r.y).toBeCloseTo(0, 0);
+    expect(r.w).toBeCloseTo(width, 0);
+    expect(r.h).toBeCloseTo(height, 0);
+  });
+
+  it("a named preset bars on at most one axis, never all four", () => {
+    for (const preset of ["16:9", "9:16", "1:1", "4:3"] as const) {
+      const { width, height } = outputSize(SCREEN_W, SCREEN_H, preset);
+      const r = frameRect(width, height, SCREEN_W, SCREEN_H, preset);
+      const barX = r.x > 0.5;
+      const barY = r.y > 0.5;
+      expect(barX && barY).toBe(false);
+    }
+  });
+
+  it("takes the preset's aspect, not the clip's", () => {
+    const square = outputSize(SCREEN_W, SCREEN_H, "1:1");
+    expect(square.width).toBe(square.height);
+    const portrait = outputSize(SCREEN_W, SCREEN_H, "9:16");
+    expect(portrait.height).toBeGreaterThan(portrait.width);
+  });
+
+  it("always returns even dimensions and respects the cap", () => {
+    for (const preset of ["source", "16:9", "9:16", "1:1", "4:3"] as const) {
+      const { width, height } = outputSize(1333, 999, preset, 1920);
+      expect(width % 2).toBe(0);
+      expect(height % 2).toBe(0);
+      expect(width).toBeLessThanOrEqual(1920);
+    }
   });
 });

@@ -159,7 +159,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   pendingBackgroundBadge: false,
   whisperProgress: null,
   exportProgress: null,
-  stagePadding: 8,
+  stagePadding: 0,
 
   // ── Project lifecycle ──
 
