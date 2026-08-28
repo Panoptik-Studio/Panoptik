@@ -70,6 +70,14 @@ let audioUrl: string | null = null;
  * from the screen file, which never has an audio track, so narration was
  * recorded and then silently dropped on import.
  */
+const liveObjectUrls = new Set<string>();
+
+function registerObjectUrl(blob: Blob): string {
+  const url = URL.createObjectURL(blob);
+  liveObjectUrls.add(url);
+  return url;
+}
+
 export async function setAudioBlob(blob: Blob | null): Promise<string | null> {
   if (audioInput) {
     try {
@@ -79,10 +87,7 @@ export async function setAudioBlob(blob: Blob | null): Promise<string | null> {
     }
     audioInput = null;
   }
-  if (audioUrl) {
-    URL.revokeObjectURL(audioUrl);
-    audioUrl = null;
-  }
+  audioUrl = null;
   // Keep fallback for export decodeAudioData path
   setAudioBlobFallback(blob);
   if (!blob || blob.size === 0) {
@@ -110,7 +115,7 @@ export async function setAudioBlob(blob: Blob | null): Promise<string | null> {
     /* keep whatever the clip itself provided */
   }
   // Playback uses a plain <audio> element, which needs its own URL.
-  audioUrl = URL.createObjectURL(blob);
+  audioUrl = registerObjectUrl(blob);
   return audioUrl;
 }
 
@@ -379,14 +384,10 @@ export async function prepareAllFrames(t: number, fcT?: number): Promise<void> {
  * clip's — otherwise every re-import pins another full recording in memory.
  */
 export async function setFacecamBlob(blob: Blob | null): Promise<string | null> {
-  if (facecamUrl) {
-    URL.revokeObjectURL(facecamUrl);
-    facecamUrl = null;
-  }
   clearFacecamCache();
   await teardownFacecam();
   if (!blob || blob.size === 0) return null;
-  facecamUrl = URL.createObjectURL(blob);
+  facecamUrl = registerObjectUrl(blob);
   await openFacecamSink(blob);
   await prepareFacecamFrame(0);
   return facecamUrl;
@@ -703,6 +704,14 @@ async function teardown(): Promise<void> {
     URL.revokeObjectURL(objectUrl);
     objectUrl = null;
   }
+  for (const url of liveObjectUrls) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
+  }
+  liveObjectUrls.clear();
   if (input) {
     try {
       input.dispose();

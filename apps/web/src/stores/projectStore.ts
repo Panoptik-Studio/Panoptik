@@ -958,17 +958,31 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   replaceFacecamMedia: (facecamSrc, audioSrc, startT) => {
     const s = get();
     if (!s.project) return;
+    const isPartialReshoot = typeof startT === "number" && startT > 0.1;
+    let tAccum = 0;
     const project = {
       ...s.project,
       audioSrc: audioSrc !== undefined ? audioSrc : s.project.audioSrc,
-      segments: s.project.segments.map((seg) => ({
-        ...seg,
-        facecam: {
-          ...seg.facecam,
-          src: facecamSrc,
-          startT: startT !== undefined ? startT : seg.facecam?.startT,
-        },
-      })),
+      segments: s.project.segments.map((seg) => {
+        const segDur = (seg.srcEnd - seg.srcStart) / (seg.speed || 1);
+        const segEndT = tAccum + segDur;
+        const isPriorSegment = isPartialReshoot && segEndT <= startT;
+        tAccum = segEndT;
+
+        if (isPriorSegment) {
+          // Keep existing camera take intact for prior segments
+          return seg;
+        }
+
+        return {
+          ...seg,
+          facecam: {
+            ...seg.facecam,
+            src: facecamSrc,
+            startT: startT !== undefined ? startT : (seg.facecam?.startT ?? 0),
+          },
+        };
+      }),
     };
     pushHistoryAndSet(project, s, set);
   },

@@ -118,6 +118,10 @@ export function ReshootModal() {
   // Open camera preview stream
   useEffect(() => {
     if (!isOpen) {
+      if (cameraTrackRef.current) {
+        cameraTrackRef.current.stop();
+        cameraTrackRef.current = null;
+      }
       setCameraStream(null);
       return;
     }
@@ -139,13 +143,12 @@ export function ReshootModal() {
 
     return () => {
       cancelled = true;
-      setCameraStream(null);
-      if (opened && state !== "recording") {
+      if (!isOpen && opened) {
         opened.stop();
         if (cameraTrackRef.current === opened) cameraTrackRef.current = null;
       }
     };
-  }, [isOpen, selectedCam, state]);
+  }, [isOpen, selectedCam]);
 
   // Sync video elements with camera stream
   useEffect(() => {
