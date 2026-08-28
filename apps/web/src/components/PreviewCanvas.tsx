@@ -143,15 +143,24 @@ function hitTestHandle(
   isPlaying?: boolean,
 ): ZoomPoint | null {
   const { rect, view } = canvasGeometry(canvas, project, t, isPlaying);
-  const baseRadius = Math.max(32, Math.round(rect.w * 0.024));
-  const grab = baseRadius * 2.2;
+  const baseRadius = Math.max(22, Math.round(rect.w * 0.016));
+  const grab = baseRadius * 1.8;
   const candidates = editableZooms(project, t, selectedId, selectedSegmentId, isPlaying);
   for (let i = candidates.length - 1; i >= 0; i--) {
     const z = candidates[i]!;
     const zx = z.to?.x ?? 0.5;
     const zy = z.to?.y ?? 0.5;
     const p = frameToCanvas(rect, view, zx * rect.w, zy * rect.h);
+    // 1. Hit test circle/puck area
     if (Math.hypot(px - p.x, py - p.y) <= grab) return z;
+    // 2. Hit test sequence pill badge (#1 · 2.2x) on the right of the handle
+    const badgeW = 90;
+    const badgeH = Math.max(22, Math.round(baseRadius * 1.1));
+    const badgeX = p.x + baseRadius + 4;
+    const badgeY = p.y - badgeH / 2;
+    if (px >= badgeX && px <= badgeX + badgeW && py >= badgeY - 4 && py <= badgeY + badgeH + 4) {
+      return z;
+    }
   }
   return null;
 }
@@ -403,6 +412,8 @@ export function PreviewCanvas() {
     isHit: boolean;
   } | null>(null);
   const lastAddZoomTimeRef = useRef(0);
+  const lastDragTimeRef = useRef(0);
+  const wasDraggingRef = useRef(false);
   // The rAF loop is built once per clip, so it reads the drag through a ref.
   const draggingIdRef = useRef<string | null>(null);
   draggingIdRef.current = dragging?.id ?? null;
@@ -476,10 +487,13 @@ export function PreviewCanvas() {
       const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
       if (!isExporting && tSrc !== requestedTime) {
         requestedTime = tSrc;
+        const seg = active.seg;
+        const fcStartT = seg.facecam?.startT ?? 0;
+        const fcT = Math.max(0, tEff - fcStartT);
         // Coalesced inside the engine — repeat calls only move the decode target.
         // Use prepareAllFrames so cam+screen stay synced at speed
-        const pending = (engine as unknown as { prepareAllFrames?: (t:number)=>Promise<void> }).prepareAllFrames
-          ? (engine as unknown as { prepareAllFrames: (t:number)=>Promise<void> }).prepareAllFrames(tSrc)
+        const pending = (engine as unknown as { prepareAllFrames?: (t: number, fcT?: number) => Promise<void> }).prepareAllFrames
+          ? (engine as unknown as { prepareAllFrames: (t: number, fcT?: number) => Promise<void> }).prepareAllFrames(tSrc, fcT)
           : engine.prepareFrame(tSrc);
         // One handler per in-flight decode; during playback the engine hands
         // back the same promise every tick and these would otherwise pile up.
@@ -650,29 +664,10 @@ export function PreviewCanvas() {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
-
-      // Facecam hit test first — PiP is in screen space (full canvas), smoothly animated
+      wasDraggingRef.current = false;
       const active = resolveActive(state.project, state.currentTime);
-      const fc = active.seg.facecam;
-      if (fc.src) {
-        const resolved = resolveInterpolatedFacecam(state.project, state.currentTime, active.seg);
-        const cw = canvas.width;
-        const ch = canvas.height;
-        const pipW = cw * resolved.size;
-        const pipH = pipW / (16 / 9);
-        const fx = cw * resolved.x;
-        const fy = ch * resolved.y;
-        if (px >= fx && px <= fx + pipW && py >= fy && py <= fy + pipH) {
-          e.preventDefault();
-          canvas.setPointerCapture(e.pointerId);
-          if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
-          facecamDragOffset.current = { dx: px - fx, dy: py - fy };
-          setDraggingFacecam(true);
-          pointerDownRef.current = { clientX: e.clientX, clientY: e.clientY, px, py, time: performance.now(), isHit: true };
-          return;
-        }
-      }
 
+      // 1. Zoom handles hit test FIRST — handles sit visually above everything, including facecam
       const hit = hitTestHandle(
         canvas,
         state.project,
@@ -693,7 +688,28 @@ export function PreviewCanvas() {
         return;
       }
 
-      // Record canvas press on empty space
+      // 2. Facecam hit test second — if not clicking a zoom handle over the camera
+      const fc = active.seg.facecam;
+      if (fc.src) {
+        const resolved = resolveInterpolatedFacecam(state.project, state.currentTime, active.seg);
+        const cw = canvas.width;
+        const ch = canvas.height;
+        const pipW = cw * resolved.size;
+        const pipH = pipW / (16 / 9);
+        const fx = cw * resolved.x;
+        const fy = ch * resolved.y;
+        if (px >= fx && px <= fx + pipW && py >= fy && py <= fy + pipH) {
+          e.preventDefault();
+          canvas.setPointerCapture(e.pointerId);
+          if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
+          facecamDragOffset.current = { dx: px - fx, dy: py - fy };
+          setDraggingFacecam(true);
+          pointerDownRef.current = { clientX: e.clientX, clientY: e.clientY, px, py, time: performance.now(), isHit: true };
+          return;
+        }
+      }
+
+      // 3. Record canvas press on empty space
       pointerDownRef.current = { clientX: e.clientX, clientY: e.clientY, px, py, time: performance.now(), isHit: false };
     },
     [setSelectedZoom, selectSegment],
@@ -710,6 +726,7 @@ export function PreviewCanvas() {
 
       // Facecam drag — screen space, clamped to canvas edges
       if (draggingFacecam) {
+        wasDraggingRef.current = true;
         const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
         const cw = canvas.width;
         const ch = canvas.height;
@@ -727,6 +744,7 @@ export function PreviewCanvas() {
       }
 
       if (dragging) {
+        wasDraggingRef.current = true;
         const zoom =
           active.seg.zoomPoints.find((z) => z.id === dragging.id) ??
           active.seg.stagedZoomPoints.find((z) => z.id === dragging.id);
@@ -747,9 +765,24 @@ export function PreviewCanvas() {
         return;
       }
 
-      // Hover affordance: facecam grab beats zoom grab beats crosshair
+      // Hover affordance: zoom grab beats facecam grab beats crosshair
       if (!state.isPlaying) {
         const { x: hx, y: hy } = pointerToCanvas(canvas, e.clientX, e.clientY);
+        const over = hitTestHandle(
+          canvas,
+          state.project,
+          state.currentTime,
+          state.selectedZoomId,
+          hx,
+          hy,
+          state.selectedSegmentId,
+          state.isPlaying,
+        );
+        if (over) {
+          canvas.style.cursor = "grab";
+          return;
+        }
+
         const fc = active.seg.facecam;
         if (fc.src) {
           const resolved = resolveInterpolatedFacecam(state.project, state.currentTime, active.seg);
@@ -764,17 +797,7 @@ export function PreviewCanvas() {
             return;
           }
         }
-        const over = hitTestHandle(
-          canvas,
-          state.project,
-          state.currentTime,
-          state.selectedZoomId,
-          hx,
-          hy,
-          state.selectedSegmentId,
-          state.isPlaying,
-        );
-        canvas.style.cursor = over ? "grab" : "crosshair";
+        canvas.style.cursor = "crosshair";
       }
     },
     [dragging, draggingFacecam, updateZoomPoint, setFacecam],
@@ -786,6 +809,7 @@ export function PreviewCanvas() {
         setDraggingFacecam(false);
         facecamDragOffset.current = null;
         commitDrag();
+        lastDragTimeRef.current = performance.now();
         pointerDownRef.current = null;
         return;
       }
@@ -794,48 +818,22 @@ export function PreviewCanvas() {
           commitDrag();
         }
         setDragging(null);
+        lastDragTimeRef.current = performance.now();
         pointerDownRef.current = null;
         return;
       }
 
-      const down = pointerDownRef.current;
       pointerDownRef.current = null;
-
-      if (down && !down.isHit) {
-        const dist = Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY);
-        if (dist < 10) {
-          const state = useProjectStore.getState();
-          if (state.project && !state.isPlaying && state.exportProgress === null) {
-            const canvas = canvasRef.current;
-            if (!canvas) return;
-            const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
-            const active = resolveActive(state.project, state.currentTime);
-            const { rect, view } = canvasGeometry(canvas, state.project, state.currentTime, false);
-            const f = canvasToFrame(rect, view, px, py);
-
-            lastAddZoomTimeRef.current = performance.now();
-            if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
-            addZoomPoint({
-              t: active.srcT,
-              to: {
-                scale: DEFAULT_ZOOM_SCALE,
-                x: clamp01(f.x / rect.w),
-                y: clamp01(f.y / rect.h),
-              },
-              dur: 0.7,
-              hold: 2.0,
-              ease: "easeInOutCubic",
-            });
-          }
-        }
-      }
     },
-    [dragging, draggingFacecam, commitDrag, addZoomPoint, selectSegment],
+    [dragging, draggingFacecam, commitDrag],
   );
 
   const handleCanvasClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (performance.now() - lastAddZoomTimeRef.current < 300) return;
+      // Guard against drag completion or rapid double click
+      if (wasDraggingRef.current) return;
+      if (performance.now() - lastDragTimeRef.current < 400) return;
+      if (performance.now() - lastAddZoomTimeRef.current < 400) return;
 
       const state = useProjectStore.getState();
       if (!state.project || state.isPlaying || state.exportProgress !== null) return;
@@ -846,6 +844,23 @@ export function PreviewCanvas() {
       const t = state.currentTime;
       const active = resolveActive(state.project, t);
 
+      // Check if click landed on facecam — if so, select segment and NEVER add zoom
+      const fc = active.seg.facecam;
+      if (fc.src) {
+        const resolved = resolveInterpolatedFacecam(state.project, t, active.seg);
+        const cw = canvas.width;
+        const ch = canvas.height;
+        const pipW = cw * resolved.size;
+        const pipH = pipW / (16 / 9);
+        const fx = cw * resolved.x;
+        const fy = ch * resolved.y;
+        if (px >= fx && px <= fx + pipW && py >= fy && py <= fy + pipH) {
+          if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
+          return;
+        }
+      }
+
+      // Check if click landed on a zoom handle — if so, select it and do not add zoom
       const hit = hitTestHandle(
         canvas,
         state.project,
@@ -862,9 +877,15 @@ export function PreviewCanvas() {
         return;
       }
 
+      // Check if click landed within the video frame rect (ignore background padding clicks)
       const { rect, view } = canvasGeometry(canvas, state.project, t, state.isPlaying);
+      if (px < rect.x || px > rect.x + rect.w || py < rect.y || py > rect.y + rect.h) {
+        return;
+      }
+
       const f = canvasToFrame(rect, view, px, py);
       if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
+      lastAddZoomTimeRef.current = performance.now();
       addZoomPoint({
         t: active.srcT,
         to: {

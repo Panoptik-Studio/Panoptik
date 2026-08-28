@@ -203,7 +203,21 @@ async function openFacecamSink(blob: Blob): Promise<void> {
       fcSurface = c;
       fcSurfaceCtx = c.getContext("2d");
     }
-    if (!fcSurfaceCtx) fcSurface = null;
+    if (!fcSurfaceCtx) {
+      fcSurface = null;
+    } else {
+      // Decode initial frame right away so getFacecamSurface() is immediately available
+      try {
+        const it = fcSink.canvases(0);
+        const first = await it.next();
+        if (first.value) {
+          presentFacecam(first.value, first.value.timestamp + (first.value.duration > 0 ? first.value.duration : NOMINAL_FRAME_DUR));
+        }
+        await it.return?.();
+      } catch {
+        /* ignore */
+      }
+    }
   } catch {
     fcSink = null;
   }
@@ -289,7 +303,18 @@ async function runFacecamPump(): Promise<void> {
       if (res.done || !res.value) {
         await closeFacecamIterator();
         // Past the camera's end, hold its last frame rather than re-seeking.
-        if (fcPresented) fcPresented = { start: fcPresented.start, end: Infinity };
+        if (fcPresented) {
+          fcPresented = { start: fcPresented.start, end: Infinity };
+        } else {
+          try {
+            const it0 = fcSink.canvases(0);
+            const f0 = await it0.next();
+            if (f0.value) {
+              presentFacecam(f0.value, Infinity);
+            }
+            await it0.return?.();
+          } catch {}
+        }
         return;
       }
       value = res.value;
@@ -343,8 +368,8 @@ async function teardownFacecam(): Promise<void> {
 }
 
 /** Decode the clip and the camera together, so a frame is complete. */
-export async function prepareAllFrames(t: number): Promise<void> {
-  await Promise.all([prepareFrame(t), prepareFacecamFrame(t)]);
+export async function prepareAllFrames(t: number, fcT?: number): Promise<void> {
+  await Promise.all([prepareFrame(t), prepareFacecamFrame(fcT !== undefined ? fcT : t)]);
 }
 
 /**

@@ -524,6 +524,9 @@ function drawFacecam(
   },
 ): void {
   if (!fc.src) return;
+  const startT = fc.startT ?? 0;
+  if (startT > 0 && t < startT - 0.05) return;
+
   const effectiveSize = resolved ? resolved.size : fc.size;
   const effectiveX = resolved ? resolved.x : fc.x;
   const effectiveY = resolved ? resolved.y : fc.y;
@@ -542,7 +545,8 @@ function drawFacecam(
     if (!video) return;
     try {
       const dur = video.duration;
-      const target = Number.isFinite(dur) && dur > 0 ? Math.min(t, dur - 1e-3) : t;
+      const facecamT = Math.max(0, t - startT);
+      const target = Number.isFinite(dur) && dur > 0 ? Math.min(facecamT, dur - 1e-3) : facecamT;
       // Assigning currentTime starts an async seek, so this frame may be a
       // little behind. Acceptable for the fallback; the decoded path is exact.
       if (!video.seeking && Math.abs(video.currentTime - target) > 0.05) {

@@ -17,12 +17,21 @@ import {
   type VideoCodec,
   type AudioCodec,
 } from "mediabunny";
+import { registerAacEncoder } from "@mediabunny/aac-encoder";
 import type { ExportOpts, Project } from "@panoptik/schema";
 import { presetAspect } from "./layout";
 import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator } from "./decode";
 import { renderFrame } from "./render";
 import { concatAudio, sliceAndStretchAudio } from "./timeStretch";
 import { projectDuration, segmentDuration } from "./timeline";
+
+// Register WASM AAC encoder fallback so all platforms/browsers (including Linux Chrome/Chromium)
+// can encode genuine, universal AAC audio in MP4 files.
+try {
+  registerAacEncoder();
+} catch (e) {
+  console.warn("[Export] could not register AAC encoder fallback", e);
+}
 
 /** Long-edge pixel height for each preset; width follows the media's aspect. */
 const RESOLUTION_HEIGHTS: Record<ExportOpts["resolution"], number> = {
@@ -43,10 +52,8 @@ const EXPORT_FPS = 30;
  */
 const MP4_VIDEO: VideoCodec[] = ["avc", "hevc", "av1", "vp9"];
 const WEBM_VIDEO: VideoCodec[] = ["vp9", "av1", "vp8"];
-const WEBM_VIDEO_FALLBACK: VideoCodec[] = ["vp8", "vp9", "av1"];
 const MP4_AUDIO: AudioCodec[] = ["aac", "opus"];
 const WEBM_AUDIO: AudioCodec[] = ["opus", "vorbis"];
-const WEBM_AUDIO_FALLBACK: AudioCodec[] = ["vorbis", "opus"];
 
 function emitProgress(value: number): void {
   if (typeof window === "undefined") return;
@@ -110,7 +117,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
     const audioBuffer = await getExportAudio(project);
     console.log("[Export] audioBuffer", audioBuffer ? { dur: audioBuffer.duration.toFixed(2), sr: audioBuffer.sampleRate, ch: audioBuffer.numberOfChannels, len: audioBuffer.length } : null);
 
-    let actualIsMp4 = requestedIsMp4;
+    const actualIsMp4 = requestedIsMp4;
     let audioCodec: AudioCodec | null = null;
     if (audioBuffer) {
       if (requestedIsMp4) {
@@ -127,19 +134,13 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           if (c) { audioCodec = c; console.log("[Export] aac encodable with", cfg, "->", c); break; }
         }
         if (!audioCodec) {
+          // If AAC encoder is not available (e.g. Linux Chromium/Chrome), mux with Opus in MP4
           audioCodec = await getFirstEncodableAudioCodec(["opus"] as AudioCodec[], {
             numberOfChannels: audioBuffer.numberOfChannels,
             sampleRate: audioBuffer.sampleRate,
           });
           if (audioCodec) {
-            console.warn("[Export] mp4: aac not encodable (Linux Chrome) -> would be opus-in-mp4 (browser OK, COSMIC silent). Switching actual container to WebM (vp8+vorbis for GStreamer-good) for maximal native compatibility. Requested was mp4, delivering webm.");
-            actualIsMp4 = false;
-            // Re-pick for webm with fallback prioritising vorbis (in -good) over opus (in -bad)
-            const webmCodec = await getFirstEncodableAudioCodec(WEBM_AUDIO_FALLBACK, {
-              numberOfChannels: audioBuffer.numberOfChannels,
-              sampleRate: audioBuffer.sampleRate,
-            });
-            if (webmCodec) audioCodec = webmCodec;
+            console.log("[Export] aac not encodable, encoding opus audio into MP4 container");
           }
         }
       } else {
@@ -153,9 +154,8 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
       console.warn("[Export] no audioBuffer -> silent export (preview uses <audio> blob URL, different decoder)");
     }
 
-    const isFallbackToWebm = !actualIsMp4 && requestedIsMp4;
     const videoCodec = await getFirstEncodableVideoCodec(
-      actualIsMp4 ? MP4_VIDEO : (isFallbackToWebm ? WEBM_VIDEO_FALLBACK : WEBM_VIDEO),
+      actualIsMp4 ? MP4_VIDEO : WEBM_VIDEO,
       {
         width,
         height,
@@ -173,7 +173,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
     if (!ctx) throw new Error("Canvas 2D is unavailable, so frames cannot be composed");
 
     const output = new Output({
-      format: actualIsMp4 ? new Mp4OutputFormat() : new WebMOutputFormat(),
+      format: actualIsMp4 ? new Mp4OutputFormat({ fastStart: "in-memory" }) : new WebMOutputFormat(),
       target: new BufferTarget(),
     });
 
@@ -181,6 +181,17 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
       codec: videoCodec,
       quality: QUALITY_VERY_HIGH,
       keyFrameInterval: 2,
+      onEncoderConfig: (config) => {
+        // OpenH264 (Chromium on Linux) is Constrained Baseline Profile (0x42, compatibility 0xE0).
+        // Mediabunny defaults to High Profile (avc1.64...) which causes corrupt/unsupported NAL
+        // streams in OpenH264 on Linux. Switch to Constrained Baseline (avc1.42E0...)
+        // for 100% universal player compatibility across Linux/macOS/Windows.
+        if (config.codec.startsWith("avc1.64") || config.codec.startsWith("avc1.4d")) {
+          const levelHex = config.codec.slice(-2);
+          config.codec = `avc1.42E0${levelHex}`;
+          console.log("[Export] adjusted AVC encoder config to Constrained Baseline:", config.codec);
+        }
+      },
     });
     output.addVideoTrack(videoSource, { frameRate: EXPORT_FPS });
 
@@ -232,7 +243,9 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           // so without awaiting here every output frame would be the same picture.
           // Use prepareAllFrames so cam+screen stay synced at speed (facecam pump now fixed for holes, no more scan-to-EOF stall at 2.7s)
           if (i % 60 === 0) console.log("[Export] frame", i, "/", totalFrames, "seg", seg.id, "tEff", tEff.toFixed(2), "srcT", srcT.toFixed(2));
-          await prepareAllFrames(srcT);
+          const fcStartT = seg.facecam?.startT ?? 0;
+          const fcT = Math.max(0, (timelineCursor + tEff) - fcStartT);
+          await prepareAllFrames(srcT, fcT);
           renderFrame(ctx as unknown as CanvasRenderingContext2D, project, timelineCursor + tEff);
           // Awaited so encoder backpressure actually throttles us rather than
           // queueing the whole clip into memory.

@@ -144,8 +144,16 @@ function MatchClipButton({
   );
 }
 
+function formatTimer(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  const ms = Math.floor((sec % 1) * 10);
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms}`;
+}
+
 export function CameraControls() {
   const project = useProjectStore((s) => s.project);
+  const currentTime = useProjectStore((s) => s.currentTime);
   const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
   const selectedSegmentIds = useProjectStore((s) => s.selectedSegmentIds);
   const selectSegment = useProjectStore((s) => s.selectSegment);
@@ -514,18 +522,21 @@ export function CameraControls() {
               </div>
               <div>
                 <h4 className="text-xs font-bold text-[#111]">Reshoot Camera Take</h4>
-                <p className="text-[11px] text-[#666]">Re-record webcam track with synced audio</p>
+                <p className="text-[11px] text-[#666]">Re-record webcam synchronized with screen canvas</p>
               </div>
             </div>
+            <div className="mb-2 rounded-xl bg-[#f8f8f8] px-3 py-1.5 text-[11px] text-[#666]">
+              <span>Starts at slider: </span>
+              <strong className="font-mono text-[#111]">{formatTimer(currentTime)}</strong>
+            </div>
             <button
-              onClick={() => window.dispatchEvent(new CustomEvent("open-record-modal"))}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[#111] py-2 text-xs font-semibold text-white shadow-md transition-all hover:bg-[#0070f3]"
+              onClick={() => window.dispatchEvent(new CustomEvent("open-reshoot-modal"))}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 py-2.5 text-xs font-semibold text-white shadow-md transition-all hover:bg-red-500 active:scale-95"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <polygon points="10 8 16 12 10 16 10 8" />
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="12" r="7" />
               </svg>
-              <span>Record New Camera Take</span>
+              <span>Reshoot from {formatTimer(currentTime)}</span>
             </button>
           </div>
 

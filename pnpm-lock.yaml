@@ -63,6 +63,9 @@ importers:
 
   packages/engine:
     dependencies:
+      '@mediabunny/aac-encoder':
+        specifier: ^1.55.3
+        version: 1.55.3(mediabunny@1.55.3)
       '@panoptik/schema':
         specifier: workspace:*
         version: link:../project-schema
@@ -431,6 +434,11 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@mediabunny/aac-encoder@1.55.3':
+    resolution: {integrity: sha512-PY6A1ix9MtsN8v+XM9Yzoa4JVGiPM08bjTJUEet8NN/SV6Q8Mz8sJSBOLXRtZuJ1SWq1OEgj2Gfe0wXYNMZ8Cg==}
+    peerDependencies:
+      mediabunny: ^1.0.0
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     resolution: {integrity: sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ==}
@@ -1414,6 +1422,10 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@mediabunny/aac-encoder@1.55.3(mediabunny@1.55.3)':
+    dependencies:
+      mediabunny: 1.55.3
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true

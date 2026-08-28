@@ -197,6 +197,7 @@ interface ProjectStore {
 
   // Facecam PiP placement (position / size / shape in the composed frame)
   setFacecam: (updates: Partial<Facecam>) => void;
+  replaceFacecamMedia: (facecamSrc: string | null, audioSrc?: string | null, startT?: number) => void;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -950,6 +951,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       segments: s.project.segments.map((seg) =>
         idSet.has(seg.id) ? { ...seg, facecam: { ...seg.facecam, ...updates } } : seg,
       ),
+    };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  replaceFacecamMedia: (facecamSrc, audioSrc, startT) => {
+    const s = get();
+    if (!s.project) return;
+    const project = {
+      ...s.project,
+      audioSrc: audioSrc !== undefined ? audioSrc : s.project.audioSrc,
+      segments: s.project.segments.map((seg) => ({
+        ...seg,
+        facecam: {
+          ...seg.facecam,
+          src: facecamSrc,
+          startT: startT !== undefined ? startT : seg.facecam?.startT,
+        },
+      })),
     };
     pushHistoryAndSet(project, s, set);
   },

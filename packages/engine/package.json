@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@mediabunny/aac-encoder": "^1.55.3",
     "@panoptik/schema": "workspace:*",
     "@panoptik/utils": "workspace:*",
     "mediabunny": "^1.0.0"

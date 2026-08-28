@@ -31,8 +31,8 @@ export function createRealEngine(): MediaEngine {
       // camera pixels over a fresh screen.
       return prepareAllFrames(t);
     },
-    async prepareAllFrames(t: number): Promise<void> {
-      return prepareAllFrames(t);
+    async prepareAllFrames(t: number, fcT?: number): Promise<void> {
+      return prepareAllFrames(t, fcT);
     },
     renderFrame(ctx, project, t, options) {
       renderFrame(ctx, project, t, options);
@@ -66,6 +66,13 @@ export function createRealEngine(): MediaEngine {
     },
     async getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
       return audioGetBuffer(project);
+    },
+    async setFacecamBlob(facecam: Blob | null, audio?: Blob | null): Promise<string | null> {
+      const facecamSrc = await setFacecamBlob(facecam);
+      if (audio) {
+        await setAudioBlob(audio);
+      }
+      return facecamSrc;
     },
     async exportProject(project: Project, opts: ExportFrameOpts): Promise<Blob> {
       return encodeProject(project, opts);

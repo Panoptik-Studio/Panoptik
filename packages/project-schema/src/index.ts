@@ -39,6 +39,7 @@ export type Facecam = {
   shape?: "circle" | "square";
   transition?: "smooth" | "spring" | "fade" | "slide" | "cut";
   transitionDuration?: number;
+  startT?: number;
 }; // all normalized 0-1, shape for PiP
 
 export type ClickEvent = {

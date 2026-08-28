@@ -338,13 +338,13 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
 
   const facecamMime =
     [
-      "video/mp4;codecs=avc1,opus",
-      "video/mp4",
-      "video/webm;codecs=h264,opus",
-      "video/webm;codecs=avc1,opus",
       "video/webm;codecs=vp9,opus",
       "video/webm;codecs=vp8,opus",
+      "video/webm;codecs=h264,opus",
+      "video/webm;codecs=avc1,opus",
       "video/webm",
+      "video/mp4;codecs=avc1,opus",
+      "video/mp4",
     ].find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) || "video/webm";
 
   // Everything starts from the same instant. The screen is the last source to

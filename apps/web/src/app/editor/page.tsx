@@ -15,6 +15,7 @@ import { Inspector } from "@/components/Inspector";
 import { PreviewCanvas } from "@/components/PreviewCanvas";
 import { ProjectBrowser } from "@/components/ProjectBrowser";
 import { RecordModal } from "@/components/RecordModal";
+import { ReshootModal } from "@/components/ReshootModal";
 import { StageControls } from "@/components/StageControls";
 import { StagingPanel } from "@/components/StagingPanel";
 import { Timeline } from "@/components/Timeline";
@@ -84,6 +85,7 @@ export default function EditorPage() {
       </div>
 
       <RecordModal />
+      <ReshootModal />
       <ConfirmDialog />
       <ExportLock />
     </div>

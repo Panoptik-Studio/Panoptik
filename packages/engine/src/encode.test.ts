@@ -15,6 +15,10 @@ vi.mock("mediabunny", () => ({
   getFirstEncodableAudioCodec: vi.fn(),
 }));
 
+vi.mock("@mediabunny/aac-encoder", () => ({
+  registerAacEncoder: vi.fn(),
+}));
+
 const { __test } = await import("./encode");
 
 /** A v1.2 project whose single segment keeps the media's own aspect. */
