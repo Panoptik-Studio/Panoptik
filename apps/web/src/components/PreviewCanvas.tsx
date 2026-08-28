@@ -533,10 +533,24 @@ export function PreviewCanvas() {
       const tSrc = active.srcT;
 
       // the audio element runs its own clock — keep its rate glued to the
-      // active segment's speed so it crosses boundaries with the playhead.
+      // active segment's speed and source so it crosses boundaries with the playhead.
       if (state.isPlaying) {
         const audio = audioRef.current;
-        if (audio) audio.playbackRate = active.seg.speed;
+        if (audio) {
+          if (audio.playbackRate !== active.seg.speed) {
+            audio.playbackRate = active.seg.speed;
+          }
+          const segSrc = active.seg.facecam?.src || state.project.audioSrc || state.project.media.src;
+          if (segSrc && audio.src !== segSrc) {
+            audio.src = segSrc;
+            const fcStartT = active.seg.facecam?.startT ?? 0;
+            const target = fcStartT > 0 ? Math.max(0, tEff - fcStartT) : tSrc;
+            audio.currentTime = target;
+            audio.play().catch(() => {});
+          } else if (audio.paused) {
+            audio.play().catch(() => {});
+          }
+        }
       }
 
       // Don't contend with export's pump — it drives desiredTime at 30fps
@@ -545,7 +559,7 @@ export function PreviewCanvas() {
         requestedTime = tSrc;
         const seg = active.seg;
         const fcStartT = seg.facecam?.startT ?? 0;
-        const fcT = Math.max(0, tEff - fcStartT);
+        const fcT = fcStartT > 0 ? Math.max(0, tEff - fcStartT) : tSrc;
         // Coalesced inside the engine — repeat calls only move the decode target.
         // Use prepareAllFrames so cam+screen stay synced at speed
         const pending = (engine as unknown as { prepareAllFrames?: (t: number, fcT?: number) => Promise<void> }).prepareAllFrames
@@ -602,9 +616,14 @@ export function PreviewCanvas() {
     const src = active.seg.facecam?.src || project.audioSrc || project.media.src;
     if (src && audio.src !== src) {
       audio.src = src;
-      audio.load();
+      const fcStartT = active.seg.facecam?.startT ?? 0;
+      const target = fcStartT > 0 ? Math.max(0, currentTime - fcStartT) : active.srcT;
+      audio.currentTime = target;
+      if (isPlaying) {
+        audio.play().catch(() => {});
+      }
     }
-  }, [project?.audioSrc, project?.media.src, currentTime]);
+  }, [project?.audioSrc, project?.media.src, currentTime, isPlaying]);
 
   // Keep the audio element pitch-preserved. The playbackRate itself follows the
   // active segment's per-frame speed (set in the rAF loop and on play/scrub).
@@ -626,7 +645,6 @@ export function PreviewCanvas() {
     const src = seg.facecam?.src || project.audioSrc || project.media.src;
     if (src && audio.src !== src) {
       audio.src = src;
-      audio.load();
     }
     const fcStartT = seg.facecam?.startT ?? 0;
     const target = fcStartT > 0 ? Math.max(0, currentTime - fcStartT) : srcT;
@@ -648,7 +666,6 @@ export function PreviewCanvas() {
     const src = active.seg.facecam?.src || state.project.audioSrc || state.project.media.src;
     if (src && audio.src !== src) {
       audio.src = src;
-      audio.load();
     }
     audio.playbackRate = active.seg.speed;
     const fcStartT = active.seg.facecam?.startT ?? 0;
@@ -660,19 +677,21 @@ export function PreviewCanvas() {
     // apart over a long clip unless they are pulled back together.
     const id = window.setInterval(() => {
       const st = useProjectStore.getState();
-      if (!st.project) return;
+      if (!st.project || !st.isPlaying) return;
       const r = resolveActive(st.project, st.currentTime);
       const rSrc = r.seg.facecam?.src || st.project.audioSrc || st.project.media.src;
-      if (rSrc && audio.src !== rSrc) {
-        audio.src = rSrc;
-        audio.load();
-      }
-      audio.playbackRate = r.seg.speed;
       const rFcStartT = r.seg.facecam?.startT ?? 0;
       const rTarget = rFcStartT > 0 ? Math.max(0, st.currentTime - rFcStartT) : r.srcT;
-      if (!audio.paused && Math.abs(audio.currentTime - rTarget) > 0.3) {
+      if (rSrc && audio.src !== rSrc) {
+        audio.src = rSrc;
+        audio.currentTime = rTarget;
+        audio.play().catch(() => {});
+      } else if (audio.paused) {
+        audio.play().catch(() => {});
+      } else if (Math.abs(audio.currentTime - rTarget) > 0.3) {
         audio.currentTime = rTarget;
       }
+      audio.playbackRate = r.seg.speed;
     }, 500);
     return () => clearInterval(id);
   }, [isPlaying]);
