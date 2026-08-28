@@ -68,6 +68,8 @@ interface ProjectStore {
   selectedZoomId: string | null;
   pendingBackgroundBadge: boolean;
   whisperProgress: number | null; // null = idle, -1 = transcribing, 0-100 = model loading
+  /** 0..1 while an export runs, null when idle. Non-null locks the editor. */
+  exportProgress: number | null;
   stagePadding: number; // p-4 = 16, p-2 = 8, p-8 = 32 etc — white space around black video container
 
   // Project lifecycle
@@ -133,6 +135,12 @@ interface ProjectStore {
   // Whisper progress (for agent-triggered runs)
   setWhisperProgress: (p: number | null) => void;
 
+  // Export lock — an export re-renders every frame off the shared decoder, so
+  // seeking or editing mid-run would corrupt the output.
+  beginExport: () => void;
+  setExportProgress: (p: number) => void;
+  endExport: () => void;
+
   // Stage UI
   setStagePadding: (n: number) => void;
   setAspectPreset: (preset: AspectPreset) => void;
@@ -150,6 +158,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   selectedZoomId: null,
   pendingBackgroundBadge: false,
   whisperProgress: null,
+  exportProgress: null,
   stagePadding: 8,
 
   // ── Project lifecycle ──
@@ -169,11 +178,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   // ── Playback ──
 
-  play: () => set((s) => ({ isPlaying: true, ...rewindIfEnded(s) })),
+  // Transport is inert while exporting. The overlay blocks the pointer, but
+  // shortcuts and programmatic callers reach these directly, and moving the
+  // playhead mid-export would hand the encoder the wrong frames.
+  play: () => set((s) => (s.exportProgress !== null ? {} : { isPlaying: true, ...rewindIfEnded(s) })),
   pause: () => set({ isPlaying: false }),
   togglePlay: () =>
-    set((s) => (s.isPlaying ? { isPlaying: false } : { isPlaying: true, ...rewindIfEnded(s) })),
-  seek: (t) => set({ currentTime: t, isPlaying: false }),
+    set((s) =>
+      s.exportProgress !== null
+        ? {}
+        : s.isPlaying
+          ? { isPlaying: false }
+          : { isPlaying: true, ...rewindIfEnded(s) },
+    ),
+  seek: (t) => set((s) => (s.exportProgress !== null ? {} : { currentTime: t, isPlaying: false })),
   setCurrentTime: (t) => set({ currentTime: t }),
 
   // ── Zoom — committed ──
@@ -579,6 +597,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   setWhisperProgress: (p) => set({ whisperProgress: p }),
+
+  // Playback is stopped up front: the export drives the decoder itself, and a
+  // running preview would fight it for frames.
+  beginExport: () => set({ exportProgress: 0, isPlaying: false }),
+  setExportProgress: (p) => set({ exportProgress: Math.max(0, Math.min(1, p)) }),
+  endExport: () => set({ exportProgress: null }),
 
   setStagePadding: (n) => set({ stagePadding: Math.max(0, Math.min(48, n)) }),
 

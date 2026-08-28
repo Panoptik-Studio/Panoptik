@@ -38,7 +38,7 @@ export function createRealEngine(): MediaEngine {
       if (facecamSrc) proj.facecam.src = facecamSrc;
       // The screen track is captured silently; the microphone rides along with
       // the camera recording, so the audio has to be read from there.
-      if (audio) await setAudioBlob(audio);
+      if (audio) proj.audioSrc = await setAudioBlob(audio);
       await decodePrepareFrame(0);
       return proj;
     },

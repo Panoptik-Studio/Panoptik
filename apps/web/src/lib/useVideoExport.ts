@@ -17,13 +17,16 @@ let exportInFlight = false;
 
 export function useVideoExport() {
   const project = useProjectStore((s) => s.project);
-  const [progress, setProgress] = useState<number | null>(null);
+  // Progress lives in the store as well, so the whole editor can lock itself
+  // for the duration rather than each surface tracking it separately.
+  const progress = useProjectStore((s) => s.exportProgress);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ExportResult | null>(null);
   const urlRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const onProgress = (e: Event) => setProgress((e as CustomEvent<number>).detail);
+    const onProgress = (e: Event) =>
+      useProjectStore.getState().setExportProgress((e as CustomEvent<number>).detail);
     window.addEventListener("export-progress", onProgress);
     return () => window.removeEventListener("export-progress", onProgress);
   }, []);
@@ -41,7 +44,7 @@ export function useVideoExport() {
       if (!project || exportInFlight) return;
       exportInFlight = true;
       setError(null);
-      setProgress(0);
+      useProjectStore.getState().beginExport();
       if (urlRef.current) {
         URL.revokeObjectURL(urlRef.current);
         urlRef.current = null;
@@ -64,7 +67,7 @@ export function useVideoExport() {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         exportInFlight = false;
-        setProgress(null);
+        useProjectStore.getState().endExport();
       }
     },
     [project],

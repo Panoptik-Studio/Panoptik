@@ -55,6 +55,7 @@ let pump: Promise<void> | null = null;
 let facecamUrl: string | null = null;
 
 let audioInput: Input | null = null;
+let audioUrl: string | null = null;
 
 /**
  * Take the project's audio from a different file than its video.
@@ -64,7 +65,7 @@ let audioInput: Input | null = null;
  * from the screen file, which never has an audio track, so narration was
  * recorded and then silently dropped on import.
  */
-export async function setAudioBlob(blob: Blob | null): Promise<void> {
+export async function setAudioBlob(blob: Blob | null): Promise<string | null> {
   if (audioInput) {
     try {
       audioInput.dispose();
@@ -73,7 +74,11 @@ export async function setAudioBlob(blob: Blob | null): Promise<void> {
     }
     audioInput = null;
   }
-  if (!blob || blob.size === 0) return;
+  if (audioUrl) {
+    URL.revokeObjectURL(audioUrl);
+    audioUrl = null;
+  }
+  if (!blob || blob.size === 0) return null;
   try {
     audioInput = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
     const track = await audioInput.getPrimaryAudioTrack();
@@ -81,6 +86,9 @@ export async function setAudioBlob(blob: Blob | null): Promise<void> {
   } catch {
     /* keep whatever the clip itself provided */
   }
+  // Playback uses a plain <audio> element, which needs its own URL.
+  audioUrl = URL.createObjectURL(blob);
+  return audioUrl;
 }
 
 /**
@@ -292,6 +300,7 @@ async function teardown(): Promise<void> {
   setCurrentFrame(null);
   setAudioSink(null);
   setFacecamBlob(null);
+  await setAudioBlob(null);
   if (audioInput) {
     try {
       audioInput.dispose();

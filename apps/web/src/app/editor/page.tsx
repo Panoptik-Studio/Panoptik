@@ -8,6 +8,7 @@
 import * as React from "react";
 import { CaptionsPanel } from "@/components/CaptionsPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ExportLock } from "@/components/ExportLock";
 import { ExportPanel } from "@/components/ExportPanel";
 import { Inspector } from "@/components/Inspector";
 import { PreviewCanvas } from "@/components/PreviewCanvas";
@@ -79,6 +80,7 @@ export default function EditorPage() {
 
       <RecordModal />
       <ConfirmDialog />
+      <ExportLock />
     </div>
   );
 }

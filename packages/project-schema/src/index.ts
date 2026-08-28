@@ -45,6 +45,12 @@ export type AspectPreset = "16:9" | "9:16" | "1:1" | "4:3";
 export type Project = {
   id: string;
   clip: { src: string; duration: number; width: number; height: number };
+  /**
+   * Where the audio lives, when that is not the clip itself. A screen recording
+   * is captured silently and the microphone is muxed into the camera take, so
+   * playback has to read audio from there.
+   */
+  audioSrc?: string | null;
   zoomPoints: ZoomPoint[]; // committed — THE ONLY input to the camera transform
   stagedZoomPoints: ZoomPoint[]; // ghosts
   textOverlays: TextOverlay[];

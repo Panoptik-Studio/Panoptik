@@ -200,6 +200,11 @@ export function PreviewCanvas() {
       const state = useProjectStore.getState();
       if (!state.project) return;
 
+      // An export drives the same decoder frame by frame. Requesting preview
+      // frames alongside it would move the decode target out from under the
+      // encoder and put the wrong pictures in the file.
+      if (state.exportProgress !== null) return;
+
       if (state.isPlaying) {
         const newTime = state.currentTime + dt;
         if (newTime >= state.project.clip.duration) {
@@ -258,12 +263,14 @@ export function PreviewCanvas() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !project) return;
-    // Source is the same blob URL as the video — contains the audio track
-    if (audio.src !== project.clip.src) {
-      audio.src = project.clip.src;
+    // A recording's audio is in a different file than its video: the screen is
+    // captured silently and the mic rides with the camera take.
+    const src = project.audioSrc ?? project.clip.src;
+    if (audio.src !== src) {
+      audio.src = src;
       audio.load();
     }
-  }, [project?.clip.src]);
+  }, [project?.audioSrc, project?.clip.src]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -346,7 +353,7 @@ export function PreviewCanvas() {
         return;
       }
       const state = useProjectStore.getState();
-      if (!state.project || state.isPlaying) return;
+      if (!state.project || state.isPlaying || state.exportProgress !== null) return;
 
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -385,7 +392,7 @@ export function PreviewCanvas() {
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const state = useProjectStore.getState();
-      if (!state.project || state.isPlaying) return;
+      if (!state.project || state.isPlaying || state.exportProgress !== null) return;
 
       const canvas = canvasRef.current;
       if (!canvas) return;
