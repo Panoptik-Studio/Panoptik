@@ -54,10 +54,7 @@ export function ProjectBrowser() {
         <button
           onClick={handleSave}
           disabled={!project || saving}
-          className="rounded-full px-4 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-40"
-          style={{ background: "#171717" }}
-          onMouseEnter={(e) => { if (project && !saving) e.currentTarget.style.background = "#0070f3"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "#171717"; }}
+          className="pk-btn pk-btn-primary pk-btn-sm"
         >
           {saving ? "Saving…" : "Save"}
         </button>
@@ -65,8 +62,7 @@ export function ProjectBrowser() {
           <select
             onChange={(e) => { if (e.target.value) handleLoad(e.target.value); e.target.value = ""; }}
             disabled={loading}
-            className="rounded-full border bg-white px-3 py-1.5 text-xs outline-none disabled:opacity-40"
-            style={{ borderColor: "#ebebeb", color: "#171717" }}
+            className="pk-select"
             defaultValue=""
           >
             <option value="" disabled>{loading ? "Loading…" : "Load project…"}</option>

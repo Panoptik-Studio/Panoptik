@@ -79,10 +79,10 @@ export function ConfirmDialog() {
           </div>
         )}
         <div className="flex justify-end gap-2">
-          <button onClick={handleCancel} className="rounded-full border bg-white px-4 py-1.5 text-sm font-medium transition-colors" style={{ borderColor: "#ebebeb", color: "#171717" }} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#0070f3"; e.currentTarget.style.color = "#0070f3"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#ebebeb"; e.currentTarget.style.color = "#171717"; }}>
+          <button onClick={handleCancel} className="pk-btn pk-btn-ghost pk-btn-md">
             Cancel
           </button>
-          <button ref={confirmBtnRef} onClick={handleConfirm} className="rounded-full px-5 py-1.5 text-sm font-medium text-white transition-colors" style={{ background: "#171717" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#0070f3")} onMouseLeave={(e) => (e.currentTarget.style.background = "#171717")}>
+          <button ref={confirmBtnRef} onClick={handleConfirm} className="pk-btn pk-btn-primary pk-btn-md">
             Confirm
           </button>
         </div>

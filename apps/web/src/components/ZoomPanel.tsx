@@ -58,18 +58,18 @@ export function ZoomPanel() {
                   // look like they do nothing.
                   seek(zp.t + zp.dur);
                 }}
-                className={`flex cursor-pointer items-center justify-between rounded-lg border px-2.5 py-2 transition-colors ${isSelected ? "bg-[#171717] text-white" : "bg-[#fafafa] hover:border-[#0070f3]"}`}
-                style={{ borderColor: isSelected ? "#171717" : "#ebebeb" }}
+                className={`pk-ui flex cursor-pointer items-center justify-between rounded-[12px] border px-3 py-2.5 transition-colors ${isSelected ? "text-white" : "hover:border-[#0070f3]"}`}
+                style={{ borderColor: isSelected ? "#1f1f1f" : "#ebebeb", background: isSelected ? "#1f1f1f" : "#f8f8f8" }}
               >
                 <div className="flex items-center gap-2">
                   <span className={`h-2 w-2 rounded-full ${isStaged ? "bg-[#f5a623]" : "bg-[#0070f3]"}`} />
-                  <span className="font-mono text-xs" style={{ color: isSelected ? "white" : "#171717" }}>{zp.t.toFixed(1)}s</span>
+                  <span className="font-mono text-xs" style={{ color: isSelected ? "white" : "#1a1a1a" }}>{zp.t.toFixed(1)}s</span>
                   <span className="font-mono text-[10px]" style={{ color: isSelected ? "rgba(255,255,255,0.6)" : "#888" }}>{zp.to.scale.toFixed(1)}×</span>
-                  {isStaged && <span className="rounded-full bg-[#ffefcf] px-1.5 py-px font-mono text-[9px] font-medium" style={{ color: "#ab570a" }}>staged</span>}
+                  {isStaged && <span className="pk-chip pk-chip-amber">staged</span>}
                 </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); isStaged ? removeStagedZoom(zp.id) : removeZoomPoint(zp.id); }}
-                  className={`rounded-full p-1 text-[10px] leading-none transition-colors ${isSelected ? "text-white/70 hover:bg-white/10" : "text-[#888] hover:bg-white hover:text-[#0070f3]"}`}
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[11px] leading-none transition-colors ${isSelected ? "text-white/70 hover:bg-white/15" : "text-[#888] hover:bg-[#d3e5ff] hover:text-[#0070f3]"}`}
                 >
                   ✕
                 </button>
@@ -80,7 +80,7 @@ export function ZoomPanel() {
       )}
 
       {allZooms.length === 0 && (
-        <div className="mt-3 rounded-lg border bg-[#fafafa] p-3 text-center" style={{ borderColor: "#ebebeb" }}>
+        <div className="mt-3 rounded-[12px] border p-4 text-center" style={{ borderColor: "#ebebeb", background: "#f8f8f8" }}>
           <p className="text-xs" style={{ color: "#888" }}>No zooms yet. Add one at the playhead or click the preview.</p>
         </div>
       )}

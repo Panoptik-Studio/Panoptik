@@ -578,42 +578,56 @@ export function PreviewCanvas() {
         onDragLeave={handleDragLeave}
       >
         <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleFilePick} />
-        {/* ex-empty-state-card: canvas-soft, rounded lg, Level 3 shadow */}
         <div
-          className={`relative flex w-full max-w-[560px] flex-col items-center rounded-xl border bg-white p-12 text-center transition-all ${isDragOver ? "scale-[1.01]" : ""}`}
+          className="pk-card relative flex w-full max-w-[520px] flex-col items-center px-10 py-12 text-center transition-all"
           style={{
             borderColor: isDragOver ? "#0070f3" : "#ebebeb",
+            borderStyle: isDragOver ? "solid" : "dashed",
+            borderWidth: 2,
+            transform: isDragOver ? "scale(1.01)" : undefined,
             boxShadow: isDragOver
-              ? "0 0 0 1px #0070f3 inset, 0 8px 24px rgba(0,112,243,0.12)"
-              : "0 0 0 1px rgba(0,0,0,0.08) inset, 0px 2px 2px rgba(0,0,0,0.04), 0px 8px 8px -8px rgba(0,0,0,0.04)",
+              ? "0 12px 40px rgba(0,112,243,0.16)"
+              : "0 2px 12px rgba(0,0,0,0.04)",
           }}
         >
-          {/* mesh halo */}
-          <div className="pointer-events-none absolute -top-16 left-1/2 h-40 w-[420px] -translate-x-1/2 rounded-full opacity-[0.08] blur-3xl" style={{ background: "linear-gradient(90deg, #007cf0 0%, #7928ca 45%, #ff0080 85%)" }} />
-          <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-full border bg-white" style={{ borderColor: "#ebebeb", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#171717" strokeWidth="1.7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+          {/* Soft halo, echoing the homepage hero. */}
+          <div
+            className="pointer-events-none absolute -top-20 left-1/2 h-44 w-[420px] -translate-x-1/2 rounded-full blur-3xl"
+            style={{ background: "linear-gradient(90deg, #007cf0 0%, #7928ca 45%, #ff0080 85%)", opacity: isDragOver ? 0.16 : 0.07 }}
+          />
+
+          <div
+            className="mb-6 flex h-14 w-14 items-center justify-center rounded-[16px] transition-colors"
+            style={{ background: isDragOver ? "#0070f3" : "#1f1f1f", color: "#fff" }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
           </div>
-          <h3 className="text-[20px] font-semibold leading-7 tracking-[-0.6px]" style={{ color: "#171717" }}>Drop a video file here.</h3>
-          <p className="mt-2 max-w-[36ch] text-[14px] leading-5" style={{ color: "#4d4d4d" }}>Import MP4, WebM or MOV. Everything renders locally in your browser — no upload, no server.</p>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="rounded-full px-5 py-2 text-sm font-medium text-white transition-colors"
-              style={{ background: "#171717" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#0070f3")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "#171717")}
-            >
+
+          <h3 className="pk-ui" style={{ fontSize: 24, fontWeight: 600, lineHeight: 1.25, color: "#1a1a1a" }}>
+            Drop a video to <span className="pk-accent">begin</span>
+          </h3>
+          <p className="pk-help mt-2.5 max-w-[38ch]" style={{ fontSize: 14, lineHeight: 1.55 }}>
+            MP4, WebM or MOV. Everything renders in your browser — no upload, no server.
+          </p>
+
+          <div className="mt-7 flex flex-wrap items-center justify-center gap-2.5">
+            <button onClick={() => fileInputRef.current?.click()} className="pk-btn pk-btn-primary pk-btn-lg">
+              <span className="flex h-5 w-5 items-center justify-center rounded-md text-[15px] leading-none" style={{ background: "rgba(255,255,255,0.16)" }}>+</span>
               Browse video
             </button>
-            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border bg-white px-3 py-1.5 text-xs" style={{ borderColor: "#ebebeb", color: "#666" }}>
-              <span className="h-1.5 w-1.5 rounded-full bg-[#0070f3]" /> or drop anywhere
-            </span>
+            <button onClick={() => window.dispatchEvent(new CustomEvent("open-record-modal"))} className="pk-btn pk-btn-ghost pk-btn-lg">
+              <span className="h-2 w-2 rounded-full" style={{ background: "#e11d48" }} />
+              Record instead
+            </button>
           </div>
-          <div className="mt-6 flex items-center gap-1.5 text-[11px] font-medium tracking-wide" style={{ color: "#888" }}>
-            <span className="rounded-full border bg-[#fafafa] px-2 py-0.5 text-[10px] font-mono" style={{ borderColor: "#ebebeb" }}>MP4</span>
-            <span className="rounded-full border bg-[#fafafa] px-2 py-0.5 text-[10px] font-mono" style={{ borderColor: "#ebebeb" }}>WebM</span>
-            <span className="rounded-full border bg-[#fafafa] px-2 py-0.5 text-[10px] font-mono" style={{ borderColor: "#ebebeb" }}>MOV</span>
-            <span className="ml-1 font-mono text-[11px]">· up to 4K</span>
+
+          <div className="mt-7 flex flex-wrap items-center justify-center gap-1.5">
+            <span className="pk-chip">MP4</span>
+            <span className="pk-chip">WebM</span>
+            <span className="pk-chip">MOV</span>
+            <span className="pk-chip" style={{ background: "transparent", borderColor: "transparent" }}>up to 4K</span>
           </div>
         </div>
       </div>

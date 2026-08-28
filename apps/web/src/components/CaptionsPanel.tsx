@@ -107,7 +107,7 @@ export function CaptionsPanel() {
           {progress !== null ? (progress === -1 ? "Transcribing…" : `Loading ${Math.round(progress)}%`) : "Generate Captions"}
         </button>
         {stagedCaptions.length > 0 && (
-          <button onClick={clearStagedCaptions} className="rounded-full border bg-white px-3 py-1.5 text-xs font-medium transition-colors" style={{ borderColor: "#ebebeb", color: "#171717" }} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#0070f3"; e.currentTarget.style.color = "#0070f3"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#ebebeb"; e.currentTarget.style.color = "#171717"; }}>
+          <button onClick={clearStagedCaptions} className="pk-btn pk-btn-ghost pk-btn-sm">
             Clear
           </button>
         )}

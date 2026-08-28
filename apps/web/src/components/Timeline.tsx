@@ -185,7 +185,7 @@ export function Timeline() {
     return (
       <footer className="shell-timeline flex h-[72px] items-center justify-between border-t bg-[#fafafa] px-4" style={{ borderColor: "#ebebeb" }}>
         <span className="font-mono text-xs" style={{ color: "#888" }}>Timeline — load a clip to begin</span>
-        <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border bg-white px-2.5 py-1 font-mono text-[10px]" style={{ borderColor: "#ebebeb", color: "#888" }}>00:00.0 / 00:00.0</span>
+        <span className="pk-chip hidden font-mono sm:inline-flex">00:00.0 / 00:00.0</span>
       </footer>
     );
   }

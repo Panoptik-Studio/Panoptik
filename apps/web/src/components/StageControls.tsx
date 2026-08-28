@@ -174,11 +174,11 @@ export function StageControls() {
                   else if (t.bg.kind === "solid") stageBackground({ kind: "solid", color: t.bg.color! });
                   else stageBackground({ kind: "solid", color: "#ffffff" });
                 }}
-                className={`group relative overflow-hidden rounded-lg border p-2 text-left transition-all ${isActive ? "ring-2" : "hover:scale-[1.02]"}`}
-                style={{ borderColor: isActive ? "#0070f3" : "#ebebeb", background: "#ffffff", boxShadow: isActive ? "0 0 0 1px #0070f3" : "0 1px 2px rgba(0,0,0,0.04)" }}
+                className="group relative overflow-hidden rounded-[12px] border p-2 text-left transition-all hover:border-[#0070f3]"
+                style={{ borderColor: isActive ? "#0070f3" : "#ebebeb", background: "#ffffff", boxShadow: isActive ? "0 0 0 2px #0070f3" : "0 2px 12px rgba(0,0,0,0.04)" }}
               >
                 <div className="h-10 rounded-md border" style={{ background: t.swatch, borderColor: "rgba(0,0,0,0.06)" }} />
-                <p className="mt-1.5 text-center font-mono text-[10px] font-medium tracking-wide" style={{ color: isActive ? "#0070f3" : "#4d4d4d" }}>{t.name}</p>
+                <p className="pk-ui mt-1.5 text-center text-[11px] font-medium" style={{ color: isActive ? "#0070f3" : "#424242" }}>{t.name}</p>
               </button>
             );
           })}

@@ -31,8 +31,8 @@ function Row({
       <button
         onClick={onReject}
         title="Reject this proposal"
-        className="shrink-0 rounded-full px-1.5 text-[10px] leading-none transition-colors hover:bg-white"
-        style={{ color: "#ab570a" }}
+        className="pk-icon-btn h-6 w-6 shrink-0 text-[11px] leading-none"
+        style={{ color: "#ab570a", background: "transparent", borderColor: "transparent" }}
       >
         ✕
       </button>

@@ -897,7 +897,7 @@ export function RecordModal() {
                 </>
               )}
               {state === "countingDown" && (
-                <div className="rounded-full bg-white/10 px-5 py-2 text-xs font-medium tracking-widest text-white">COUNTDOWN…</div>
+                <div className="pk-ui rounded-[13px] bg-white/10 px-5 py-2 text-xs font-medium tracking-widest text-white">COUNTDOWN…</div>
               )}
               {state === "recording" && (
                 <button onClick={handleStop} className="pk-btn pk-btn-ghost pk-btn-md">
@@ -906,7 +906,7 @@ export function RecordModal() {
                 </button>
               )}
               {state === "stopping" && (
-                <div className="rounded-full bg-white/10 px-5 py-2 text-xs font-medium text-white">Processing…</div>
+                <div className="pk-ui rounded-[13px] bg-white/10 px-5 py-2 text-xs font-medium text-white">Processing…</div>
               )}
             </div>
 
