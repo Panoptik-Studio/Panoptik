@@ -75,6 +75,62 @@ async function tryWebCodecsScreen(
 const FLUSH_TIMEOUT_MS = 4000;
 
 /**
+ * Longest we wait for the captured surface to produce its first frame. The OS
+ * compositor takes a moment to spin up; beyond this we start anyway rather than
+ * leave the user staring at a dead Record button.
+ */
+const FIRST_FRAME_TIMEOUT_MS = 5000;
+
+/**
+ * Resolve once the stream has actually painted a frame.
+ *
+ * getDisplayMedia resolves as soon as the user picks a surface, but the first
+ * frame can be seconds behind it. The camera and microphone are live well
+ * before that, so starting every recorder together let them run on while the
+ * screen recorded nothing — the take opened with a frozen picture over live
+ * audio. Waiting here lines all three up at the same instant.
+ */
+async function waitForFirstFrame(stream: MediaStream): Promise<void> {
+  const track = stream.getVideoTracks()[0];
+  if (!track || typeof document === "undefined") return;
+
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = stream;
+  // Detached elements are not reliably driven, so park it out of sight.
+  video.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0";
+  document.body.appendChild(video);
+
+  try {
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(done, FIRST_FRAME_TIMEOUT_MS);
+
+      const rvfc = (video as unknown as {
+        requestVideoFrameCallback?: (cb: () => void) => number;
+      }).requestVideoFrameCallback;
+      if (typeof rvfc === "function") {
+        // Fires on a genuinely presented frame, which is what we are after.
+        rvfc.call(video, done);
+      } else {
+        video.addEventListener("loadeddata", done, { once: true });
+      }
+      video.play().catch(done);
+    });
+  } finally {
+    video.srcObject = null;
+    video.remove();
+  }
+}
+
+/**
  * Ask for far more than any webcam provides and let the browser settle on the
  * device's best mode — naming 1280x720 pins it there even on a 4K camera.
  */
@@ -266,6 +322,14 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
       "video/webm;codecs=vp8,opus",
       "video/webm",
     ].find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) || "video/webm";
+
+  // Everything starts from the same instant. The screen is the last source to
+  // come alive, so the encoders wait on its first frame — otherwise the camera
+  // and microphone, live since the recorder opened, run on for seconds while
+  // the screen has nothing to record.
+  if (screen.getVideoTracks().length > 0) {
+    await waitForFirstFrame(screen);
+  }
 
   // ── Try WebCodecs VP9 HW for screen (1920p60 HW → 60fps) before MediaRecorder VP8 SW (13fps)
   let webCodecsScreen: { output: import("mediabunny").Output; stop: () => Promise<Blob> } | null = null;

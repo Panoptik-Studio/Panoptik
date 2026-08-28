@@ -16,6 +16,7 @@ import { renderFrame } from "./render";
 import { getAudioBuffer as audioGetBuffer } from "./audio";
 import { exportProject as encodeProject } from "./encode";
 import { loadProjectRecord } from "./opfs";
+import { mergeSavedProject } from "./sanitize";
 
 export function createRealEngine(): MediaEngine {
   return {
@@ -53,22 +54,9 @@ export function createRealEngine(): MediaEngine {
       // and facecam pipeline are all opened — loading only the JSON would give
       // a project whose blob URLs point at nothing decodable.
       const proj = await this.loadRecording(saved.clip, saved.facecam, saved.audio);
-      const { project: saved_ } = saved;
-      return {
-        ...proj,
-        // Keep the fresh sources, restore the edits made on top of them.
-        id: saved_.id,
-        zoomPoints: saved_.zoomPoints ?? [],
-        stagedZoomPoints: saved_.stagedZoomPoints ?? [],
-        textOverlays: saved_.textOverlays ?? [],
-        stagedTextOverlays: saved_.stagedTextOverlays ?? [],
-        captions: saved_.captions ?? [],
-        stagedCaptions: saved_.stagedCaptions ?? [],
-        background: saved_.background ?? proj.background,
-        aspectPreset: saved_.aspectPreset ?? proj.aspectPreset,
-        clickLog: saved_.clickLog ?? [],
-        facecam: { ...proj.facecam, ...saved_.facecam, src: proj.facecam.src },
-      };
+      // project.json is same-origin but not something we produced this session,
+      // so its values are validated before they reach the renderer.
+      return mergeSavedProject(proj, saved.project);
     },
     async getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
       return audioGetBuffer(project);
