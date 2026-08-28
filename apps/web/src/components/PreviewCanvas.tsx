@@ -374,6 +374,59 @@ function drawHandles(
   }
 }
 
+function drawFacecamGridGuides(
+  ctx: CanvasRenderingContext2D,
+  canvasW: number,
+  canvasH: number,
+  fc: Facecam,
+) {
+  const pipW = canvasW * fc.size;
+  const pipH = pipW / (16 / 9);
+
+  ctx.save();
+  // 3x3 Grid Guidelines:
+  // Left, Center, Right columns
+  const colX = [0.03 * canvasW, (canvasW - pipW) / 2, canvasW * 0.97 - pipW];
+  // Top, Middle, Bottom rows
+  const rowY = [0.03 * canvasH, (canvasH - pipH) / 2, canvasH * 0.97 - pipH];
+
+  // Center cross lines
+  ctx.strokeStyle = "rgba(0, 112, 243, 0.25)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+
+  ctx.beginPath();
+  ctx.moveTo(canvasW / 2, 0);
+  ctx.lineTo(canvasW / 2, canvasH);
+  ctx.moveTo(0, canvasH / 2);
+  ctx.lineTo(canvasW, canvasH / 2);
+  ctx.stroke();
+
+  // 9 preset target zones
+  for (const gx of colX) {
+    for (const gy of rowY) {
+      const isCurrentZone =
+        Math.abs(fc.x * canvasW - gx) < 14 && Math.abs(fc.y * canvasH - gy) < 14;
+
+      ctx.strokeStyle = isCurrentZone ? "rgba(0, 112, 243, 0.9)" : "rgba(0, 112, 243, 0.22)";
+      ctx.fillStyle = isCurrentZone ? "rgba(0, 112, 243, 0.08)" : "transparent";
+      ctx.lineWidth = isCurrentZone ? 2 : 1;
+      ctx.setLineDash(isCurrentZone ? [] : [3, 3]);
+
+      if (typeof ctx.roundRect === "function") {
+        ctx.beginPath();
+        ctx.roundRect(gx, gy, pipW, pipH, fc.shape === "circle" ? pipW / 2 : 10);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.strokeRect(gx, gy, pipW, pipH);
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
 export function PreviewCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -417,6 +470,8 @@ export function PreviewCanvas() {
   // The rAF loop is built once per clip, so it reads the drag through a ref.
   const draggingIdRef = useRef<string | null>(null);
   draggingIdRef.current = dragging?.id ?? null;
+  const draggingFacecamRef = useRef(false);
+  draggingFacecamRef.current = draggingFacecam;
 
   // Toast state (moment mark feedback)
   const [toast, setToast] = useState<string | null>(null);
@@ -513,9 +568,10 @@ export function PreviewCanvas() {
       }
       engine.renderFrame(ctx, state.project, tEff, { isPlaying: state.isPlaying });
       // Editor chrome on top of the composed frame — hidden during playback so
-      // the preview shows exactly what an export would. When paused, full 100% frame
-      // displays all zoom ticks clearly with their respective scale badges.
       if (!state.isPlaying) {
+        if (draggingFacecamRef.current && active.seg.facecam.src) {
+          drawFacecamGridGuides(ctx, ctx.canvas.width, ctx.canvas.height, active.seg.facecam);
+        }
         drawHandles(
           ctx,
           state.project,
@@ -724,7 +780,7 @@ export function PreviewCanvas() {
 
       const active = resolveActive(state.project, state.currentTime);
 
-      // Facecam drag — screen space, clamped to canvas edges
+      // Facecam drag — screen space, with 3x3 magnetic grid snapping and clamping
       if (draggingFacecam) {
         wasDraggingRef.current = true;
         const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
@@ -735,8 +791,27 @@ export function PreviewCanvas() {
         const pipH = pipW / (16 / 9);
         const off = facecamDragOffset.current;
         if (!off) return;
-        const fx = px - off.dx;
-        const fy = py - off.dy;
+        let fx = px - off.dx;
+        let fy = py - off.dy;
+
+        // 3x3 Magnetic Snapping (Left, Center, Right & Top, Middle, Bottom)
+        const snapThreshold = 18;
+        const snapLeft = 0.03 * cw;
+        const snapCenterX = (cw - pipW) / 2;
+        const snapRight = cw * 0.97 - pipW;
+
+        if (Math.abs(fx - snapLeft) < snapThreshold) fx = snapLeft;
+        else if (Math.abs(fx - snapCenterX) < snapThreshold) fx = snapCenterX;
+        else if (Math.abs(fx - snapRight) < snapThreshold) fx = snapRight;
+
+        const snapTop = 0.03 * ch;
+        const snapCenterY = (ch - pipH) / 2;
+        const snapBottom = ch * 0.97 - pipH;
+
+        if (Math.abs(fy - snapTop) < snapThreshold) fy = snapTop;
+        else if (Math.abs(fy - snapCenterY) < snapThreshold) fy = snapCenterY;
+        else if (Math.abs(fy - snapBottom) < snapThreshold) fy = snapBottom;
+
         const clampedX = Math.max(0, Math.min(cw - pipW, fx));
         const clampedY = Math.max(0, Math.min(ch - pipH, fy));
         setFacecam({ x: clampedX / cw, y: clampedY / ch });

@@ -16,7 +16,7 @@ import {
   resolveSegment,
   sourceToTimeline,
 } from "@panoptik/engine";
-import { TRANSITION_ICONS } from "./CameraControls";
+import { TRANSITION_ICONS, getClosestGridPreset } from "./CameraControls";
 
 const RULER_HEIGHT = 26;
 const VIDEO_TRACK_Y = 32;
@@ -477,21 +477,42 @@ export function Timeline() {
         // Subtle gradient sheen
         const grad = ctx.createLinearGradient(x0, FACECAM_TRACK_Y, x0, FACECAM_TRACK_Y + FACECAM_TRACK_HEIGHT);
         grad.addColorStop(0, "rgba(255, 255, 255, 0.6)");
-        grad.addColorStop(1, "rgba(0, 0, 0, 0.03)");
-        ctx.fillStyle = grad;
-        ctx.fillRect(x0, FACECAM_TRACK_Y, segW, FACECAM_TRACK_HEIGHT);
-
-        const cornerText = seg.facecam.x < 0.5
-          ? (seg.facecam.y < 0.5 ? "TL" : "BL")
-          : (seg.facecam.y < 0.5 ? "TR" : "BR");
+        const hFrac = (seg.facecam.size * (project?.media?.width ?? 1920) / (project?.media?.height ?? 1080)) / (16 / 9);
+        const { preset } = getClosestGridPreset(
+          seg.facecam.x,
+          seg.facecam.y,
+          seg.facecam.size,
+          hFrac,
+        );
+        const positionText = preset.code;
         const shapeIcon = seg.facecam.shape === "circle" ? "●" : "■";
+
+        // Draw mini 3x3 dot matrix glyph if segW >= 42
+        if (segW >= 42) {
+          const matrixX = x0 + 6;
+          const matrixY = FACECAM_TRACK_Y + 9;
+          const dotSize = 2;
+          const dotGap = 3.5;
+          for (let r = 0; r < 3; r++) {
+            for (let c = 0; c < 3; c++) {
+              const dx = matrixX + c * dotGap;
+              const dy = matrixY + r * dotGap;
+              const isActiveCell = r === preset.row && c === preset.col;
+              ctx.fillStyle = isActiveCell
+                ? (selected ? "#0070f3" : "#2563eb")
+                : (selected ? "rgba(0,112,243,0.2)" : "rgba(100,116,139,0.25)");
+              ctx.fillRect(dx, dy, dotSize, dotSize);
+            }
+          }
+        }
 
         ctx.fillStyle = selected ? "#0070f3" : "#475569";
         ctx.font = "bold 9px monospace";
-        if (segW > 70) {
-          ctx.fillText(`CAM · ${cornerText} ${shapeIcon}`, x0 + 6, FACECAM_TRACK_Y + 18);
-        } else if (segW > 30) {
-          ctx.fillText(`CAM · ${cornerText}`, x0 + 4, FACECAM_TRACK_Y + 18);
+        const textOffsetX = segW >= 42 ? 22 : 4;
+        if (segW > 74) {
+          ctx.fillText(`CAM · ${positionText} ${shapeIcon}`, x0 + textOffsetX, FACECAM_TRACK_Y + 18);
+        } else if (segW > 32) {
+          ctx.fillText(`${positionText}`, x0 + textOffsetX, FACECAM_TRACK_Y + 18);
         } else {
           ctx.fillText("CAM", x0 + 3, FACECAM_TRACK_Y + 18);
         }

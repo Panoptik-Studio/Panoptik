@@ -12,52 +12,120 @@ import type { Facecam } from "@panoptik/schema";
 
 const CAMERA_ASPECT = 16 / 9;
 
-const CAMERA_CORNERS = [
+export interface CameraGridPreset {
+  id: string;
+  code: string;
+  label: string;
+  row: number; // 0 (top), 1 (mid), 2 (bottom)
+  col: number; // 0 (left), 1 (center), 2 (right)
+  at: (size: number, hFrac: number) => { x: number; y: number };
+}
+
+export const CAMERA_GRID_9: CameraGridPreset[] = [
   {
     id: "topLeft",
+    code: "TL",
     label: "Top Left",
-    icon: (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="7 17 7 7 17 7" />
-        <line x1="7" y1="7" x2="17" y2="17" />
-      </svg>
-    ),
+    row: 0,
+    col: 0,
     at: () => ({ x: 0.03, y: 0.03 }),
   },
   {
+    id: "topCenter",
+    code: "TC",
+    label: "Top Center",
+    row: 0,
+    col: 1,
+    at: (s: number) => ({ x: Number(Math.max(0, 0.5 - s / 2).toFixed(4)), y: 0.03 }),
+  },
+  {
     id: "topRight",
+    code: "TR",
     label: "Top Right",
-    icon: (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="7 7 17 7 17 17" />
-        <line x1="17" y1="7" x2="7" y2="17" />
-      </svg>
-    ),
-    at: (s: number) => ({ x: 0.97 - s, y: 0.03 }),
+    row: 0,
+    col: 2,
+    at: (s: number) => ({ x: Number(Math.max(0, 0.97 - s).toFixed(4)), y: 0.03 }),
+  },
+  {
+    id: "midLeft",
+    code: "ML",
+    label: "Mid Left",
+    row: 1,
+    col: 0,
+    at: (s: number, h: number) => ({ x: 0.03, y: Number(Math.max(0, 0.5 - h / 2).toFixed(4)) }),
+  },
+  {
+    id: "center",
+    code: "CTR",
+    label: "Center",
+    row: 1,
+    col: 1,
+    at: (s: number, h: number) => ({
+      x: Number(Math.max(0, 0.5 - s / 2).toFixed(4)),
+      y: Number(Math.max(0, 0.5 - h / 2).toFixed(4)),
+    }),
+  },
+  {
+    id: "midRight",
+    code: "MR",
+    label: "Mid Right",
+    row: 1,
+    col: 2,
+    at: (s: number, h: number) => ({
+      x: Number(Math.max(0, 0.97 - s).toFixed(4)),
+      y: Number(Math.max(0, 0.5 - h / 2).toFixed(4)),
+    }),
   },
   {
     id: "bottomLeft",
+    code: "BL",
     label: "Bottom Left",
-    icon: (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="17 17 7 17 7 7" />
-        <line x1="7" y1="17" x2="17" y2="7" />
-      </svg>
-    ),
-    at: (s: number, h: number) => ({ x: 0.03, y: 0.97 - h }),
+    row: 2,
+    col: 0,
+    at: (s: number, h: number) => ({ x: 0.03, y: Number(Math.max(0, 0.97 - h).toFixed(4)) }),
+  },
+  {
+    id: "bottomCenter",
+    code: "BC",
+    label: "Bottom Center",
+    row: 2,
+    col: 1,
+    at: (s: number, h: number) => ({
+      x: Number(Math.max(0, 0.5 - s / 2).toFixed(4)),
+      y: Number(Math.max(0, 0.97 - h).toFixed(4)),
+    }),
   },
   {
     id: "bottomRight",
+    code: "BR",
     label: "Bottom Right",
-    icon: (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="7 17 17 17 17 7" />
-        <line x1="17" y1="17" x2="7" y2="7" />
-      </svg>
-    ),
-    at: (s: number, h: number) => ({ x: 0.97 - s, y: 0.97 - h }),
+    row: 2,
+    col: 2,
+    at: (s: number, h: number) => ({
+      x: Number(Math.max(0, 0.97 - s).toFixed(4)),
+      y: Number(Math.max(0, 0.97 - h).toFixed(4)),
+    }),
   },
-] as const;
+];
+
+export function getClosestGridPreset(
+  x: number,
+  y: number,
+  size = 0.22,
+  hFrac = size / (16 / 9),
+): { preset: CameraGridPreset; isExact: boolean } {
+  let best = CAMERA_GRID_9[0]!;
+  let minDistance = Infinity;
+  for (const preset of CAMERA_GRID_9) {
+    const target = preset.at(size, hFrac);
+    const dist = Math.hypot(x - target.x, y - target.y);
+    if (dist < minDistance) {
+      minDistance = dist;
+      best = preset;
+    }
+  }
+  return { preset: best, isExact: minDistance < 0.04 };
+}
 
 export const TRANSITION_ICONS: Record<string, React.ReactNode> = {
   smooth: (
@@ -348,10 +416,10 @@ export function CameraControls() {
       {/* SECTION 1: PLACEMENT */}
       {activeSection === "placement" && (
         <div>
-          {/* Corner Position Preset */}
+          {/* 3x3 Grid Position Preset */}
           <div className="mb-4">
             <div className="mb-1.5 flex items-center justify-between">
-              <span className="pk-label">Corner Placement</span>
+              <span className="pk-label">3×3 Grid Placement</span>
               <div className="flex items-center gap-1.5">
                 {prevSeg && prevSeg.facecam.src && (
                   <MatchClipButton
@@ -387,34 +455,71 @@ export function CameraControls() {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {CAMERA_CORNERS.map((c) => {
-                const size = seg.facecam.size;
-                const target = c.at(size, camHeightFraction(size));
-                const active =
-                  allSameFacecam &&
-                  Math.abs(seg.facecam.x - target.x) < 0.03 &&
-                  Math.abs(seg.facecam.y - target.y) < 0.03;
-                return (
-                  <button
-                    key={c.id}
-                    onClick={() => setFacecam(target)}
-                    className="group relative flex items-center justify-between rounded-xl border p-2.5 text-left transition-all hover:border-[#0070f3]"
-                    style={{
-                      borderColor: active ? "#0070f3" : "#ebebeb",
-                      background: active ? "#f0f7ff" : "#ffffff",
-                      boxShadow: active ? "0 0 0 2px rgba(0,112,243,0.2)" : "0 2px 8px rgba(0,0,0,0.02)",
-                    }}
-                  >
-                    <span className="text-xs font-semibold text-[#333]">{c.label}</span>
-                    <span className={`flex h-6 w-6 items-center justify-center rounded-lg text-xs font-bold transition-all ${
-                      active ? "bg-[#0070f3] text-white" : "bg-[#f5f5f5] text-[#666] group-hover:bg-[#e0f2fe] group-hover:text-[#0070f3]"
-                    }`}>
-                      {c.icon}
-                    </span>
-                  </button>
+
+            {/* 3x3 Interactive Matrix */}
+            <div className="rounded-xl border border-[#e2e8f0] bg-[#f8fafc] p-2.5 shadow-sm">
+              <div className="grid grid-cols-3 gap-1.5">
+                {CAMERA_GRID_9.map((c) => {
+                  const size = seg.facecam.size;
+                  const hFrac = camHeightFraction(size);
+                  const target = c.at(size, hFrac);
+                  const isExact =
+                    allSameFacecam &&
+                    Math.abs(seg.facecam.x - target.x) < 0.035 &&
+                    Math.abs(seg.facecam.y - target.y) < 0.035;
+
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => setFacecam(target)}
+                      title={c.label}
+                      className="group relative flex flex-col items-center justify-center rounded-lg border py-2 px-1 text-center transition-all active:scale-95"
+                      style={{
+                        borderColor: isExact ? "#0070f3" : "#e2e8f0",
+                        background: isExact ? "#0070f3" : "#ffffff",
+                        color: isExact ? "#ffffff" : "#475569",
+                        boxShadow: isExact ? "0 4px 12px rgba(0,112,243,0.25)" : "0 1px 2px rgba(0,0,0,0.02)",
+                      }}
+                    >
+                      <div className="mb-1 flex items-center justify-center">
+                        <span
+                          className={`h-2 w-2 rounded-full transition-all ${
+                            isExact
+                              ? "bg-white shadow-sm ring-2 ring-white/40"
+                              : "bg-[#cbd5e1] group-hover:bg-[#0070f3] group-hover:scale-110"
+                          }`}
+                        />
+                      </div>
+                      <span className="text-[11px] font-bold tracking-tight">
+                        {c.code}
+                      </span>
+                      <span className={`text-[9px] truncate max-w-full font-medium leading-none mt-0.5 ${
+                        isExact ? "text-white/90" : "text-[#94a3b8] group-hover:text-[#475569]"
+                      }`}>
+                        {c.label.split(" ")[1] ?? c.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Status footer inside card */}
+              {(() => {
+                const { preset, isExact } = getClosestGridPreset(
+                  seg.facecam.x,
+                  seg.facecam.y,
+                  seg.facecam.size,
+                  camHeightFraction(seg.facecam.size),
                 );
-              })}
+                return (
+                  <div className="mt-2.5 flex items-center justify-between border-t border-[#e2e8f0] pt-2 text-[10.5px]">
+                    <span className="text-[#64748b]">Active Placement:</span>
+                    <span className="font-semibold text-[#0f172a]">
+                      {isExact ? preset.label : `${preset.label} (Custom)`}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
