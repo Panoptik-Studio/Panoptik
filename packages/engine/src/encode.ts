@@ -244,9 +244,16 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
         const tSrc = tEff * playbackRate;
         // Decode before composing: renderFrame draws whatever frame is current,
         // so without awaiting here every output frame would be the same picture.
-        // Use prepareAllFrames so cam+screen stay synced at speed
-        if (typeof prepareAllFrames === "function") await prepareAllFrames(tSrc);
-        else await prepareFrame(tSrc);
+        // Use prepareFrame for screen; facecam via prepareAllFrames was stalling at 2.7s (webm facecam hole) — fallback to screen only for now, facecam will be stale but export completes. TODO: fix facecam hole handling.
+        if (i % 30 === 0) console.log("[Export] frame", i, "/", totalFrames, "tEff", tEff.toFixed(2), "tSrc", tSrc.toFixed(2));
+        await prepareFrame(tSrc);
+        // Also try facecam but don't block export if it stalls — race with timeout
+        try {
+          await Promise.race([
+            prepareAllFrames(tSrc).catch(()=>{}),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("facecam timeout")), 200)),
+          ]);
+        } catch { /* facecam stall, continue with screen */ }
         renderFrame(ctx as unknown as CanvasRenderingContext2D, project, tSrc);
         // Awaited so encoder backpressure actually throttles us rather than
         // queueing the whole clip into memory.
