@@ -33,6 +33,16 @@ function generateId(): string {
   );
 }
 
+/** The selected segment's source window, or the media bounds when none selected. */
+function activeSourceWindow(): { lo: number; hi: number } {
+  const s = useProjectStore.getState();
+  const seg = s.project?.segments.find(
+    (x) => x.id === s.selectedSegmentId,
+  );
+  const duration = s.project?.media.duration ?? 0;
+  return seg ? { lo: seg.srcStart, hi: seg.srcEnd } : { lo: 0, hi: duration };
+}
+
 export function registerEditingTools(): void {
   // ── READ-ONLY (none for editing tools — all are staging/write) ──
 
@@ -75,13 +85,14 @@ export function registerEditingTools(): void {
         };
 
       const list = Array.isArray(timestamps) ? timestamps : [];
+      const { lo, hi } = activeSourceWindow();
       const clamped = list
         .filter(
           (t: number) =>
             typeof t === "number" &&
             Number.isFinite(t) &&
-            t >= 0 &&
-            t <= store.project!.clip.duration,
+            t >= lo &&
+            t <= hi,
         )
         // Without a cap, one call could stage enough keyframes to lock the tab.
         .slice(0, MAX_PROPOSALS);
@@ -147,7 +158,8 @@ export function registerEditingTools(): void {
 
       const safeText = String(text ?? "").slice(0, MAX_TEXT_LENGTH);
       if (!safeText.trim()) return { error: "Text must not be empty." };
-      const at = clampNumber(timestamp, 0, store.project.clip.duration, 0);
+      const { lo, hi } = activeSourceWindow();
+      const at = clampNumber(timestamp, lo, hi, lo);
       const where =
         position === "top" || position === "center" || position === "bottom"
           ? position

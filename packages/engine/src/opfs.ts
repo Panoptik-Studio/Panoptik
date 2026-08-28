@@ -5,7 +5,7 @@
  * Degrades gracefully off secure context.
  */
 
-import type { Project } from "@panoptik/schema";
+import { migrateProject, type Project } from "@panoptik/schema";
 
 function isSecureContext(): boolean {
   return (
@@ -43,8 +43,8 @@ export async function saveProject(
   if (!includeMedia) return;
 
   // Save clip blob if it's a blob URL
-  if (project.clip.src.startsWith("blob:")) {
-    const response = await fetch(project.clip.src);
+  if (project.media.src.startsWith("blob:")) {
+    const response = await fetch(project.media.src);
     const blob = await response.blob();
     const clipFile = await projectDir.getFileHandle(
       "clip.webm",
@@ -55,12 +55,10 @@ export async function saveProject(
     await clipWritable.close();
   }
 
-  // Save facecam blob if present and is a blob URL
-  if (
-    project.facecam.src &&
-    project.facecam.src.startsWith("blob:")
-  ) {
-    const response = await fetch(project.facecam.src);
+  // The active (first) segment's facecam, if present and a blob URL.
+  const facecamSrc = project.segments[0]?.facecam.src ?? null;
+  if (facecamSrc && facecamSrc.startsWith("blob:")) {
+    const response = await fetch(facecamSrc);
     const blob = await response.blob();
     const facecamFile = await projectDir.getFileHandle(
       "facecam.webm",
@@ -86,7 +84,7 @@ export async function saveProject(
 /** Read a saved project back as blobs, so the decoder can be re-opened on them. */
 export async function loadProjectRecord(id: string): Promise<{
   project: Project;
-  clip: Blob | null;
+  media: Blob | null;
   facecam: Blob | null;
   audio: Blob | null;
 } | null> {
@@ -95,7 +93,8 @@ export async function loadProjectRecord(id: string): Promise<{
     const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle(id);
     const json = await (await (await dir.getFileHandle("project.json")).getFile()).text();
-    const project = JSON.parse(json) as Project;
+    // Old v1.1 records get upgraded to the v1.2 segment model on read.
+    const project = migrateProject(JSON.parse(json));
 
     const read = async (name: string): Promise<Blob | null> => {
       try {
@@ -106,7 +105,7 @@ export async function loadProjectRecord(id: string): Promise<{
     };
     return {
       project,
-      clip: await read("clip.webm"),
+      media: await read("clip.webm"),
       facecam: await read("facecam.webm"),
       audio: await read("audio.webm"),
     };
@@ -160,7 +159,8 @@ export async function loadProject(
     );
     const file = await jsonFile.getFile();
     const text = await file.text();
-    const project = JSON.parse(text) as Project;
+    // Old v1.1 records upgrade to the v1.2 segment model on read.
+    let project = migrateProject(JSON.parse(text));
 
     // Restore clip blob URL from OPFS
     try {
@@ -168,7 +168,7 @@ export async function loadProject(
         "clip.webm",
       );
       const clipBlob = await clipFile.getFile();
-      project.clip.src = mintUrl(clipBlob);
+      project = { ...project, media: { ...project.media, src: mintUrl(clipBlob) } };
     } catch {
       // clip not saved — keep existing src
     }
@@ -179,7 +179,13 @@ export async function loadProject(
         "facecam.webm",
       );
       const facecamBlob = await facecamFile.getFile();
-      project.facecam.src = mintUrl(facecamBlob);
+      const src = mintUrl(facecamBlob);
+      project = {
+        ...project,
+        segments: project.segments.map((seg, i) =>
+          i === 0 ? { ...seg, facecam: { ...seg.facecam, src } } : seg,
+        ),
+      };
     } catch {
       // no facecam
     }
@@ -207,12 +213,12 @@ export async function listProjects(): Promise<
           "project.json",
         );
         const file = await jsonFile.getFile();
-        const project = JSON.parse(
-          await file.text(),
-        ) as Project;
+        const project = migrateProject(
+          JSON.parse(await file.text()),
+        );
         projects.push({
           id: name,
-          name: `Clip ${project.clip.duration.toFixed(0)}s`,
+          name: `Clip ${project.media.duration.toFixed(0)}s`,
         });
       } catch {
         // skip corrupt/empty dirs

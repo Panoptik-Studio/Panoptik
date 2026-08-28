@@ -52,22 +52,16 @@ export function createRealEngine(): MediaEngine {
     },
     async restoreProject(id: string): Promise<Project | null> {
       const saved = await loadProjectRecord(id);
-      if (!saved?.clip) return null;
+      if (!saved?.media) return null;
       // Run the media back through the normal ingest so the decoder, audio sink
       // and facecam pipeline are all opened — loading only the JSON would give
       // a project whose blob URLs point at nothing decodable.
-      const proj = await this.loadRecording(saved.clip, saved.facecam, saved.audio);
+      const proj = await this.loadRecording(saved.media, saved.facecam, saved.audio);
       // project.json is same-origin but not something we produced this session,
-      // so its values are validated before they reach the renderer.
-      // Task 8 migrates sanitize.ts to the v1.2 segment model; until then the
-      // v1.1 merge throws on a v1.2 fresh project (no top-level clip/facecam),
-      // so fall back to the freshly re-opened project. Remove the guard then.
-      try {
-        return mergeSavedProject(proj, saved.project);
-      } catch (err) {
-        console.warn("[Engine] restoreProject: saved edits not re-applied (sanitize not yet v1.2)", err);
-        return proj;
-      }
+      // so its values are validated before they reach the renderer. The saved
+      // edits (annotations, settings) are re-applied per-segment over the
+      // freshly re-opened media.
+      return mergeSavedProject(proj, saved.project);
     },
     async getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
       return audioGetBuffer(project);

@@ -42,22 +42,26 @@ function createMockFileSystem() {
 describe("opfs serialize/deserialize", () => {
   const mockProject: Project = {
     id: "test-123",
-    clip: {
-      src: "blob:http://localhost/test",
-      duration: 10,
-      width: 1920,
-      height: 1080,
-    },
-    facecam: { src: "", x: 0.8, y: 0.8, size: 0.2 },
-    zoomPoints: [],
-    stagedZoomPoints: [],
-    textOverlays: [],
-    stagedTextOverlays: [],
-    captions: [],
-    stagedCaptions: [],
+    media: { src: "blob:http://localhost/test", duration: 10, width: 1920, height: 1080 },
+    segments: [
+      {
+        id: "s1",
+        srcStart: 0,
+        srcEnd: 10,
+        speed: 1,
+        stagePadding: 0,
+        aspectPreset: "16:9",
+        background: { kind: "solid", color: "#000000" },
+        facecam: { src: "", x: 0.8, y: 0.8, size: 0.2, shape: "circle" },
+        zoomPoints: [],
+        stagedZoomPoints: [],
+        textOverlays: [],
+        stagedTextOverlays: [],
+        captions: [],
+        stagedCaptions: [],
+      },
+    ],
     clickLog: [],
-    background: { kind: "solid", color: "#000000" },
-    aspectPreset: "16:9",
   };
 
   it("JSON roundtrip preserves all fields", () => {
@@ -65,35 +69,40 @@ describe("opfs serialize/deserialize", () => {
     const deserialized = JSON.parse(serialized) as Project;
 
     expect(deserialized.id).toBe(mockProject.id);
-    expect(deserialized.clip.duration).toBe(mockProject.clip.duration);
-    expect(deserialized.clip.width).toBe(mockProject.clip.width);
-    expect(deserialized.background).toEqual(mockProject.background);
-    expect(deserialized.aspectPreset).toBe(mockProject.aspectPreset);
+    expect(deserialized.media.duration).toBe(mockProject.media.duration);
+    expect(deserialized.media.width).toBe(mockProject.media.width);
+    expect(deserialized.segments[0]!.background).toEqual(mockProject.segments[0]!.background);
+    expect(deserialized.segments[0]!.aspectPreset).toBe(mockProject.segments[0]!.aspectPreset);
   });
 
   it("serialize handles empty arrays", () => {
     const serialized = JSON.stringify(mockProject);
     const parsed = JSON.parse(serialized);
 
-    expect(parsed.zoomPoints).toEqual([]);
-    expect(parsed.stagedZoomPoints).toEqual([]);
-    expect(parsed.textOverlays).toEqual([]);
-    expect(parsed.captions).toEqual([]);
+    expect(parsed.segments[0].zoomPoints).toEqual([]);
+    expect(parsed.segments[0].stagedZoomPoints).toEqual([]);
+    expect(parsed.segments[0].textOverlays).toEqual([]);
+    expect(parsed.segments[0].captions).toEqual([]);
     expect(parsed.clickLog).toEqual([]);
   });
 
   it("serialize preserves nested background types", () => {
     const gradientProject = {
       ...mockProject,
-      background: { kind: "gradient" as const, stops: ["#ff0000", "#0000ff"] },
+      segments: [
+        {
+          ...mockProject.segments[0]!,
+          background: { kind: "gradient" as const, stops: ["#ff0000", "#0000ff"] },
+        },
+      ],
     };
     const deserialized = JSON.parse(
       JSON.stringify(gradientProject),
     ) as Project;
 
-    expect(deserialized.background.kind).toBe("gradient");
-    if (deserialized.background.kind === "gradient") {
-      expect(deserialized.background.stops).toEqual(["#ff0000", "#0000ff"]);
+    expect(deserialized.segments[0]!.background.kind).toBe("gradient");
+    if (deserialized.segments[0]!.background.kind === "gradient") {
+      expect(deserialized.segments[0]!.background.stops).toEqual(["#ff0000", "#0000ff"]);
     }
   });
 
@@ -108,14 +117,19 @@ describe("opfs serialize/deserialize", () => {
   it("handles projects with zoom points serialized correctly", () => {
     const projectWithZm = {
       ...mockProject,
-      zoomPoints: [
-        { id: "z1", t: 2.5, to: { scale: 2, x: 0.5, y: 0.5 }, dur: 0.7, ease: "easeInOutCubic", staged: false },
+      segments: [
+        {
+          ...mockProject.segments[0]!,
+          zoomPoints: [
+            { id: "z1", t: 2.5, to: { scale: 2, x: 0.5, y: 0.5 }, dur: 0.7, ease: "easeInOutCubic", staged: false },
+          ],
+        },
       ],
     };
     const deserialized = JSON.parse(
       JSON.stringify(projectWithZm),
     ) as Project;
-    expect(deserialized.zoomPoints).toHaveLength(1);
-    expect(deserialized.zoomPoints[0]!.t).toBe(2.5);
+    expect(deserialized.segments[0]!.zoomPoints).toHaveLength(1);
+    expect(deserialized.segments[0]!.zoomPoints[0]!.t).toBe(2.5);
   });
 });

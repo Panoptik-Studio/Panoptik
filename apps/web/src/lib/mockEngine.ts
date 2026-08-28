@@ -9,38 +9,37 @@ import { mockProject } from "../../../../packages/engine/src/test-fixtures";
 type Ctx = CanvasRenderingContext2D;
 
 export const mockEngine = {
-  loadClip: async (file: File): Promise<Project> => ({
-    ...mockProject(),
-    clip: {
-      src: URL.createObjectURL(file),
-      duration: 15,
-      width: 1920,
-      height: 1080,
-    },
-  }),
+  loadClip: async (file: File): Promise<Project> => {
+    const p = mockProject();
+    p.media = { src: URL.createObjectURL(file), duration: 15, width: 1920, height: 1080 };
+    p.segments[0]!.srcEnd = p.media.duration;
+    return p;
+  },
   prepareFrame: async () => {},
   renderFrame: (ctx: Ctx, project: Project, t: number) => {
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
+    // The mock always renders its single (first) segment.
+    const seg = project.segments[0];
 
     // Background fill
     ctx.fillStyle = "#111827";
     ctx.fillRect(0, 0, w, h);
-    if (project.background.kind === "gradient" && project.background.stops.length >= 2) {
+    if (seg?.background.kind === "gradient" && seg.background.stops.length >= 2) {
       const g = ctx.createLinearGradient(0, 0, w, h);
-      g.addColorStop(0, project.background.stops[0]!);
-      g.addColorStop(1, project.background.stops[1]!);
+      g.addColorStop(0, seg.background.stops[0]!);
+      g.addColorStop(1, seg.background.stops[1]!);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
-    } else if (project.background.kind === "solid") {
-      ctx.fillStyle = project.background.color;
+    } else if (seg?.background.kind === "solid") {
+      ctx.fillStyle = seg.background.color;
       ctx.fillRect(0, 0, w, h);
     }
 
     // Zoom focal markers: green committed, amber ghost
     [
-      ...project.zoomPoints,
-      ...project.stagedZoomPoints,
+      ...(seg?.zoomPoints ?? []),
+      ...(seg?.stagedZoomPoints ?? []),
     ].forEach((zp) => {
       if (t >= zp.t && t <= zp.t + zp.dur) {
         ctx.strokeStyle = zp.staged ? "#f59e0b" : "#10b981";
@@ -59,8 +58,8 @@ export const mockEngine = {
 
     // Text overlays
     [
-      ...project.textOverlays,
-      ...project.stagedTextOverlays,
+      ...(seg?.textOverlays ?? []),
+      ...(seg?.stagedTextOverlays ?? []),
     ].forEach((to) => {
       if (t >= to.timestamp && t <= to.timestamp + 3) {
         ctx.fillStyle = to.staged ? "#f59e0b" : "#ffffff";
@@ -78,8 +77,8 @@ export const mockEngine = {
 
     // Captions
     [
-      ...project.captions,
-      ...project.stagedCaptions,
+      ...(seg?.captions ?? []),
+      ...(seg?.stagedCaptions ?? []),
     ].forEach((c) => {
       if (t >= c.start && t <= c.end) {
         ctx.fillStyle = "#ffffff";
