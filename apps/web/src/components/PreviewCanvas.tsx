@@ -598,14 +598,13 @@ export function PreviewCanvas() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !project) return;
-    // A recording's audio is in a different file than its video: the screen is
-    // captured silently and the mic rides with the camera take.
-    const src = project.audioSrc ?? project.media.src;
-    if (audio.src !== src) {
+    const active = resolveActive(project, currentTime);
+    const src = active.seg.facecam?.src || project.audioSrc || project.media.src;
+    if (src && audio.src !== src) {
       audio.src = src;
       audio.load();
     }
-  }, [project?.audioSrc, project?.media.src]);
+  }, [project?.audioSrc, project?.media.src, currentTime]);
 
   // Keep the audio element pitch-preserved. The playbackRate itself follows the
   // active segment's per-frame speed (set in the rAF loop and on play/scrub).
@@ -624,6 +623,11 @@ export function PreviewCanvas() {
     const audio = audioRef.current;
     if (!audio || !project || isPlaying) return;
     const { seg, srcT } = resolveActive(project, currentTime);
+    const src = seg.facecam?.src || project.audioSrc || project.media.src;
+    if (src && audio.src !== src) {
+      audio.src = src;
+      audio.load();
+    }
     const fcStartT = seg.facecam?.startT ?? 0;
     const target = fcStartT > 0 ? Math.max(0, currentTime - fcStartT) : srcT;
     if (Math.abs(audio.currentTime - target) > 0.15) audio.currentTime = target;
@@ -641,6 +645,11 @@ export function PreviewCanvas() {
     const state = useProjectStore.getState();
     if (!state.project) return;
     const active = resolveActive(state.project, state.currentTime);
+    const src = active.seg.facecam?.src || state.project.audioSrc || state.project.media.src;
+    if (src && audio.src !== src) {
+      audio.src = src;
+      audio.load();
+    }
     audio.playbackRate = active.seg.speed;
     const fcStartT = active.seg.facecam?.startT ?? 0;
     const target = fcStartT > 0 ? Math.max(0, state.currentTime - fcStartT) : active.srcT;
@@ -653,13 +662,18 @@ export function PreviewCanvas() {
       const st = useProjectStore.getState();
       if (!st.project) return;
       const r = resolveActive(st.project, st.currentTime);
+      const rSrc = r.seg.facecam?.src || st.project.audioSrc || st.project.media.src;
+      if (rSrc && audio.src !== rSrc) {
+        audio.src = rSrc;
+        audio.load();
+      }
       audio.playbackRate = r.seg.speed;
       const rFcStartT = r.seg.facecam?.startT ?? 0;
       const rTarget = rFcStartT > 0 ? Math.max(0, st.currentTime - rFcStartT) : r.srcT;
       if (!audio.paused && Math.abs(audio.currentTime - rTarget) > 0.3) {
         audio.currentTime = rTarget;
       }
-    }, 1000);
+    }, 500);
     return () => clearInterval(id);
   }, [isPlaying]);
 

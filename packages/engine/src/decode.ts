@@ -162,7 +162,7 @@ export function getFacecamSurface(): CanvasImageSource | null {
   return fcPresented ? fcSurface : null;
 }
 
-setFacecamFrameSource(getFacecamSurface, getFacecamAspect);
+setFacecamFrameSource(getFacecamSurface, getFacecamAspect, () => facecamUrl);
 
 /** Aspect of the camera track, for sizing the PiP. */
 export function getFacecamAspect(): number {

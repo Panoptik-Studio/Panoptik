@@ -458,13 +458,16 @@ const facecamCache = new Map<string, HTMLVideoElement>();
 // this module, and importing it back would be circular.
 let decodedFacecam: (() => CanvasImageSource | null) | null = null;
 let decodedFacecamAspect: (() => number) | null = null;
+let decodedFacecamSrc: (() => string | null) | null = null;
 
 export function setFacecamFrameSource(
   frame: (() => CanvasImageSource | null) | null,
   aspect: (() => number) | null,
+  currentSrc?: (() => string | null) | null,
 ): void {
   decodedFacecam = frame;
   decodedFacecamAspect = aspect;
+  decodedFacecamSrc = currentSrc ?? null;
 }
 let lastFacecamT = 0;
 
@@ -544,10 +547,11 @@ function drawFacecam(
 
   if (effectiveSize <= 0.001 || opacity <= 0.01) return;
 
-  // Prefer the decoded camera frame. It is stepped in lockstep with the clip,
-  // so it stays in sync; the <video> fallback below only exists for projects
-  // reloaded from storage, where we hold a URL but never saw the blob.
-  let source: CanvasImageSource | null = decodedFacecam?.() ?? null;
+  const activeSrc = decodedFacecamSrc?.() ?? null;
+  const isDecodedSourceMatch = !activeSrc || fc.src === activeSrc;
+
+  // Prefer the decoded camera frame when the segment matches the decoded take.
+  let source: CanvasImageSource | null = isDecodedSourceMatch ? decodedFacecam?.() ?? null : null;
   let aspect = source ? decodedFacecamAspect?.() ?? 16 / 9 : 16 / 9;
 
   if (!source) {
