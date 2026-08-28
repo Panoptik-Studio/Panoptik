@@ -1,101 +1,149 @@
-# Panoptik — Open Demo Studio × WebMCP
+# Panoptik
 
-An open-source, **client-side** demo video editor where a human and an AI agent co-edit screen recordings on the **same canvas** via [WebMCP](https://github.com/webmachinelearning/webmcp). No server, no upload, no API keys — everything runs in the browser with WebCodecs + `mediabunny`.
-
-> **Hackathon:** OpenAI WebMCP Challenge (Devpost deadline Sep 3, 2026 4:00 PM EDT). Two-layer build: Days 1–4 Poindeo-competitor core editor, Days 5–7 agent co-editing.
+Panoptik is an open-source, client-side demo video editor and screen recording studio. It runs entirely in the browser using WebCodecs, HTML5 Canvas, and mediabunny, enabling high-performance video editing, keyframe zooming, multi-track audio control, and AI co-editing via WebMCP without uploading media to external servers.
 
 ---
 
-## What it is
+## Overview
 
-1. **Core editor (Days 1–4):** Import MP4/WebM/MOV → click-to-zoom (eased `scale`/`x`/`y` per `ROADMAP-A.md` sequential fold, clamped viewport, letterboxed frame `packages/engine/src/layout.ts:1`), facecam PiP `render.ts:215` (screen-space, circular/square), captions via local Whisper `workers/whisperWorker.ts`, backgrounds (solid/gradient/blur `render.ts:155`), text overlays, `StagingPanel` human-in-loop (`getStagedDiff`/`commitAll`), `Timeline` diamonds, `PreviewCanvas` dirty-flag rAF, `OPFS` persistence, `CanvasSink` 60fps `decode.ts:44` (coalesced pump, `MAX_DECODE_WIDTH 1920`, `POOL_SIZE 4`), export `encode.ts:57` (`Output`/`CanvasSource`/`AudioBufferSource`, `30fps`, `export-progress` events, `MP4`/`WebM` `720p`/`1080p`/`4k`).
+Panoptik combines screen recording and demo video editing into a single browser-native tool:
 
-2. **WebMCP co-edit (Days 5–7):** Agent calls structured tools (`propose_zoom_points`, `add_text_overlay`, `set_background`, `generate_captions` → `staged*` ghosts amber `#f59e0b`, then `commit_staged_changes` gated by `ConfirmDialog` `webmcp/confirm.ts`). Nine tools + declarative `ExportPanel` form (`tool-name`/`tool-description`), lifecycle `webmcp/lifecycle.ts` (`AbortController` + `webmcp-tool-call` trace `ToolTrace.tsx`).
+- **Client-Side Processing**: All video decoding, rendering, audio mixing, and export happen directly inside your browser. No server rendering, no external uploads, and no API keys required.
+- **Dynamic Zoom Keyframes**: Add smooth, eased camera zooms focused on specific screen coordinates with configurable transition speed and hold duration.
+- **Multi-Track Audio Engine**: Fully separated screen audio and camera mic tracks with independent volume controls, per-segment muting, and pitch-preserving time-stretching.
+- **Facecam Picture-in-Picture**: Customizable camera overlays with selectable shapes (circle, rounded square, square), 9-point positioning presets, and animated transition styles.
+- **Reshoot Takes & Persistence**: Reshoot facecam segments independently with persistence across reloads via the Origin Private File System (OPFS).
+- **Local AI Captions**: Client-side speech-to-text transcription powered by local Whisper models running in Web Workers.
+- **Backgrounds and Canvas Styling**: Customizable padding, aspect ratios, background images, gradients, and solid themes.
+- **WebMCP Co-Editing**: Standardized tool interface exposing project state, keyframe creation, captioning, and export controls to AI agents.
+- **High-DPI Vector Timeline**: Multi-track timeline featuring waveform visualizations, thumbnail filmstrips, volume controllers, and crisp Retina scaling.
+- **Hardware-Accelerated Export**: Real-time and faster-than-realtime video encoding into MP4 (H.264 / AAC) and WebM (VP8/VP9 / Opus) at 720p, 1080p, and 4K resolutions.
 
-Architecture: `mediabunny` demux/mux + WebCodecs under the hood + Canvas2D `renderFrame()` **single path** for preview and export ("preview equals export"). See `Spec.md` for full slice breakdown and `ROADMAP-A/B.md` for the day-by-day plan.
+---
+
+## Repository Structure
+
+The project is structured as a pnpm monorepo:
 
 ```
-apps/web         Next.js 15 static export — /editor (canvas+timeline+inspector+staging)
-packages/engine  @panoptik/engine MIT — decode/render/encode/audio/layout (browser-native)
-packages/project-schema  @panoptik/schema — Project/ZoomPoint/ExportOpts (locked contract v1.1)
-packages/utils   @panoptik/utils — easing (easeInOutCubic etc., EASINGS registry)
+Panoptik/
+├── apps/
+│   └── web/                     # Next.js 15 web application and editor interface
+│       ├── src/
+│       │   ├── app/             # Application routes (/editor)
+│       │   ├── components/      # UI components (Timeline, PreviewCanvas, Toolbar, Modals)
+│       │   ├── stores/          # Zustand project store with undo/redo history
+│       │   ├── lib/             # Thumbnail extraction, caption chunkers, persistence
+│       │   └── webmcp/          # WebMCP tool declarations and lifecycle handlers
+│       └── public/              # Static assets and Whisper worker files
+├── packages/
+│   ├── engine/                  # Core video and audio processing engine
+│   │   ├── src/
+│   │   │   ├── decode.ts        # Video decoding pipeline and frame extraction
+│   │   │   ├── render.ts        # Unified Canvas2D frame renderer
+│   │   │   ├── encode.ts        # WebCodecs muxing and multi-track audio export
+│   │   │   ├── audio.ts         # Audio extraction, routing, and Web Audio mixing
+│   │   │   ├── timeStretch.ts   # Pitch-preserving WSOLA audio stretching algorithm
+│   │   │   ├── record.ts        # Dual-stream screen and webcam recording
+│   │   │   ├── opfs.ts          # Origin Private File System storage layer
+│   │   │   ├── layout.ts        # Viewport framing and zoom math calculations
+│   │   │   └── sanitize.ts      # Project migration and validation helpers
+│   ├── project-schema/          # TypeScript schemas and migration logic
+│   └── utils/                   # Shared mathematics, easings, and utility functions
 ```
+
+---
+
+## Core Capabilities
+
+### 1. Recording & Reshoots
+- Record screen and camera simultaneously into dedicated media tracks.
+- Select audio input sources with options for screen audio, microphone, or both.
+- Reshoot specific facecam segments while preserving original screen footage and sync.
+
+### 2. Zoom & Camera Motion
+- Point-and-click focal point zoom configuration on the preview canvas.
+- Configurable zoom scales (1.0x to 5.0x), transition durations, hold windows, and easing curves.
+- Instant, non-destructive editing with automatic application to the timeline and history.
+
+### 3. Audio Architecture & Pitch-Preserving Time-Stretch
+- True track separation between display/system audio and webcam microphone audio.
+- Independent volume sliders, mute toggles, and global track adjustments directly in the timeline.
+- WSOLA (Waveform Similarity Overlap-Add) time-stretching preserves natural voice pitch when clip speed is changed.
+
+### 4. Backgrounds & Custom Framing
+- Stage padding and aspect ratio presets (16:9, 9:16, 1:1, 4:3, 21:9).
+- Background image upload with OPFS local caching.
+- Built-in curated gradients and solid colors.
+
+### 5. WebMCP Integration
+- Implements WebMCP tools for AI-assisted editing workflows.
+- Exposes tools such as `get_project_state`, `propose_zooms`, `add_text_overlay`, `set_background`, and `generate_captions`.
+- Real-time tool execution tracing in the editor inspector.
 
 ---
 
 ## Quickstart
 
+### Prerequisites
+- Node.js 20+ (recommended: Node 20.19.6 or Node 24)
+- pnpm 9+ or 10+
+- Chromium-based browser (Chrome, Edge, Brave 110+) supporting WebCodecs and OPFS.
+
+### Installation
+
 ```bash
-pnpm install          # Node 20.19.6, pnpm 10.33.0
-pnpm dev              # → http://localhost:3000/editor (Next.js --filter @panoptik/web dev)
-pnpm build            # static export to apps/web/out
-pnpm vitest run       # 106 tests (engine+store+utils+opfs+layout)
-pnpm -r typecheck     # tsc --noEmit per package
+# Clone the repository
+git clone https://github.com/Panoptik-Studio/Panoptik.git
+cd Panoptik
+
+# Install dependencies
+pnpm install
 ```
 
-Requirements: Chrome/Edge 110+ (WebCodecs + `getDisplayMedia`), SecureContext (`https` or `localhost`). No env vars, no keys.
+### Development Server
 
-Import: drag a clip or `Browse video` or **Record** (header red button → `getDisplayMedia` + `getUserMedia` → `record.ts:212` → `engine.loadRecording` → facecam PiP at `facecam.x/y/size`). Play/pause `Space`, seek via timeline, click canvas (paused) to add zoom, click near diamond to delete, drag focal dot, tweak `Inspector` (depth/duration/easing/focal), `StagingPanel` → `Apply all` / `Discard`.
-
-Export: **Export Video** → `encode.ts:57` (30fps loop `prepareFrame`+`renderFrame` → `CanvasSource.add` + `AudioBufferSource.add` from unified `audio.ts:9` `AudioBufferSink`) → progress bar on `export-progress` → download `video/mp4` or `video/webm`.
-
----
-
-## Testing with an agent
-
-> **Owner: DEV B** — this subsection is B's deliverable (`ROADMAP-B.md:409`). The steps below are the current draft; B will finalize.
-
-1. Deploy to Vercel (`vercel.json`: `pnpm --filter @panoptik/web build` → `apps/web/out`, framework Other, `https` required) — do **not** test against `localhost` from ChatGPT browser.
-2. Chrome `chrome://flags/#enable-webmcp-testing` **Enabled** + relaunch, or open the Vercel URL in ChatGPT app's in-app browser.
-3. In DevTools console: `document.modelContext.getTools()` should list 9 tools (4 engine `tools-a.ts` + 5 editing `tools-b.ts`) + `lifecycle.ts` trace.
-4. Agent prompts: `get_project_state` → `get_click_log` → `propose_zoom_points({timestamps:[3,8]})` → ghosts appear amber on timeline → human drags one → `commit_staged_changes` → Confirm dialog → `export_clip({format:"mp4",resolution:"1080p"})` → confirm → MP4 downloads. Declarative `ExportPanel` form: agent fills `format`/`resolution`, **human** clicks submit.
-
-Whisper `whisper-base` (~40MB) downloads on first `Generate captions`; pre-warm before demo (Day 6) or use `whisper-tiny.en` fallback `ROADMAP-B.md:527`.
-
----
-
-## Architecture diagram
-
-`Spec.md` §§ Slice A/B + `ROADMAP-A.md` § Locked contract + Calendar. One `MediaEngine` `engine/index.ts:11`:
-
-```ts
-loadClip / loadRecording / prepareFrame(t) / renderFrame(ctx,project,t) / getAudioBuffer / exportProject
+```bash
+# Start the local development server
+pnpm dev
 ```
 
-Single `Input` (`BlobSource`) yields `CanvasSink` (video) and `AudioBufferSink` (audio) — no duplicate parsing. Timeline → `projectStore.ts` (`staged*` + `history` + `selectedZoomId` + `markMoment` + `pendingBackgroundBadge`) → `render.ts` (`background` → letterboxed+zoomed `currentFrame` → `facecam` → `text` → `captions`).
+Open [http://localhost:3000/editor](http://localhost:3000/editor) in your browser.
 
-License boundary: `LICENSE` AGPL-3.0 (app), `packages/engine/LICENSE` MIT (publishable).
+### Building for Production
 
----
+```bash
+# Build all packages and static export
+pnpm build
+```
 
-## Benchmarks (measured `ROADMAP-A.md:587` — Day 6)
-
-> Fill after Day 6 export run on 15s 1080p clip.
-
-* Preview: 60fps at 1080p ( OffscreenCanvas + `POOL_SIZE 4` + dirty-flag `PreviewCanvas.tsx:99` + selector isolation)
-* Export: ≤2× realtime at 1080p (e.g. 15s clip → ~25-30s on M-series, `QUALITY_VERY_HIGH`, `keyFrameInterval 2`)
-* Whisper `whisper-base` word-level: ~10-15s for 15s clip (after 40MB download)
-* Vercel cold start: static `out` (no SSR)
+The production bundle will be output to `apps/web/out`.
 
 ---
 
-## Known limitations
+## Quality Assurance & Testing
 
-* `background.kind==="blur"` is stretched+`blur(24px)` of the current frame `render.ts:174` — cheap but plausible; true stacked blur is post-hackathon.
-* Facecam is composited during preview+export; export PiP is drawn from the same `HTMLVideoElement` cache — ` OffscreenCanvas` export uses the same path.
-* No `gif` export (cut from `ExportOpts` v1.1).
-* `AudioBufferSink` concat preserves channels/sampleRate; `audio16k.ts` resamples to 16kHz mono for Whisper.
-* `getDisplayMedia` + PiP both need transient activation — screen capture is prioritized, PiP falls back inline `RecordModal.tsx:367`.
-* OPFS requires SecureContext; falls back to in-memory when unavailable.
+The repository maintains an automated test suite across the engine, project schema, audio processing, layout math, and web stores.
 
----
+```bash
+# Run all unit and integration test suites
+pnpm test
 
-## Submission checklist (`ROADMAP-A.md:598`)
-
-`pnpm build` green · `document.modelContext.registerTool` greppable `apps/web/src/webmcp` · `LICENSE`/`packages/engine/LICENSE` present · Vercel `https` `/editor` loads real video · `README` engine/codec sections accurate · `rm -rf node_modules && pnpm i && pnpm dev` clean clone.
+# Run TypeScript typechecks across all monorepo packages
+pnpm typecheck
+```
 
 ---
 
-## Risks & fallbacks
+## Browser Requirements & Security
 
-See `ROADMAP-A.md:618` (codec drift → read `node_modules/mediabunny/dist/*.d.ts`; export slow → pre-render MP4; polyfill/native mismatch → feature-detect `modelContext` in `document`).
+- **Secure Context**: WebCodecs, MediaRecorder, and OPFS require a Secure Context (`https://` or `http://localhost`).
+- **WebCodecs Support**: Supported natively in Chromium 110+, Safari 16.4+, and Firefox 130+ (with media flags enabled).
+- **Origin Private File System**: Used for persistent local caching of project recordings and background assets.
+
+---
+
+## License
+
+- Web application (`apps/web`): AGPL-3.0 License.
+- Media engine (`packages/engine`, `packages/project-schema`, `packages/utils`): MIT License.
