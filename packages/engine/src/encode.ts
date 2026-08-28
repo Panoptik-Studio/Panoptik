@@ -31,11 +31,20 @@ const RESOLUTION_HEIGHTS: Record<ExportOpts["resolution"], number> = {
 
 const EXPORT_FPS = 30;
 
-/** Codec preference, best first. The browser picks the first it can encode. */
+/** Codec preference, best first. The browser picks the first it can encode.
+ * For maximal native-player compatibility:
+ * - MP4: avc (H.264) + aac is gold (every player: VLC/MPV/COSMIC/GStreamer/QuickTime)
+ * - WebM: vp8 + vorbis is the original webm combo in GStreamer-good (installed
+ *   by default on Pop!_OS). vp9/opus are in -bad and often missing, so we
+ *   prioritize vp8/vorbis for the mp4->webm fallback. User-requested webm still
+ *   prefers vp9/opus for quality, but the fallback will try vorbis/vp8 first.
+ */
 const MP4_VIDEO: VideoCodec[] = ["avc", "hevc", "av1", "vp9"];
 const WEBM_VIDEO: VideoCodec[] = ["vp9", "av1", "vp8"];
+const WEBM_VIDEO_FALLBACK: VideoCodec[] = ["vp8", "vp9", "av1"];
 const MP4_AUDIO: AudioCodec[] = ["aac", "opus"];
 const WEBM_AUDIO: AudioCodec[] = ["opus", "vorbis"];
+const WEBM_AUDIO_FALLBACK: AudioCodec[] = ["vorbis", "opus"];
 
 function emitProgress(value: number): void {
   if (typeof window === "undefined") return;
@@ -102,10 +111,10 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
             sampleRate: audioBuffer.sampleRate,
           });
           if (audioCodec) {
-            console.warn("[Export] mp4: aac not encodable (Linux Chrome) -> would be opus-in-mp4 (browser OK, COSMIC silent). Switching actual container to WebM (vp9+opus) for maximal native compatibility. Requested was mp4, delivering webm.");
+            console.warn("[Export] mp4: aac not encodable (Linux Chrome) -> would be opus-in-mp4 (browser OK, COSMIC silent). Switching actual container to WebM (vp8+vorbis for GStreamer-good) for maximal native compatibility. Requested was mp4, delivering webm.");
             actualIsMp4 = false;
-            // Re-pick for webm so we get opus/vorbis correctly
-            const webmCodec = await getFirstEncodableAudioCodec(WEBM_AUDIO, {
+            // Re-pick for webm with fallback prioritising vorbis (in -good) over opus (in -bad)
+            const webmCodec = await getFirstEncodableAudioCodec(WEBM_AUDIO_FALLBACK, {
               numberOfChannels: audioBuffer.numberOfChannels,
               sampleRate: audioBuffer.sampleRate,
             });
@@ -123,10 +132,14 @@ export async function exportProject(project: Project, opts: ExportOpts): Promise
       console.warn("[Export] no audioBuffer -> silent export (preview uses <audio> blob URL, different decoder)");
     }
 
-    const videoCodec = await getFirstEncodableVideoCodec(actualIsMp4 ? MP4_VIDEO : WEBM_VIDEO, {
-      width,
-      height,
-    });
+    const isFallbackToWebm = !actualIsMp4 && requestedIsMp4;
+    const videoCodec = await getFirstEncodableVideoCodec(
+      actualIsMp4 ? MP4_VIDEO : (isFallbackToWebm ? WEBM_VIDEO_FALLBACK : WEBM_VIDEO),
+      {
+        width,
+        height,
+      },
+    );
     if (!videoCodec) {
       throw new Error(
         `This browser cannot encode ${(actualIsMp4 ? "mp4" : "webm").toUpperCase()} at ${opts.resolution}. Try ${actualIsMp4 ? "WebM" : "MP4"}, or a lower resolution.`,
