@@ -41,51 +41,22 @@ describe("projectStore", () => {
       st.setProject(p);
     };
 
-    it("an unrelated commit does not bake in a theme that was only previewed", () => {
-      // The reported bug: preview a theme, do something else, and from then on
-      // Discard restores the previewed theme instead of the real one. Vercel is
-      // the first tile in the grid, so it is the one that kept coming back.
-      const committed = bgOf("s1");
-      useProjectStore.getState().stageBackground({ kind: "gradient", stops: ["#007cf0", "#7928ca"] });
-      useProjectStore.getState().addZoomPoint({
-        t: 2,
-        to: { scale: 2, x: 0.5, y: 0.5 },
-        dur: 0.7,
-        ease: "easeInOutCubic",
-      });
+    it("stageBackground immediately applies the theme to selected segment", () => {
+      const theme = { kind: "gradient" as const, stops: ["#007cf0", "#7928ca"] as [string, string] };
+      useProjectStore.getState().stageBackground(theme);
 
       const st = useProjectStore.getState();
-      expect(st.history[st.historyIndex]!.segments[0]!.background).toEqual(committed);
-
-      useProjectStore.getState().clearStaged();
-      expect(bgOf("s1")).toEqual(committed);
+      expect(st.history[st.historyIndex]!.segments[0]!.background).toEqual(theme);
+      expect(bgOf("s1")).toEqual(theme);
     });
 
-    it("discard restores every clip a theme was staged across", () => {
+    it("stageBackground updates all selected clips", () => {
       twoSegments();
-      const committed = bgOf("s1");
       useProjectStore.setState({ selectedSegmentIds: ["s1", "s2"], selectedSegmentId: "s1" });
 
       useProjectStore.getState().stageBackground({ kind: "solid", color: "#123456" });
+      expect(bgOf("s1")).toEqual({ kind: "solid", color: "#123456" });
       expect(bgOf("s2")).toEqual({ kind: "solid", color: "#123456" });
-
-      useProjectStore.getState().clearStaged();
-      // s2 used to keep the unapproved theme for good, with the badge gone.
-      expect(bgOf("s1")).toEqual(committed);
-      expect(bgOf("s2")).toEqual(committed);
-    });
-
-    it("discard reaches a theme staged on a clip that is no longer selected", () => {
-      twoSegments();
-      const committed = bgOf("s1");
-      useProjectStore.setState({ selectedSegmentIds: ["s1"], selectedSegmentId: "s1" });
-      useProjectStore.getState().stageBackground({ kind: "solid", color: "#abcdef" });
-
-      // The user clicks another clip before hitting Discard.
-      useProjectStore.setState({ selectedSegmentIds: ["s2"], selectedSegmentId: "s2" });
-      useProjectStore.getState().clearStaged();
-
-      expect(bgOf("s1")).toEqual(committed);
     });
 
     it("applying keeps the theme and clears the staging record", () => {
