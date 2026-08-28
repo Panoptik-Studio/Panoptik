@@ -493,6 +493,7 @@ export function PreviewCanvas() {
     let requestedTime = NaN;
     let decodePending = false;
     const markDirty = () => {
+      requestedTime = NaN;
       dirty = true;
     };
     const unsubscribe = useProjectStore.subscribe(markDirty);
@@ -622,8 +623,10 @@ export function PreviewCanvas() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !project || isPlaying) return;
-    const { srcT } = resolveActive(project, currentTime);
-    if (Math.abs(audio.currentTime - srcT) > 0.15) audio.currentTime = srcT;
+    const { seg, srcT } = resolveActive(project, currentTime);
+    const fcStartT = seg.facecam?.startT ?? 0;
+    const target = fcStartT > 0 ? Math.max(0, currentTime - fcStartT) : srcT;
+    if (Math.abs(audio.currentTime - target) > 0.15) audio.currentTime = target;
   }, [currentTime, isPlaying, project]);
 
   useEffect(() => {
@@ -634,31 +637,43 @@ export function PreviewCanvas() {
       return;
     }
 
-    // Line the element up with the playhead *before* starting. Pressing play
-    // without this resumes from wherever the element happened to be left — and
-    // if that was the end of the clip, it plays nothing at all, which is why
-    // sound came and went between takes of play/pause.
+    // Line the element up with the playhead *before* starting.
     const state = useProjectStore.getState();
     if (!state.project) return;
     const active = resolveActive(state.project, state.currentTime);
     audio.playbackRate = active.seg.speed;
-    if (Math.abs(audio.currentTime - active.srcT) > 0.15) audio.currentTime = active.srcT;
+    const fcStartT = active.seg.facecam?.startT ?? 0;
+    const target = fcStartT > 0 ? Math.max(0, state.currentTime - fcStartT) : active.srcT;
+    if (Math.abs(audio.currentTime - target) > 0.15) audio.currentTime = target;
     audio.play().catch(() => {});
 
     // The canvas runs off rAF and the audio off its own clock, so they drift
-    // apart over a long clip unless they are pulled back together. The active
-    // segment (and its speed) can change mid-play, so resolve on every tick.
+    // apart over a long clip unless they are pulled back together.
     const id = window.setInterval(() => {
       const st = useProjectStore.getState();
       if (!st.project) return;
       const r = resolveActive(st.project, st.currentTime);
       audio.playbackRate = r.seg.speed;
-      if (!audio.paused && Math.abs(audio.currentTime - r.srcT) > 0.3) {
-        audio.currentTime = r.srcT;
+      const rFcStartT = r.seg.facecam?.startT ?? 0;
+      const rTarget = rFcStartT > 0 ? Math.max(0, st.currentTime - rFcStartT) : r.srcT;
+      if (!audio.paused && Math.abs(audio.currentTime - rTarget) > 0.3) {
+        audio.currentTime = rTarget;
       }
     }, 1000);
     return () => clearInterval(id);
   }, [isPlaying]);
+
+  // Listen for background media ready events (e.g. video decoder ready)
+  useEffect(() => {
+    const onDirty = () => {
+      if (canvasRef.current && project) {
+        const ctx = canvasRef.current.getContext("2d");
+        if (ctx) engine.renderFrame(ctx, project, useProjectStore.getState().currentTime);
+      }
+    };
+    window.addEventListener("panoptik:frame-dirty", onDirty);
+    return () => window.removeEventListener("panoptik:frame-dirty", onDirty);
+  }, [project]);
 
   // ── Keyboard undo/redo + moment mark (Phase 2.4 + 3.3) ──
   useEffect(() => {

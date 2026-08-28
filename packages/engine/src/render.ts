@@ -491,6 +491,14 @@ function getFacecamVideo(src: string): HTMLVideoElement | null {
   // Muted autoplay is permitted and forces a decoded first frame; we pause
   // immediately because the timeline, not the element, drives playback.
   v.play().then(() => v.pause()).catch(() => { /* seeking still works */ });
+  if (typeof window !== "undefined") {
+    const onReady = () => {
+      window.dispatchEvent(new CustomEvent("panoptik:frame-dirty"));
+    };
+    v.addEventListener("loadeddata", onReady);
+    v.addEventListener("canplay", onReady);
+    v.addEventListener("seeked", onReady);
+  }
   facecamCache.set(src, v);
   return v;
 }
@@ -503,7 +511,9 @@ export function clearFacecamCache(): void {
       v.removeAttribute("src");
       v.load();
       v.remove();
-    } catch { /* already gone */ }
+    } catch {
+      /* ignore */
+    }
   }
   facecamCache.clear();
 }
@@ -525,7 +535,7 @@ function drawFacecam(
 ): void {
   if (!fc.src) return;
   const startT = fc.startT ?? 0;
-  if (startT > 0 && t < startT - 0.05) return;
+  const facecamT = startT > 0 ? Math.max(0, t - startT) : t;
 
   const effectiveSize = resolved ? resolved.size : fc.size;
   const effectiveX = resolved ? resolved.x : fc.x;
@@ -545,7 +555,6 @@ function drawFacecam(
     if (!video) return;
     try {
       const dur = video.duration;
-      const facecamT = Math.max(0, t - startT);
       const target = Number.isFinite(dur) && dur > 0 ? Math.min(facecamT, dur - 1e-3) : facecamT;
       // Assigning currentTime starts an async seek, so this frame may be a
       // little behind. Acceptable for the fallback; the decoded path is exact.

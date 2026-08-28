@@ -258,6 +258,10 @@ export function ReshootModal() {
       // Seek back to start of take so user can inspect immediately
       seek(reshootStartT);
 
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("panoptik:frame-dirty"));
+      }
+
       // Cleanup
       cameraTrackRef.current?.stop();
       cameraTrackRef.current = null;

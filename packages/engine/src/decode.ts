@@ -183,9 +183,21 @@ async function openFacecamSink(blob: Blob): Promise<void> {
   try {
     fcInput = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
     const track = await fcInput.getPrimaryVideoTrack();
-    if (!track || !(await track.canDecode())) return;
-    const w = await track.getDisplayWidth();
-    const h = await track.getDisplayHeight();
+    if (!track) {
+      console.warn("[Facecam] openFacecamSink: no primary video track in blob", { type: blob.type, size: blob.size });
+      fcSink = null;
+      return;
+    }
+    const can = await track.canDecode();
+    if (!can) {
+      console.warn("[Facecam] openFacecamSink: track cannot decode");
+      fcSink = null;
+      return;
+    }
+    const rawW = await track.getDisplayWidth();
+    const rawH = await track.getDisplayHeight();
+    const w = rawW > 0 ? rawW : 1280;
+    const h = rawH > 0 ? rawH : 720;
     fcAspect = h > 0 ? w / h : 16 / 9;
     // The PiP is small on screen; decoding the camera at full size would cost
     // far more than it shows.
@@ -205,20 +217,10 @@ async function openFacecamSink(blob: Blob): Promise<void> {
     }
     if (!fcSurfaceCtx) {
       fcSurface = null;
-    } else {
-      // Decode initial frame right away so getFacecamSurface() is immediately available
-      try {
-        const it = fcSink.canvases(0);
-        const first = await it.next();
-        if (first.value) {
-          presentFacecam(first.value, first.value.timestamp + (first.value.duration > 0 ? first.value.duration : NOMINAL_FRAME_DUR));
-        }
-        await it.return?.();
-      } catch {
-        /* ignore */
-      }
     }
-  } catch {
+    console.log("[Facecam] openFacecamSink: ready", { dw, dh, aspect: fcAspect });
+  } catch (err) {
+    console.error("[Facecam] openFacecamSink failed", err);
     fcSink = null;
   }
 }
@@ -386,6 +388,7 @@ export async function setFacecamBlob(blob: Blob | null): Promise<string | null> 
   if (!blob || blob.size === 0) return null;
   facecamUrl = URL.createObjectURL(blob);
   await openFacecamSink(blob);
+  await prepareFacecamFrame(0);
   return facecamUrl;
 }
 
