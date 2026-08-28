@@ -281,7 +281,7 @@ export function renderFrame(
 
   // ── Layer 3: Facecam PiP (screen space, smoothly animated across segment transitions) ──
   const resolvedFc = resolveInterpolatedFacecam(project, timelineT, seg);
-  drawFacecam(ctx, seg.facecam, srcT, w, h, resolvedFc);
+  drawFacecam(ctx, seg.facecam, srcT, w, h, resolvedFc, options?.isPlaying, seg.speed);
 
   // ── Layer 4: Text overlays ──
   drawTextOverlays(ctx, seg, srcT, w, h);
@@ -498,9 +498,8 @@ function getFacecamVideo(src: string): HTMLVideoElement | null {
     const onReady = () => {
       window.dispatchEvent(new CustomEvent("panoptik:frame-dirty"));
     };
-    v.addEventListener("loadeddata", onReady);
-    v.addEventListener("canplay", onReady);
-    v.addEventListener("seeked", onReady);
+    v.addEventListener("loadeddata", onReady, { once: true });
+    v.addEventListener("canplay", onReady, { once: true });
   }
   facecamCache.set(src, v);
   return v;
@@ -535,6 +534,8 @@ function drawFacecam(
     shapeProgress?: number;
     opacity: number;
   },
+  isPlaying?: boolean,
+  speed?: number,
 ): void {
   if (!fc.src) return;
   const startT = fc.startT ?? 0;
@@ -556,20 +557,44 @@ function drawFacecam(
 
   if (!source) {
     const video = getFacecamVideo(fc.src);
-    if (!video) return;
-    try {
+    if (video) {
       const dur = video.duration;
       const target = Number.isFinite(dur) && dur > 0 ? Math.min(facecamT, dur - 1e-3) : facecamT;
-      // Assigning currentTime starts an async seek, so this frame may be a
-      // little behind. Acceptable for the fallback; the decoded path is exact.
-      if (!video.seeking && Math.abs(video.currentTime - target) > 0.05) {
-        video.currentTime = target;
+
+      if (isPlaying) {
+        if (video.paused) {
+          video.currentTime = target;
+          video.play().catch(() => {});
+        } else if (Math.abs(video.currentTime - target) > 0.3) {
+          video.currentTime = target;
+        }
+        if (speed && video.playbackRate !== speed) {
+          video.playbackRate = speed;
+        }
+      } else {
+        if (!video.paused) {
+          video.pause();
+        }
+        if (!video.seeking && Math.abs(video.currentTime - target) > 0.05) {
+          video.currentTime = target;
+        }
       }
-    } catch { /* ignore seek errors */ }
-    if (video.readyState < 2) return;
-    source = video;
-    aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        source = video;
+        aspect = video.videoWidth / video.videoHeight;
+      }
+    }
   }
+
+  // Pause other inactive videos to save resources
+  for (const [s, v] of facecamCache.entries()) {
+    if (s !== fc.src && !v.paused) {
+      v.pause();
+    }
+  }
+
+  if (!source) return;
 
   const pipW = Math.round(canvasW * effectiveSize);
   const pipH = Math.round(pipW / aspect);

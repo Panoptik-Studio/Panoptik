@@ -107,7 +107,7 @@ describe("getProjectCameraTransform across multi-clip boundaries", () => {
     const proj: Project = {
       id: "p1",
       name: "Test",
-      media: { width: 1920, height: 1080, duration: 10, fps: 30 },
+      media: { width: 1920, height: 1080, duration: 10, src: "blob:test" },
       segments: [
         {
           id: "seg1",
@@ -123,7 +123,9 @@ describe("getProjectCameraTransform across multi-clip boundaries", () => {
           ],
           stagedZoomPoints: [],
           textOverlays: [],
+          stagedTextOverlays: [],
           captions: [],
+          stagedCaptions: [],
         },
         {
           id: "seg2",
@@ -137,7 +139,9 @@ describe("getProjectCameraTransform across multi-clip boundaries", () => {
           zoomPoints: [],
           stagedZoomPoints: [],
           textOverlays: [],
+          stagedTextOverlays: [],
           captions: [],
+          stagedCaptions: [],
         },
       ],
     };
