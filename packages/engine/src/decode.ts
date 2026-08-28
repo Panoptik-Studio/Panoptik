@@ -11,13 +11,8 @@
  */
 import { ALL_FORMATS, BlobSource, CanvasSink, Input, type WrappedCanvas } from "mediabunny";
 import type { Project } from "@panoptik/schema";
-<<<<<<< HEAD
 import { clearFacecamCache, getCurrentFrame, setCurrentFrame, setFacecamFrameSource } from "./render";
-import { setAudioSink } from "./audio";
-=======
-import { clearFacecamCache, getCurrentFrame, setCurrentFrame } from "./render";
 import { setAudioBlobFallback, setAudioSink } from "./audio";
->>>>>>> a30e6c3 (refactor: improve export reliability with sequential iterator resets, robust AAC codec probing, and export state signaling)
 
 /** Keep 1920 everywhere on canvas per request — export and preview share res. */
 const MAX_DECODE_WIDTH = 1920;

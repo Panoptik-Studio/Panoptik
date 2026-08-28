@@ -54,11 +54,15 @@ export function useVideoExport() {
         const blob = await engine.exportProject(project, opts);
         const url = URL.createObjectURL(blob);
         urlRef.current = url;
-        setResult({ url, size: blob.size, format: opts.format });
+        const actualFormat: ExportOpts["format"] = blob.type.includes("webm") ? "webm" : blob.type.includes("mp4") ? "mp4" : opts.format;
+        if (actualFormat !== opts.format) {
+          console.warn(`[Export] requested ${opts.format} but delivered ${actualFormat} (aac not encodable, switched for maximal native compatibility)`);
+        }
+        setResult({ url, size: blob.size, format: actualFormat });
         if (download) {
           const a = document.createElement("a");
           a.href = url;
-          a.download = `panoptik-${opts.resolution}.${opts.format}`;
+          a.download = `panoptik-${opts.resolution}.${actualFormat}`;
           document.body.appendChild(a);
           a.click();
           a.remove();
