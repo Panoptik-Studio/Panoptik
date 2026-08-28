@@ -31,7 +31,7 @@ import {
   resolveInterpolatedFacecam,
   resolveSegment,
 } from "@panoptik/engine";
-import type { Project, Segment, ZoomPoint } from "@panoptik/schema";
+import type { Facecam, Project, Segment, ZoomPoint } from "@panoptik/schema";
 
 /** Preview compositing cap — matches the decode cap in the engine. */
 const MAX_CANVAS_WIDTH = 1920;
