@@ -437,8 +437,14 @@ export function PreviewCanvas() {
       const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
       const t = state.currentTime;
 
+      // Handles and the geometry below belong to the playhead's segment.
+      const active = resolveActive(state.project, t);
+
       const hit = hitTestHandle(canvas, state.project, t, state.selectedZoomId, px, py);
       if (hit) {
+        // The handle lives in the ACTIVE segment — point the selection at it so the
+        // Inspector (which reads the selected segment) shows the zoom immediately.
+        if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
         setSelectedZoom(hit.id);
         return;
       }
@@ -448,7 +454,6 @@ export function PreviewCanvas() {
       // Zoom keyframes are source-relative, so the new point lands at the active
       // segment's srcT. addZoomPoint targets the selected segment — point the
       // selection at the playhead's segment so the keyframe lands where it shows.
-      const active = resolveActive(state.project, t);
       if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
       addZoomPoint({
         t: active.srcT,
@@ -492,6 +497,10 @@ export function PreviewCanvas() {
         if (px >= fx && px <= fx + pipW && py >= fy && py <= fy + pipH) {
           e.preventDefault();
           canvas.setPointerCapture(e.pointerId);
+          // setFacecam targets the selected segment — but the displayed PiP belongs
+          // to the ACTIVE segment, so point the selection at it before dragging
+          // (mirrors the zoom-handle path).
+          if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
           facecamDragOffset.current = { dx: px - fx, dy: py - fy };
           setDraggingFacecam(true);
           return;
