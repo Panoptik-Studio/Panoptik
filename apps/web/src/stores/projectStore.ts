@@ -847,12 +847,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
     const restoredProject = structuredClone(snap);
     restoredProject.media.src = currentMediaSrc;
-    restoredProject.audioSrc = currentAudioSrc;
+    restoredProject.audioSrc = snap.audioSrc ?? currentAudioSrc;
     restoredProject.segments = restoredProject.segments.map((seg) => ({
       ...seg,
       facecam: {
         ...seg.facecam,
-        src: seg.facecam?.src ? currentFacecamSrc : null,
+        src: seg.facecam?.src ?? (seg.facecam ? currentFacecamSrc : null),
       },
     }));
 
@@ -890,12 +890,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
     const restoredProject = structuredClone(snap);
     restoredProject.media.src = currentMediaSrc;
-    restoredProject.audioSrc = currentAudioSrc;
+    restoredProject.audioSrc = snap.audioSrc ?? currentAudioSrc;
     restoredProject.segments = restoredProject.segments.map((seg) => ({
       ...seg,
       facecam: {
         ...seg.facecam,
-        src: seg.facecam?.src ? currentFacecamSrc : null,
+        src: seg.facecam?.src ?? (seg.facecam ? currentFacecamSrc : null),
       },
     }));
 

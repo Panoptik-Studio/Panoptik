@@ -69,10 +69,13 @@ export function createRealEngine(): MediaEngine {
 
       // Map each saved segment to its specific minted take URL
       const savedSegs = saved.project.segments ?? [];
-      const segmentFacecamSrcs: (string | null)[] = savedSegs.map((_, i) => {
+      const segmentFacecamSrcs: (string | null)[] = savedSegs.map((seg, i) => {
         const filename = saved.segmentFacecamTakes?.[i];
         if (filename && mintedTakes.has(filename)) {
           return mintedTakes.get(filename)!;
+        }
+        if (!seg.facecam || seg.facecam.src === null) {
+          return null;
         }
         return proj.segments[0]?.facecam.src ?? null;
       });

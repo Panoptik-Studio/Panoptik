@@ -116,6 +116,19 @@ function facecam(v: unknown, fallback: Segment["facecam"]): Segment["facecam"] {
     y: num(fc.y, fallback.y, 0, 1),
     size: num(fc.size, fallback.size, 0.02, 1),
     shape: fc.shape === "circle" || fc.shape === "square" ? fc.shape : fallback.shape,
+    startT: typeof fc.startT === "number" && Number.isFinite(fc.startT) ? fc.startT : fallback.startT,
+    transition:
+      fc.transition === "smooth" ||
+      fc.transition === "spring" ||
+      fc.transition === "fade" ||
+      fc.transition === "slide" ||
+      fc.transition === "cut"
+        ? fc.transition
+        : fallback.transition,
+    transitionDuration:
+      typeof fc.transitionDuration === "number" && Number.isFinite(fc.transitionDuration)
+        ? num(fc.transitionDuration, fallback.transitionDuration ?? 0.6, 0.05, 5)
+        : fallback.transitionDuration,
   };
 }
 
@@ -245,7 +258,9 @@ export function mergeSavedProject(
       .filter((s): s is Segment => s !== null);
     segments = restored.length > 0 ? restored : [mergeSegment(freshSeg, savedSegs[0])];
   } else {
-    segments = fresh.segments.map((seg, i) => mergeSegment(seg, savedSegs[i]));
+    segments = fresh.segments.map((seg, i) =>
+      sanitizeSegment(seg, savedSegs[i], segmentFacecamSrcs ? segmentFacecamSrcs[i] ?? null : seg.facecam.src),
+    );
   }
 
   return {

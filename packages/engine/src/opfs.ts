@@ -21,6 +21,12 @@ function isSecureContext(): boolean {
  */
 let loadedUrls: string[] = [];
 
+/**
+ * Maps OPFS filename -> last saved blob URL to skip re-saving unchanged media
+ * while ensuring new takes (e.g. reshoots) are always written.
+ */
+const savedBlobUrls = new Map<string, string>();
+
 export function mintUrl(blob: Blob): string {
   const url = URL.createObjectURL(blob);
   loadedUrls.push(url);
@@ -110,14 +116,8 @@ export async function saveProject(
   // Helper to save a blob to a file in projectDir
   const saveBlobFile = async (filename: string, blobUrl: string, force = false) => {
     try {
-      if (!force) {
-        // Check if file already exists
-        try {
-          await projectDir.getFileHandle(filename);
-          return; // already saved
-        } catch {
-          // file does not exist, proceed to save
-        }
+      if (!force && savedBlobUrls.get(filename) === blobUrl) {
+        return; // already saved this exact blobUrl to this filename
       }
       const response = await fetch(blobUrl);
       const blob = await response.blob();
@@ -125,6 +125,7 @@ export async function saveProject(
       const writable = await file.createWritable();
       await writable.write(blob);
       await writable.close();
+      savedBlobUrls.set(filename, blobUrl);
     } catch (e) {
       console.warn(`Failed to save blob to ${filename}:`, e);
     }

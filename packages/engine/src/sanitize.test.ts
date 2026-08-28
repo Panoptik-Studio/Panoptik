@@ -274,4 +274,45 @@ describe("mergeSavedProject", () => {
     expect(out.segments[0]!.id).toBe("s1");
     expect(out.clickLog).toHaveLength(1);
   });
+
+  it("preserves startT, transition, and custom takes on reshot segments", () => {
+    const base = fresh();
+    const out = mergeSavedProject(
+      base,
+      {
+        segments: [
+          {
+            id: "s1",
+            srcStart: 0,
+            srcEnd: 5,
+            facecam: { src: "blob:old-take", x: 0.8, y: 0.8, size: 0.2, shape: "square" },
+          },
+          {
+            id: "s2",
+            srcStart: 5,
+            srcEnd: 10,
+            facecam: {
+              src: "blob:old-reshoot",
+              x: 0.2,
+              y: 0.2,
+              size: 0.3,
+              shape: "circle",
+              startT: 5.0,
+              transition: "smooth",
+              transitionDuration: 0.8,
+            },
+          },
+        ],
+      } as unknown as Partial<Project>,
+      ["blob:fresh-cam", "blob:fresh-reshoot-take"],
+    );
+
+    expect(out.segments).toHaveLength(2);
+    expect(out.segments[0]!.facecam.src).toBe("blob:fresh-cam");
+    expect(out.segments[1]!.facecam.src).toBe("blob:fresh-reshoot-take");
+    expect(out.segments[1]!.facecam.startT).toBe(5.0);
+    expect(out.segments[1]!.facecam.transition).toBe("smooth");
+    expect(out.segments[1]!.facecam.transitionDuration).toBe(0.8);
+    expect(out.segments[1]!.facecam.shape).toBe("circle");
+  });
 });
