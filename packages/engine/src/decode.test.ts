@@ -177,3 +177,70 @@ describe("audio routing", () => {
     expect(getAudioSinkTrackId()).toBeNull();
   });
 });
+
+describe("variable-rate footage", () => {
+  const file = () => new File([new Uint8Array(2048)], "screen.webm", { type: "video/webm" });
+
+  it("settles on a time that falls in a hole between frames", async () => {
+    // A screen recording emits nothing while the picture is still. Here there
+    // is no frame covering 22.800 — 22.760 ends at 22.778 and the next starts
+    // at 22.808 — which is the shape that stalled a real export.
+    const FRAMES = [
+      { timestamp: 22.742, duration: 0.018 },
+      { timestamp: 22.760, duration: 0.018 },
+      { timestamp: 22.808, duration: 0.018 },
+      // A long tail: decoding through it to look for a cover is the failure.
+      ...Array.from({ length: 400 }, (_, i) => ({ timestamp: 23 + i * 0.018, duration: 0.018 })),
+    ];
+    let decoded = 0;
+
+    vi.resetModules();
+    vi.doMock("mediabunny", () => ({
+      ALL_FORMATS: "all",
+      BlobSource: vi.fn().mockImplementation((f: File) => ({ file: f })),
+      AudioBufferSink: vi.fn(),
+      Input: vi.fn().mockImplementation(() => ({
+        getPrimaryVideoTrack: vi.fn().mockResolvedValue({
+          canDecode: vi.fn().mockResolvedValue(true),
+          computeDuration: vi.fn().mockResolvedValue(40),
+          getDisplayWidth: vi.fn().mockResolvedValue(1920),
+          getDisplayHeight: vi.fn().mockResolvedValue(1080),
+        }),
+        getPrimaryAudioTrack: vi.fn().mockResolvedValue(null),
+        dispose: vi.fn(),
+      })),
+      CanvasSink: vi.fn().mockImplementation(() => ({
+        canvases: (start = 0) => {
+          const from = FRAMES.filter((f) => f.timestamp + f.duration > start);
+          return (async function* () {
+            for (const f of from) {
+              decoded++;
+              yield { canvas: { _mock: true }, ...f };
+            }
+          })();
+        },
+      })),
+    }));
+
+    const mod = await import("./decode");
+    await mod.loadClip(file());
+
+    decoded = 0;
+    await Promise.race([
+      mod.prepareFrame(22.8),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("pump did not settle")), 3000)),
+    ]);
+
+    // It should stop at the first frame past the hole, not chew through the
+    // remaining 400.
+    expect(decoded).toBeLessThan(10);
+
+    // And the hole must now read as covered, so the next request is a hit
+    // rather than another scan.
+    const afterFirst = decoded;
+    await mod.prepareFrame(22.8);
+    expect(decoded).toBe(afterFirst);
+
+    vi.doUnmock("mediabunny");
+  });
+});

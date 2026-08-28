@@ -464,21 +464,34 @@ async function runPump(): Promise<void> {
         console.log("[Screen] video fps", { fps, framesInThisPump, totalDecoded: pumpFramesDecoded, target: target.toFixed(3), presented: `${value.timestamp.toFixed(3)}-${end.toFixed(3)}`, blitTook: `${(performance.now() - presentStart).toFixed(1)}ms` });
         pumpLastLog = performance.now();
       }
-    } else if (!presented) {
-      // First frame bootstrap: if nothing has been shown yet, display the
-      // very first decoded frame as placeholder even if it doesn't cover the
-      // target (target 0 is normally covered, so this is rare). It will be
-      // overwritten as soon as the covering frame is found.
-      present(value, end);
+    } else if (value.timestamp > target) {
+      // Walked past the target without a frame covering it. Variable-rate
+      // footage emits nothing while the picture is still, so the timeline has
+      // holes: the frame before the hole is what should be on screen for its
+      // whole span. Without this the loop keeps pulling frames looking for a
+      // cover that does not exist, decoding to the end of the file for a single
+      // request — and then, with presented.end left at Infinity, every later
+      // request is a false cache hit and the picture freezes for the rest of
+      // the export.
+      if (!presented) {
+        // Nothing shown yet and the earliest available frame is already past
+        // the target, so it is the best answer — and the window has to reach
+        // back over the target, or the next request repeats this scan.
+        present(value, end, Math.min(value.timestamp, target));
+      } else {
+        // Hold the frame before the hole until the next one actually begins.
+        presented = { start: presented.start, end: value.timestamp };
+      }
+      return;
     }
   }
 }
 
-function present(wrapped: WrappedCanvas, end: number): void {
+function present(wrapped: WrappedCanvas, end: number, start = wrapped.timestamp): void {
   // Direct use — poolSize 8 means holding one canvas still leaves 7 for decode.
   // The previous blit to `surface` (drawImage per frame) was ~30% of the 1.8s/frame cost.
   setCurrentFrame(wrapped.canvas);
-  presented = { start: wrapped.timestamp, end };
+  presented = { start, end };
 }
 
 function createSurface(w: number, h: number): void {
