@@ -9,6 +9,7 @@
 
 import { useProjectStore } from "@/stores/projectStore";
 import { sourceToTimeline } from "@panoptik/engine";
+import { mediaForSegment } from "@panoptik/schema";
 import type { ZoomPoint } from "@panoptik/schema";
 
 const EASE_OPTIONS: { value: string; label: string }[] = [
@@ -49,9 +50,23 @@ export function Inspector() {
       seg.stagedZoomPoints.find((z) => z.id === selectedZoomId)
     : undefined;
 
+  // Source clip row — shows which media this segment cuts from (multiclip)
+  const sourceMedia = seg ? mediaForSegment(project, seg) : null;
+  const sourceIndex = sourceMedia ? project.media.findIndex((m) => m.id === sourceMedia.id) : -1;
+
   if (!zoom) {
     return (
       <div className="pk-panel">
+        {seg && sourceMedia && project.media.length > 1 && (
+          <div className="mb-3 rounded border border-pk-hairline bg-pk-surface-soft px-2.5 py-2">
+            <div className="pk-label">Source clip</div>
+            <div className="pk-help mt-1 flex items-center gap-2">
+              <span className="rounded bg-white px-1.5 py-0.5 text-[11px] font-medium border border-pk-hairline">Clip {sourceIndex + 1}</span>
+              <span className="truncate">{sourceMedia.width}×{sourceMedia.height} · {sourceMedia.duration.toFixed(1)}s</span>
+              <span className="ml-auto font-mono text-[10px] text-pk-faint">{sourceMedia.id.slice(0, 6)}</span>
+            </div>
+          </div>
+        )}
         <h3 className="pk-panel-title mb-1">
           Zoom settings
         </h3>
@@ -68,6 +83,16 @@ export function Inspector() {
 
   return (
     <div className="pk-panel">
+      {sourceMedia && project.media.length > 1 && (
+        <div className="mb-3 rounded border border-pk-hairline bg-pk-surface-soft px-2.5 py-2">
+          <div className="pk-label">Source clip</div>
+          <div className="pk-help mt-1 flex items-center gap-2">
+            <span className="rounded bg-white px-1.5 py-0.5 text-[11px] font-medium border border-pk-hairline">Clip {sourceIndex + 1}</span>
+            <span className="truncate">{sourceMedia.width}×{sourceMedia.height} · {sourceMedia.duration.toFixed(1)}s</span>
+            <span className="ml-auto font-mono text-[10px] text-pk-faint">{sourceMedia.id.slice(0, 6)}</span>
+          </div>
+        </div>
+      )}
       <div className="mb-3 flex items-center justify-between">
         <h3 className="pk-panel-title">
           Zoom settings

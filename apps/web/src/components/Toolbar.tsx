@@ -7,8 +7,10 @@
 
 import Link from "next/link";
 
+import { useRef } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useVideoExport } from "@/lib/useVideoExport";
+import { engine } from "@/lib/engineProvider";
 
 export function Toolbar() {
   const project = useProjectStore((s) => s.project);
@@ -17,6 +19,29 @@ export function Toolbar() {
   const canUndo = useProjectStore((s) => s.historyIndex > 0);
   const canRedo = useProjectStore((s) => s.historyIndex < s.history.length - 1);
   const quickExport = useVideoExport();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const onAddClip = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !file.type.startsWith("video/")) return;
+    const state = useProjectStore.getState();
+    if (!state.project) {
+      try {
+        const proj = await engine.loadClip(file);
+        state.setProject(proj);
+      } catch (err) {
+        console.error("Add clip failed", err);
+      }
+      return;
+    }
+    try {
+      const { media, segment } = await engine.importClip(file);
+      state.appendClip(media, segment);
+    } catch (err) {
+      console.error("Add clip failed", err);
+    }
+  };
 
   return (
     <header className="flex shrink-0 items-center justify-between border-b px-8" style={{ background: "#ffffff", borderColor: "#ebebeb", height: 80, minHeight: 80 }}>
@@ -65,6 +90,16 @@ export function Toolbar() {
         >
           <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
           Record
+        </button>
+        <input ref={fileRef} type="file" accept="video/*" className="hidden" onChange={onAddClip} />
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="pk-btn pk-btn-ghost pk-btn-sm hidden sm:inline-flex"
+          style={{ height: 38 }}
+          title="Add clip to timeline"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+          Add clip
         </button>
         <button onClick={() => window.dispatchEvent(new CustomEvent("open-record-modal"))} className="pk-icon-btn flex h-[38px] w-[38px] sm:hidden" title="Record">
           <span className="h-3 w-3 rounded-full bg-red-500" />

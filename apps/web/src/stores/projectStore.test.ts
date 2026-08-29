@@ -728,3 +728,47 @@ describe("appendClip (multiclip)", () => {
     }
   });
 });
+
+describe("reorderSegments", () => {
+  beforeEach(fresh);
+
+  it("reorders segments and pushes history", () => {
+    // Create 3 segments via splits
+    const s = useProjectStore.getState();
+    const p = structuredClone(s.project!);
+    const s1 = structuredClone(p.segments[0]!);
+    s1.id = "s-a";
+    const s2 = structuredClone(p.segments[0]!);
+    s2.id = "s-b";
+    const s3 = structuredClone(p.segments[0]!);
+    s3.id = "s-c";
+    p.segments = [s1, s2, s3];
+    s.setProject(p);
+    expect(useProjectStore.getState().project!.segments.map((x) => x.id)).toEqual(["s-a", "s-b", "s-c"]);
+    useProjectStore.getState().reorderSegments(0, 2);
+    expect(useProjectStore.getState().project!.segments.map((x) => x.id)).toEqual(["s-b", "s-c", "s-a"]);
+    expect(useProjectStore.getState().historyIndex).toBeGreaterThan(0);
+  });
+
+  it("undo restores order", () => {
+    const s = useProjectStore.getState();
+    const p = structuredClone(s.project!);
+    p.segments = [
+      { ...p.segments[0]!, id: "s-a" },
+      { ...p.segments[0]!, id: "s-b" },
+      { ...p.segments[0]!, id: "s-c" },
+    ];
+    s.setProject(p);
+    useProjectStore.getState().reorderSegments(2, 0);
+    expect(useProjectStore.getState().project!.segments[0]!.id).toBe("s-c");
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().project!.segments.map((x) => x.id)).toEqual(["s-a", "s-b", "s-c"]);
+  });
+
+  it("is no-op for out of bounds", () => {
+    const before = structuredClone(useProjectStore.getState().project!);
+    useProjectStore.getState().reorderSegments(-1, 1);
+    useProjectStore.getState().reorderSegments(0, 10);
+    expect(useProjectStore.getState().project!.segments).toEqual(before.segments);
+  });
+});

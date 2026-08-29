@@ -179,6 +179,8 @@ interface ProjectStore {
   // Multiclip — append assets to the end of the timeline
   appendClip: (media: Media, segment: Segment) => void;
   appendRecordedProject: (recorded: Project) => void;
+  /** Reorder segments by drag — `from` and `to` are indices in the segments array. */
+  reorderSegments: (fromIndex: number, toIndex: number) => void;
 
   // Playback
   play: () => void;
@@ -611,6 +613,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       media: [...s.project.media, ...media],
       segments: [...s.project.segments, ...segments],
     };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  reorderSegments: (fromIndex, toIndex) => {
+    const s = get();
+    if (!s.project || s.exportProgress !== null) return;
+    const segs = s.project.segments;
+    if (fromIndex < 0 || fromIndex >= segs.length || toIndex < 0 || toIndex >= segs.length || fromIndex === toIndex) return;
+    const next = [...segs];
+    const [moved] = next.splice(fromIndex, 1);
+    if (!moved) return;
+    next.splice(toIndex, 0, moved);
+    const project: Project = { ...s.project, segments: next };
     pushHistoryAndSet(project, s, set);
   },
 

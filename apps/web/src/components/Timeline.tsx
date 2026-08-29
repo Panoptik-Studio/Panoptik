@@ -1927,6 +1927,46 @@ export function Timeline() {
             </span>
           </button>
           <div className="my-1 h-px bg-[#ebebeb]" />
+          {(() => {
+            const idx = project.segments.findIndex((s) => s.id === contextMenu.segmentId);
+            const canLeft = idx > 0 && exportProgress === null;
+            const canRight = idx >= 0 && idx < project.segments.length - 1 && exportProgress === null;
+            return (
+              <div className="flex gap-1">
+                <button
+                  disabled={!canLeft}
+                  onClick={() => {
+                    if (canLeft) {
+                      const s = useProjectStore.getState();
+                      s.reorderSegments(idx, idx - 1);
+                    }
+                    setContextMenu(null);
+                  }}
+                  className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${canLeft ? "bg-[#f5f5f5] text-[#1a1a1a] hover:bg-[#ebebeb]" : "cursor-not-allowed bg-[#fafafa] text-[#aaa]"}`}
+                  title={canLeft ? "Move clip left" : "Already first"}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg>
+                  Left
+                </button>
+                <button
+                  disabled={!canRight}
+                  onClick={() => {
+                    if (canRight) {
+                      const s = useProjectStore.getState();
+                      s.reorderSegments(idx, idx + 1);
+                    }
+                    setContextMenu(null);
+                  }}
+                  className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${canRight ? "bg-[#f5f5f5] text-[#1a1a1a] hover:bg-[#ebebeb]" : "cursor-not-allowed bg-[#fafafa] text-[#aaa]"}`}
+                  title={canRight ? "Move clip right" : "Already last"}
+                >
+                  Right
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
+                </button>
+              </div>
+            );
+          })()}
+          <div className="my-1 h-px bg-[#ebebeb]" />
           <button
             className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
               project.segments.length > 1 && exportProgress === null
