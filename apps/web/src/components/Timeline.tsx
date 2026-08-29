@@ -17,6 +17,7 @@ import {
   sourceToTimeline,
 } from "@panoptik/engine";
 import { TRANSITION_ICONS, getClosestGridPreset } from "./CameraControls";
+import { AUDIO_TRACK_Y, AUDIO_LANE_HEIGHT, audioBlockGeometry, drawAudioTracks } from "@/lib/timelineAudioTracks";
 
 const RULER_HEIGHT = 26;
 const VIDEO_TRACK_Y = 30;
@@ -119,6 +120,7 @@ export function Timeline() {
   const [draggingDiamond, setDraggingDiamond] = useState<{ id: string; committed: boolean; segmentId: string } | null>(null);
   const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
+  const [draggingAudio, setDraggingAudio] = useState<{ id: string; grabOffset: number } | null>(null);
   const [transitionPopover, setTransitionPopover] = useState<{
     x: number;
     y: number;
@@ -145,6 +147,7 @@ export function Timeline() {
   const selectedZoomId = useProjectStore((s) => s.selectedZoomId);
   const setSelectedZoom = useProjectStore((s) => s.setSelectedZoom);
   const updateZoomPoint = useProjectStore((s) => s.updateZoomPoint);
+  const updateAudioTrack = useProjectStore((s) => s.updateAudioTrack);
   const removeZoomPoint = useProjectStore((s) => s.removeZoomPoint);
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
   const exportProgress = useProjectStore((s) => s.exportProgress);
@@ -202,7 +205,7 @@ export function Timeline() {
   // Canvas width scales with zoom: 0→0.5×, 1→2× base — ruler uses on-timeline duration
   const baseW = 1387;
   const canvasW = Math.round(baseW * (0.5 + zoom * 1.5));
-  const canvasH = 182;
+  const canvasH = 216; // extended to fit the audio lane below the zoom track
   const timeToX = useCallback((t: number) => (t / duration) * canvasW, [duration, canvasW]);
   const xToTime = useCallback((x: number) => Math.max(0, Math.min(duration, (x / canvasW) * duration)), [duration, canvasW]);
 
@@ -707,6 +710,9 @@ export function Timeline() {
         ctx.restore();
       }
     }
+
+    // ── 7. Audio Track Lane (music/voiceover, wall-clock) ──
+    drawAudioTracks(ctx, project?.audioTracks ?? [], timeToX, AUDIO_TRACK_Y, AUDIO_LANE_HEIGHT);
   }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
@@ -809,6 +815,22 @@ export function Timeline() {
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     seek(xToTime(x));
   }, [isDraggingPlayhead, seek, xToTime]);
+
+  const handleAudioTrackDrag = useCallback((e: React.PointerEvent) => {
+    if (!draggingAudio || !scrollRef.current) return;
+    const rect = scrollRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+    updateAudioTrack(draggingAudio.id, { startT: Math.max(0, xToTime(x) - draggingAudio.grabOffset) });
+  }, [draggingAudio, updateAudioTrack, xToTime]);
+
+  const handleAudioTrackDown = useCallback((e: React.PointerEvent, track: { id: string; startT: number }) => {
+    e.stopPropagation();
+    if (!scrollRef.current) return;
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    const rect = scrollRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+    setDraggingAudio({ id: track.id, grabOffset: xToTime(x) - track.startT });
+  }, [xToTime]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1104,8 +1126,8 @@ export function Timeline() {
         onClick={handleCanvasClick}
         onContextMenu={handleContextMenu}
         onPointerDown={handleTimelinePointerDown}
-        onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); }}
-        onPointerUp={() => { setDraggingDiamond(null); setIsDraggingPlayhead(false); }}
+        onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); handleAudioTrackDrag(e); }}
+        onPointerUp={() => { setDraggingDiamond(null); setIsDraggingPlayhead(false); setDraggingAudio(null); }}
         onPointerLeave={() => setIsDraggingPlayhead(false)}
       >
         <div className="relative" style={{ width: canvasW, height: canvasH }}>
@@ -1177,6 +1199,20 @@ export function Timeline() {
               );
             }),
           )}
+
+          {/* Audio Track lane — invisible draggable hit-divs over the canvas-drawn blocks */}
+          {(project.audioTracks ?? []).map((track) => {
+            const { left, width } = audioBlockGeometry(track, timeToX);
+            return (
+              <div
+                key={`audio-hit-${track.id}`}
+                className="absolute z-10 cursor-grab active:cursor-grabbing"
+                style={{ top: AUDIO_TRACK_Y, left, width, height: AUDIO_LANE_HEIGHT }}
+                onPointerDown={(e) => handleAudioTrackDown(e, track)}
+                title={`${track.name ?? track.kind} — drag to move`}
+              />
+            );
+          })}
 
           {/* Facecam Transition Interactive Nodes in between clips */}
           {(() => {
