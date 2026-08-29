@@ -52,7 +52,7 @@ export function applyTrackEnvelope(buffer: AudioBuffer, track: AudioTrack): Audi
     const src = buffer.getChannelData(ch);
     const dst = out.getChannelData(ch);
     for (let i = 0; i < buffer.length; i++) {
-      dst[i] = src[i] * trackGainAt(track, i / buffer.sampleRate);
+      dst[i] = src[i]! * trackGainAt(track, i / buffer.sampleRate);
     }
   }
   return out;
@@ -67,13 +67,13 @@ function windowRms(base: AudioBuffer, windowMs: number): { rms: Float32Array; wi
   const mono = new Float32Array(base.length);
   for (let ch = 0; ch < base.numberOfChannels; ch++) {
     const d = base.getChannelData(ch);
-    for (let i = 0; i < base.length; i++) mono[i] += d[i] / base.numberOfChannels;
+    for (let i = 0; i < base.length; i++) mono[i]! += d[i]! / base.numberOfChannels;
   }
   for (let w = 0; w < nWindows; w++) {
     const start = w * winLen;
     const end = Math.min(base.length, start + winLen);
     let sum = 0;
-    for (let i = start; i < end; i++) sum += mono[i] * mono[i];
+    for (let i = start; i < end; i++) sum += mono[i]! * mono[i]!;
     rms[w] = Math.sqrt(sum / Math.max(1, end - start));
   }
   return { rms, winLen };
@@ -92,22 +92,22 @@ export function computeDuckingEnvelope(base: AudioBuffer, amount: number, window
   if (amount <= 0 || n === 0) return gain;
   const { rms, winLen } = windowRms(base, windowMs);
   let peak = 0;
-  for (let i = 0; i < rms.length; i++) if (rms[i] > peak) peak = rms[i];
+  for (let i = 0; i < rms.length; i++) if (rms[i]! > peak) peak = rms[i]!;
   if (peak === 0) return gain;
   const noiseFloor = peak * 0.1;
   const speechRef = peak * 0.5;
   const presence = new Float32Array(rms.length);
   for (let i = 0; i < rms.length; i++) {
-    presence[i] = Math.min(1, Math.max(0, (rms[i] - noiseFloor) / (speechRef - noiseFloor)));
+    presence[i] = Math.min(1, Math.max(0, (rms[i]! - noiseFloor) / (speechRef - noiseFloor)));
   }
   const smooth = new Float32Array(rms.length);
   for (let i = 0; i < rms.length; i++) {
     const a = presence[Math.max(0, i - 1)] ?? 0;
     const c = presence[Math.min(rms.length - 1, i + 1)] ?? 0;
-    smooth[i] = (a + presence[i] + c) / 3;
+    smooth[i] = (a + presence[i]! + c) / 3;
   }
   for (let w = 0; w < rms.length; w++) {
-    const g = 1 - amount * smooth[w];
+    const g = 1 - amount * smooth[w]!;
     const start = w * winLen;
     const end = Math.min(n, start + winLen);
     for (let i = start; i < end; i++) gain[i] = g;
@@ -137,8 +137,8 @@ function addResampled(
       const i0 = Math.floor(s);
       if (i0 >= srcLen) break;
       const i1 = Math.min(srcLen - 1, i0 + 1);
-      const sample = srcCh[i0] + (srcCh[i1] - srcCh[i0]) * (s - i0);
-      dst[idx] += sample * (gainPerSample ? gainPerSample(idx) : 1);
+      const sample = srcCh[i0]! + (srcCh[i1]! - srcCh[i0]!) * (s - i0);
+      dst[idx]! += sample * (gainPerSample ? gainPerSample(idx) : 1);
     }
   }
 }

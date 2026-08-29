@@ -6,7 +6,7 @@
  *   DEV B: record.ts, opfs.ts (re-exported below in the B-region)
  */
 
-import type { ExportOpts, Project } from "@panoptik/schema";
+import type { AudioTrack, ExportOpts, Project } from "@panoptik/schema";
 import type { ExportFrameOpts } from "./encode";
 import type { RenderOptions } from "./render";
 
@@ -31,7 +31,7 @@ export interface MediaEngine {
   exportProject(project: Project, opts: ExportFrameOpts): Promise<Blob>;
 }
 
-export type { Project, ExportOpts, ExportFrameOpts };
+export type { Project, ExportOpts, ExportFrameOpts, AudioTrack };
 export { createRealEngine } from "./real-engine";
 
 // Camera geometry — shared so the editor's focal handles land exactly where
@@ -70,4 +70,13 @@ export {
   markExported,
 } from "./opfs";
 export type { ProjectSummary } from "./opfs";
+export {
+  registerTrackBuffer,
+  getTrackBuffer,
+  clearTrackBuffers,
+  trackGainAt,
+  applyTrackEnvelope,
+  computeDuckingEnvelope,
+  mixTracksIntoBase,
+} from "./audioTracks";
 // ── #endregion ──
