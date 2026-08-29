@@ -134,7 +134,7 @@ export type Project = {
   clickLog: ClickEvent[];
   /** Always present at runtime (migration defaults it to `[]`); optional in the type so
    *  existing Project literals across the app need not change until they use it. */
-  audioTracks: AudioTrack[];
+  audioTracks?: AudioTrack[];
 };
 
 /** First media id. Deterministic so re-migrating the same file is a no-op. */
@@ -178,7 +178,7 @@ export function migrateProject(raw: unknown): Project {
     const v12 = raw as Omit<Project, "media"> & { media: Omit<Media, "id"> & { id?: string } };
     const only: Media = { ...v12.media, id: v12.media.id ?? FIRST_MEDIA_ID };
     const audioTracks = Array.isArray((v12 as unknown as { audioTracks?: unknown }).audioTracks)
-      ? (v12 as Project).audioTracks
+      ? (v12 as unknown as Project).audioTracks
       : ((r.audioTracks ?? []) as AudioTrack[]);
     return {
       ...v12,
