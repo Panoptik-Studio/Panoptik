@@ -123,7 +123,7 @@ export function Timeline() {
   const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [draggingAudio, setDraggingAudio] = useState<{ id: string; grabOffset: number } | null>(null);
-  const [draggingSegment, setDraggingSegment] = useState<{ id: string; fromIndex: number; startX: number } | null>(null);
+  const [draggingSegment, setDraggingSegment] = useState<{ id: string; fromIndex: number; startX: number; groupStart: number; groupEnd: number; groupSize: number } | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [transitionPopover, setTransitionPopover] = useState<{
     x: number;
@@ -406,10 +406,24 @@ export function Timeline() {
 
     // ── 2c. Drag reorder drop indicator ──
     if (draggingSegment && dragOverIndex !== null && project) {
+      const ds = draggingSegment as unknown as { fromIndex: number; groupStart: number; groupEnd: number; groupSize: number };
+      const isGroup = ds.groupSize > 1;
       let acc = 0;
       for (let i = 0; i < dragOverIndex; i++) acc += segmentDuration(project.segments[i]!);
-      // Adjust for removal of dragged item
-      if (dragOverIndex > draggingSegment.fromIndex) acc -= segmentDuration(project.segments[draggingSegment.fromIndex]!);
+      // Adjust for removal of dragged item(s)
+      if (isGroup) {
+        if (dragOverIndex > ds.groupEnd) {
+          let groupDur = 0;
+          for (let j = ds.groupStart; j <= ds.groupEnd; j++) groupDur += segmentDuration(project.segments[j]!);
+          acc -= groupDur;
+        } else if (dragOverIndex >= ds.groupStart && dragOverIndex <= ds.groupEnd) {
+          // Hovering over itself — show at original position
+          acc = 0;
+          for (let i = 0; i < ds.groupStart; i++) acc += segmentDuration(project.segments[i]!);
+        }
+      } else {
+        if (dragOverIndex > ds.fromIndex) acc -= segmentDuration(project.segments[ds.fromIndex]!);
+      }
       const dropX = timeToX(acc);
       ctx.save();
       ctx.strokeStyle = "#0070f3";
@@ -817,7 +831,8 @@ export function Timeline() {
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     const y = e.clientY - rect.top;
-    if (y < VIDEO_TRACK_Y || y >= VIDEO_TRACK_Y + VIDEO_TRACK_HEIGHT) return false;
+    // Video track is at y=30, height 32, but allow a bit of padding for easier grab
+    if (y < VIDEO_TRACK_Y - 4 || y >= VIDEO_TRACK_Y + VIDEO_TRACK_HEIGHT + 8) return false;
     // Find which segment is under the pointer
     let acc = 0;
     for (let i = 0; i < project.segments.length; i++) {
@@ -828,8 +843,29 @@ export function Timeline() {
       if (x >= x0 && x <= x1) {
         // Select on pointer down (like click) and start dragging
         selectSegment(seg.id, false);
-        setDraggingSegment({ id: seg.id, fromIndex: i, startX: x });
-        setDragOverIndex(i);
+        // For clip group drag: find contiguous block with same mediaId
+        const targetMediaId = seg.mediaId;
+        let groupStart = i;
+        let groupEnd = i;
+        // Expand left
+        for (let j = i - 1; j >= 0; j--) {
+          if (project.segments[j]!.mediaId === targetMediaId) groupStart = j;
+          else break;
+        }
+        // Expand right
+        for (let j = i + 1; j < project.segments.length; j++) {
+          if (project.segments[j]!.mediaId === targetMediaId) groupEnd = j;
+          else break;
+        }
+        setDraggingSegment({
+          id: seg.id,
+          fromIndex: groupStart,
+          startX: x,
+          groupStart,
+          groupEnd,
+          groupSize: groupEnd - groupStart + 1,
+        });
+        setDragOverIndex(groupStart);
         (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
         e.preventDefault();
         e.stopPropagation();
@@ -902,6 +938,11 @@ export function Timeline() {
         acc += d;
       }
       if (hovered === null) hovered = project.segments.length - 1;
+      // For group drag, adjust hovered to be the group's insertion point
+      // If hovering over a segment that is part of the dragged group, keep original
+      if (hovered >= draggingSegment.groupStart && hovered <= draggingSegment.groupEnd) {
+        hovered = draggingSegment.groupStart;
+      }
       // Adjust for dragging item removal
       if (hovered > draggingSegment.fromIndex) hovered = Math.max(0, hovered);
       setDragOverIndex(hovered);
@@ -921,14 +962,28 @@ export function Timeline() {
     }
     const from = draggingSegment.fromIndex;
     const to = dragOverIndex;
+    const groupStart = (draggingSegment as unknown as { groupStart: number }).groupStart ?? from;
+    const groupEnd = (draggingSegment as unknown as { groupEnd: number }).groupEnd ?? from;
+    const groupSize = (draggingSegment as unknown as { groupSize: number }).groupSize ?? 1;
     setDraggingSegment(null);
     setDragOverIndex(null);
-    if (to !== null && to !== from && to >= 0 && to < project.segments.length) {
-      // Need to adjust target index for removal offset
+    if (to === null) return;
+    if (groupSize > 1) {
+      // Clip group drag — move contiguous block
+      if (to >= groupStart && to <= groupEnd) return; // dropped inside itself
+      // For group, `to` is the hovered segment index; convert to insertion index
+      // If dropping after the group, adjust for removal
       let target = to;
-      if (from < to) target = to;
-      // Use store's reorder which handles splice correctly
-      useProjectStore.getState().reorderSegments(from, target);
+      if (to > groupEnd) target = to - groupSize + 1;
+      // If dragging left, target is the hovered index
+      if (to < groupStart) target = to;
+      useProjectStore.getState().moveClipGroup(groupStart, groupEnd, target);
+    } else {
+      if (to !== from && to >= 0 && to < project.segments.length) {
+        let target = to;
+        if (from < to) target = to;
+        useProjectStore.getState().reorderSegments(from, target);
+      }
     }
   }, [draggingSegment, dragOverIndex, project]);
 

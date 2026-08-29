@@ -181,6 +181,8 @@ interface ProjectStore {
   appendRecordedProject: (recorded: Project) => void;
   /** Reorder segments by drag — `from` and `to` are indices in the segments array. */
   reorderSegments: (fromIndex: number, toIndex: number) => void;
+  /** Move a contiguous clip group (fromStart..fromEnd inclusive) to toIndex. */
+  moveClipGroup: (fromStart: number, fromEnd: number, toIndex: number) => void;
 
   // Playback
   play: () => void;
@@ -625,6 +627,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const [moved] = next.splice(fromIndex, 1);
     if (!moved) return;
     next.splice(toIndex, 0, moved);
+    const project: Project = { ...s.project, segments: next };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  moveClipGroup: (fromStart, fromEnd, toIndex) => {
+    const s = get();
+    if (!s.project || s.exportProgress !== null) return;
+    const segs = s.project.segments;
+    if (fromStart < 0 || fromEnd >= segs.length || fromStart > fromEnd) return;
+    if (toIndex < 0 || toIndex > segs.length) return;
+    // No-op if dropping inside the group
+    if (toIndex >= fromStart && toIndex <= fromEnd + 1) return;
+    const next = [...segs];
+    const group = next.splice(fromStart, fromEnd - fromStart + 1);
+    // Adjust target index for removal
+    let target = toIndex;
+    if (toIndex > fromEnd) target = toIndex - (fromEnd - fromStart + 1);
+    // Clamp
+    target = Math.max(0, Math.min(next.length, target));
+    next.splice(target, 0, ...group);
     const project: Project = { ...s.project, segments: next };
     pushHistoryAndSet(project, s, set);
   },
