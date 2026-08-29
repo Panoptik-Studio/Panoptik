@@ -5,6 +5,8 @@
  */
 "use client";
 
+import Link from "next/link";
+
 import { useProjectStore } from "@/stores/projectStore";
 import { useVideoExport } from "@/lib/useVideoExport";
 
@@ -41,6 +43,20 @@ export function Toolbar() {
 
       {/* Right: actions — larger to match homepage, Poppins */}
       <div className="flex items-center gap-2">
+        <Link
+          href="/projects"
+          className="pk-btn pk-btn-ghost pk-btn-sm hidden sm:inline-flex"
+          style={{ height: 38 }}
+          title="All clips saved on this device"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1.5" />
+            <rect x="14" y="3" width="7" height="7" rx="1.5" />
+            <rect x="3" y="14" width="7" height="7" rx="1.5" />
+            <rect x="14" y="14" width="7" height="7" rx="1.5" />
+          </svg>
+          My clips
+        </Link>
         <button
           onClick={() => window.dispatchEvent(new CustomEvent("open-record-modal"))}
           className="pk-btn pk-btn-ghost pk-btn-sm hidden sm:inline-flex"

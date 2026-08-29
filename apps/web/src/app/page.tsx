@@ -64,9 +64,10 @@ export default function Home() {
               <img src="/text-logo-dark.webp" alt="Panoptik" width={140} height={34} style={{ height: 34, width: "auto", objectFit: "contain" }} />
             </a>
             <nav style={{ display: "flex" }} className="hidden md:flex">
-              <ul style={{ display: "flex", alignItems: "center", gap: 80, listStyle: "none", margin: 0, padding: 0 }}>
+              <ul style={{ display: "flex", alignItems: "center", gap: 56, listStyle: "none", margin: 0, padding: 0 }}>
                 {[
                   { label: "How it works", href: "#how" },
+                  { label: "My clips", href: "/projects" },
                   { label: "Editor", href: "/editor" },
                   { label: "FAQ", href: "#faq" },
                 ].map((l) => (
@@ -86,6 +87,7 @@ export default function Home() {
                 {menuOpen && (
                   <div ref={menuRef} style={{ position: "absolute", right: 16, top: 78, width: 220, background: "#F8F8F8", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 8, zIndex: 200 }}>
                     <a href="#how" onClick={() => setMenuOpen(false)} style={{ display: "block", padding: "10px 12px", fontFamily: "var(--font-poppins)", color: "#1A1A1A", textDecoration: "none" }}>How it works</a>
+                    <a href="/projects" onClick={() => setMenuOpen(false)} style={{ display: "block", padding: "10px 12px", fontFamily: "var(--font-poppins)", color: "#1A1A1A", textDecoration: "none" }}>My clips</a>
                     <a href="/editor" onClick={() => setMenuOpen(false)} style={{ display: "block", padding: "10px 12px", fontFamily: "var(--font-poppins)", color: "#1A1A1A", textDecoration: "none" }}>Editor</a>
                   </div>
                 )}

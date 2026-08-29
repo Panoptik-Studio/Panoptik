@@ -39,6 +39,16 @@ function mockOpfs() {
         if (!files.has(fileName)) throw new Error("not found");
         files.delete(fileName);
       },
+      // listProjectSummaries walks each project directory to sum sizes and
+      // spot the poster and exported markers.
+      entries: async function* () {
+        for (const [fileName, blob] of files) {
+          yield [
+            fileName,
+            { kind: "file" as const, getFile: async () => blob },
+          ] as const;
+        }
+      },
     };
   };
 
@@ -46,6 +56,11 @@ function mockOpfs() {
     dirs,
     root: {
       getDirectoryHandle: async (name: string) => dirHandle(name),
+      entries: async function* () {
+        for (const name of dirs.keys()) {
+          yield [name, { kind: "directory" as const, ...dirHandle(name) }] as const;
+        }
+      },
     },
   };
 }
@@ -91,6 +106,42 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const namesIn = (id: string) => [...(fs.dirs.get(id)?.keys() ?? [])].filter((n) => n.startsWith("bg-"));
+
+describe("project summaries", () => {
+  it("reports drafts until a project is exported, then stops", async () => {
+    const { saveProject, listProjectSummaries, markExported } = await import("./opfs");
+    await saveProject(project([segment()]), false);
+
+    let [summary] = await listProjectSummaries();
+    // Nothing exported yet, so the library shows it as a draft.
+    expect(summary!.exportedAt).toBeNull();
+
+    await markExported("proj");
+    [summary] = await listProjectSummaries();
+    expect(typeof summary!.exportedAt).toBe("number");
+  });
+
+  it("carries what the grid needs without opening the media", async () => {
+    const { saveProject, listProjectSummaries } = await import("./opfs");
+    await saveProject(project([segment()]), false);
+
+    const [summary] = await listProjectSummaries();
+    expect(summary).toMatchObject({ id: "proj", duration: 10, width: 1920, height: 1080 });
+    // Size is summed from the files actually on disk.
+    expect(summary!.bytes).toBeGreaterThan(0);
+    expect(summary!.hasPoster).toBe(false);
+  });
+
+  it("keeps a poster once one has been generated", async () => {
+    const { saveProject, savePoster, loadPoster, listProjectSummaries } = await import("./opfs");
+    await saveProject(project([segment()]), false);
+    await savePoster("proj", new Blob(["jpeg-bytes"]));
+
+    expect(await loadPoster("proj")).toBeTruthy();
+    const [summary] = await listProjectSummaries();
+    expect(summary!.hasPoster).toBe(true);
+  });
+});
 
 describe("background image storage", () => {
   it("writes one file per distinct image, not one per segment", async () => {

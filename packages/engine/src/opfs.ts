@@ -414,6 +414,127 @@ export async function loadProject(
   }
 }
 
+/** What the library grid needs to draw a card, without opening the media. */
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  duration: number;
+  width: number;
+  height: number;
+  /** project.json's mtime — when the project was last edited. */
+  updatedAt: number;
+  /** Everything the project occupies on disk. */
+  bytes: number;
+  /** When it was last exported, or null if it never has been. */
+  exportedAt: number | null;
+  hasPoster: boolean;
+};
+
+const POSTER = "poster.jpg";
+const EXPORTED = "exported.json";
+
+/**
+ * Summaries for every stored project, newest first.
+ *
+ * Reads only the metadata files: opening the media of every project just to
+ * draw a grid would decode the user's whole library on page load.
+ */
+export async function listProjectSummaries(): Promise<ProjectSummary[]> {
+  if (!isSecureContext()) return [];
+  const root = await navigator.storage.getDirectory();
+  const out: ProjectSummary[] = [];
+
+  for await (const [name, handle] of (root as unknown as {
+    entries: () => AsyncIterable<[string, FileSystemHandle]>;
+  }).entries()) {
+    if (handle.kind !== "directory") continue;
+    const dir = handle as FileSystemDirectoryHandle;
+    try {
+      const jsonHandle = await dir.getFileHandle("project.json");
+      const jsonFile = await jsonHandle.getFile();
+      const project = migrateProject(JSON.parse(await jsonFile.text()));
+
+      // Size and poster presence come from walking the directory once.
+      let bytes = 0;
+      let hasPoster = false;
+      let exportedAt: number | null = null;
+      for await (const [fileName, fh] of (dir as unknown as {
+        entries: () => AsyncIterable<[string, FileSystemHandle]>;
+      }).entries()) {
+        if (fh.kind !== "file") continue;
+        if (fileName === POSTER) hasPoster = true;
+        try {
+          const f = await (fh as FileSystemFileHandle).getFile();
+          bytes += f.size;
+          if (fileName === EXPORTED) {
+            const parsed = JSON.parse(await f.text()) as { at?: unknown };
+            if (typeof parsed.at === "number") exportedAt = parsed.at;
+          }
+        } catch {
+          /* unreadable entry contributes nothing */
+        }
+      }
+
+      out.push({
+        id: name,
+        name: project.name && project.name.trim() ? project.name : "Untitled clip",
+        duration: project.media.duration,
+        width: project.media.width,
+        height: project.media.height,
+        updatedAt: jsonFile.lastModified,
+        bytes,
+        exportedAt,
+        hasPoster,
+      });
+    } catch {
+      /* skip corrupt or half-written directories */
+    }
+  }
+
+  return out.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** Cache a poster frame so the library does not re-decode video every visit. */
+export async function savePoster(id: string, poster: Blob): Promise<void> {
+  if (!isSecureContext()) return;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(id, { create: true });
+    const handle = await dir.getFileHandle(POSTER, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(poster);
+    await writable.close();
+  } catch {
+    /* a missing poster just means the card regenerates it next time */
+  }
+}
+
+export async function loadPoster(id: string): Promise<Blob | null> {
+  if (!isSecureContext()) return null;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(id);
+    return await (await dir.getFileHandle(POSTER)).getFile();
+  } catch {
+    return null;
+  }
+}
+
+/** Record that a project has been exported, so drafts can be told apart. */
+export async function markExported(id: string): Promise<void> {
+  if (!isSecureContext()) return;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(id, { create: true });
+    const handle = await dir.getFileHandle(EXPORTED, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify({ at: Date.now() }));
+    await writable.close();
+  } catch {
+    /* the marker is a nicety; failing to write it must not fail an export */
+  }
+}
+
 export async function listProjects(): Promise<
   { id: string; name: string }[]
 > {

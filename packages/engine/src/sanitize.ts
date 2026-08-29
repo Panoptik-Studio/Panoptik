@@ -308,6 +308,9 @@ export function mergeSavedProject(
   return {
     ...fresh,
     id: typeof saved.id === "string" ? saved.id.slice(0, 100) : fresh.id,
+    // Shown as the card title in the library, so it is length-capped like any
+    // other stored string.
+    name: typeof saved.name === "string" ? saved.name.slice(0, 120) : fresh.name,
     media: {
       ...fresh.media,
       width: num(media.width, fresh.media.width, 1, 100_000),

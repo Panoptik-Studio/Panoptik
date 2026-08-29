@@ -67,6 +67,14 @@ export function useVideoExport() {
           console.warn(`[Export] requested ${opts.format} but delivered ${actualFormat} (aac not encodable, switched for maximal native compatibility)`);
         }
         setResult({ url, size: blob.size, format: actualFormat });
+        // Record the export so the library can tell a finished clip from a
+        // draft. Best-effort: a failed marker must never fail the export.
+        try {
+          const { markExported } = await import("@panoptik/engine");
+          await markExported(project.id);
+        } catch {
+          /* the card just keeps showing as a draft */
+        }
         if (download) {
           const a = document.createElement("a");
           a.href = url;

@@ -83,6 +83,8 @@ export type Segment = {
 
 export type Project = {
   id: string;
+  /** User-facing title, shown in the library. Absent until named. */
+  name?: string;
   media: Media;
   audioSrc?: string | null;
   segments: Segment[];

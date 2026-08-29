@@ -56,5 +56,16 @@ export { segmentDuration, projectDuration, resolveSegment, sourceToTimeline } fr
 export { startRecording, openCameraTrack, openMicrophoneTrack } from "./record";
 export type { RecordingHandles } from "./record";
 export { setFacecamBlob, setAudioBlob } from "./decode";
-export { saveProject, loadProject, loadProjectRecord, listProjects, deleteProject } from "./opfs";
+export {
+  saveProject,
+  loadProject,
+  loadProjectRecord,
+  listProjects,
+  listProjectSummaries,
+  deleteProject,
+  savePoster,
+  loadPoster,
+  markExported,
+} from "./opfs";
+export type { ProjectSummary } from "./opfs";
 // ── #endregion ──
