@@ -68,34 +68,34 @@ Changes:
 2. Extract the "open a clip from blob + url" body of `loadClip` into
    `openMedia(url: string): Promise<{ duration, width, height }>`, called by
    `loadClip` and by the swap path.
-3. `prepareFrame/getAudioBuffer/...` entry points get a media-resolution
-   wrapper:
-   - resolve the segment at `t` via `resolveSegment`
-   - `mediaId = segment.mediaId ?? FIRST_MEDIA_ID`
-   - if `mediaId !== activeMediaId` → `await swapToMedia(project, mediaId)`:
-     `teardown()`, `openMedia(media.src)` (a blob URL already minted at
-     import/restore)
-   - for the facecam: same keying rule — when the **segment's** `facecam.src`
-     differs from the loaded facecam, `setFacecamBlob(src)` swap. Export already
-     does per-segment facecam swaps (`encode.ts:387`); this makes preview match.
-   - audio sink: reopen from the same clip (its audio track), so both preview
-     audio and `getAudioBuffer` serve the active clip.
-4. Prefetch: in `prepareAllFrames`, if the upcoming boundary within 2s has a
-   different `mediaId` and that media is not loaded, warm-open it **in
-   parallel** without tearing down the active pipeline. On swap, keep open the
-   prefetched pipeline (no double open).
-5. Export (`encode.ts` already resolves `mediaForSegment` for sizing): the
-   per-frame `prepareFrame` swap logic applies the same way — boundary swaps
-   happen once per group of adjacent same-media segments. Verified path: keep
-   `__isExporting` context; do NOT run prefetch in export.
-6. `MediaEngine` interface: add `resolveMediaSwap` nothing public — swaps stay
-   internal to prepare calls. `restoreProject` stays as-is (mints URLs; decode
-   opens lazily).
+3. The caller drives the swap — `prepareFrame(t)` receives a **source** time
+   for the active clip and has no `Project` context, so a new exported
+   function carries the state:
+   ```ts
+   export async function activateMedia(
+     mediaId: string,        // FIRST_MEDIA_ID for single-clip projects
+     src: string | null,     // blob URL of the clip to make active
+   ): Promise<void>
+   ```
+   `activateMedia` is a no-op when `mediaId === activeMediaId`; otherwise it
+   tears down (`teardown()`) and re-opens via `openMedia(src)`, and resets
+   `activeMediaId`. The facecam swap mirrors it: activate keyed on the
+   **segment's** `facecam.src` (two segments can share a clip with different
+   takes).
+   - `loadClip` keeps its behavior — sets `activeMediaId = FIRST_MEDIA_ID`.
+   - `loadRecording`/`restoreProject` set it too (single active clip on open).
+4. `MediaEngine` interface: add `activateMedia` so `real-engine.ts` forwards it.
+5. Prefetch: in `PreviewCanvas`'s loop (it has the `Project` and the active
+   segment) — when the playhead is within 2s of a boundary with a different
+   `mediaId`, call `activateMedia` for that media *and* warm its frames via a
+   parallel `prepareFrame` — see "hot paths" below. Export does **no**
+   prefetch; its per-segment loop calls `activateMedia(mediaId, media.src)`
+   once per boundary (adjacent same-media segments group into one swap).
 
 Tests (`decode.test.ts` additions):
 - two clips swapped at segment boundary: prepareFrame on seg A → seg B →
   seg A; the correct surfaces are presented (mock Inputs, count open/close).
-- prefetch warms next media and swap reuses it.
+- activateMedia is idempotent for the same id (no teardown).
 - `loadClip` still tears down + fresh project (existing tests keep passing).
 
 ### B. Store — append actions (`apps/web/src/stores/projectStore.ts`)
@@ -107,9 +107,11 @@ Tests (`decode.test.ts` additions):
 2. `appendRecordedProject(recorded: Project)`
    - for each `recorded.media[i]` push to `media`, for each segment push to
      `segments` — segment `mediaId` already points at the corresponding media
-     id; facecam `src` URL and `audioSrc` ride along as-is.
+     id; facecam `src` URL and `audioSrc` ride along as-is. Ensure the recorded
+     project's media ids are unique against the current project (rename via
+     `crypto.randomUUID()` if a collision occurs).
    - history push.
-3. Guard: no-op when `exportProgress !== null`.
+3. Guard: both no-op when `exportProgress !== null` or no loaded project.
 
 Tests (`projectStore.test.ts`):
 - `appendClip` adds media + one segment, undo removes, redo restores.
@@ -142,10 +144,21 @@ by store-level append test + manual).
 ### D. Preview — follow active segment
 
 1. `PreviewCanvas.tsx`
+   - rAF loop: `resolveActive` already yields the active segment; before
+     `prepareAllFrames`, call `await engine.activateMedia(active.mediaId,
+     mediaForSegment(project, seg).src)` (idempotent per clip).
+   - **Facecam keying**: when the active segment's `facecam.src` differs from
+     the facecam currently loaded, hit `engine.setFacecamBlob` with the segment
+     src — same rule export uses (`encode.ts:387`).
    - canvas size effect: `mediaForSegment(project, activeSegment)` instead of
      `media[0]` (fall back to `primaryMedia(project)`).
    - clip audio `<audio>` element binds to the active segment's media src so
-     sound follows the segment being previewed.
+     sound follows the segment being previewed (reuse existing
+     `screenSrc`-per-frame logic; swap to `mediaForSegment`-resolved src).
+   - **Prefetch**: within 2s of a boundary whose next segment has a different
+     `mediaId`, warm `activateMedia(nextMediaId, nextSrc)` + one
+     `prepareFrame` at the boundary start time; guard so it never runs twice
+     for the same boundary and never fights export (`__isExporting`).
 2. `useTimelineThumbnails.ts`
    - signature changes to key by media id: `Map<mediaId, cache>`. Timeline
      uses `cache = caches.get(seg.mediaId)` per filmstrip segment.
@@ -154,23 +167,50 @@ by store-level append test + manual).
    thumbnails needs the per-media cache. `useTimelineThumbnails` currently
    takes `project.media[0].src` — change to `(project)` with per-media caches.
 
+Export swap: `encode.ts`'s frame loop calls `activateMedia(seg.mediaId,
+mediaForSegment(project, seg).src)` at each segment boundary so frames come
+from the right clip (no prefetch there).
+
 ### E. Persistence
 
-No engine persistence changes: `opfs.ts` already writes/reads
-`media-<id>.bin` and iterates all media on save and restore. Verify:
-`saveProject` writes every media entry; `loadProjectRecord` mints URLs for all;
-`restoreProject` decodes the active one lazily.
+`saveProject` already iterates every media entry and writes `media-<id>.bin`
+(`opfs.ts:183-186`); `mediaFileName` is correct. But restore is single-clip
+today and needs work:
+
+- `loadProjectRecord` (`opfs.ts:299`) reads only `clip.webm` — it returns one
+  `media: Blob`. Change to `mediaFiles: (Blob | null)[]` aligned with
+  `project.media` order (`clip.webm` for index 0 has the historic fallback).
+- `real-engine.restoreProject` (`real-engine.ts:60-104`) demuxes via
+  `loadRecording(saved.media)`, which produces a 1-clip `fresh` project;
+  `mergeSavedProject` then maps `fresh.media` — so clips 2+ would vanish.
+  Change: keep the demux of media[0] (primes the pipeline + facecam/audio),
+  then mint blob URLs for every other `mediaFiles[i]` and extend
+  `fresh = { ...fresh, media: [fresh.media[0], ...mintedAdditional] }` before
+  the merge. `mergeSavedProject` already handles multi-media and per-segment
+  `mediaId` (`sanitize.ts:286-335`).
+- Decode opens additional media lazily by its minted src when the app activates
+  a segment from it — no restore-time decode of every clip.
+
+Verify with manual test: save project with 2 clips, reload, both clips play.
 
 ## Hot paths and risks
 
-- `prepareFrame` gains a `resolveSegment` + `mediaId` branch per call (~µs).
-- Prefetch must not tear down the active pipeline — only parallel warm; the
-  swap path itself is the only teardown.
-- Export must not prefetch (steady-state memory); swaps only at boundaries.
-- Double-facecam-URL regressions: facecam key must be the segment src, not the
-  media id (two segments can share a clip but have different takes).
+- `prepareFrame(t)` grabs a `const mediaId = activeMediaId` before starting the
+  pump; a swap in-flight changes the pipeline underneath — the pump must abort
+  and re-run after activation (documented: activation is `await`ed by the
+  caller before `prepareFrame`).
+- Prefetch only warms the *next* media pipeline; the active one is never torn
+  down concurrently. Guard: keep a `prefetchBoundaryKey` and a flag so the same
+  boundary cannot warm twice.
+- Facecam swap must be keyed on segment `facecam.src`, never on media id
+  (two segments can share a clip but use different takes).
+- Export: swaps once per media boundary; no prefetch. `__isExporting` remains
+  the gate for both preview pause and prefetch suppression.
 - Old projects: v1.2/v1.3 migrations put `mediaId` in place, so swap path
   always resolves; guard `mediaId` undefined → `FIRST_MEDIA_ID`.
+- Recorded take id collisions: `loadRecording` mints fresh ids per take, but
+  re-append after undo could collide — `appendRecordedProject` renames on
+  collision.
 
 ## Verification
 
