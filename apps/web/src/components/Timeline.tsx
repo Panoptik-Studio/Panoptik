@@ -318,6 +318,29 @@ export function Timeline() {
         ctx.fillRect(x0, VIDEO_TRACK_Y, segW, VIDEO_TRACK_HEIGHT);
       }
 
+      // Chapter name (C2), drawn over the thumbnails with a scrim so it stays
+      // readable on any frame. Skipped when the clip is too narrow to say
+      // anything useful.
+      if (seg.name && segW >= 56) {
+        const padX = 5;
+        ctx.font = "500 10px Poppins, system-ui, sans-serif";
+        const maxTextW = segW - padX * 2 - 4;
+        let label = seg.name;
+        if (ctx.measureText(label).width > maxTextW) {
+          while (label.length > 1 && ctx.measureText(`${label}…`).width > maxTextW) {
+            label = label.slice(0, -1);
+          }
+          label = `${label}…`;
+        }
+        const textW = ctx.measureText(label).width;
+        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+        drawRoundRect(ctx, x0 + padX - 3, VIDEO_TRACK_Y + 3, textW + 8, 14, 3);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, x0 + padX + 1, VIDEO_TRACK_Y + 10.5);
+      }
+
       ctx.restore();
 
       // Outer segment stroke

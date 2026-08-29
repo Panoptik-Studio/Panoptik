@@ -12,6 +12,8 @@ import { extractMono16k } from "@/lib/audio16k";
 import { postProcessCaptions } from "@/lib/captionChunker";
 
 export function CaptionsPanel() {
+  const autoChapters = useProjectStore((st) => st.autoChapters);
+  const [chapterNote, setChapterNote] = useState<string | null>(null);
   const project = useProjectStore((s) => s.project);
   const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
   const stageCaptions = useProjectStore((s) => s.stageCaptions);
@@ -125,6 +127,25 @@ export function CaptionsPanel() {
             Clear
           </button>
         )}
+      </div>
+
+      {/* Chapters (C2) — names come from the captions already transcribed. */}
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          onClick={() => {
+            const named = autoChapters();
+            setChapterNote(
+              named > 0
+                ? `Named ${named} clip${named === 1 ? "" : "s"}.`
+                : "No captions to name clips from yet.",
+            );
+          }}
+          className="pk-btn pk-btn-ghost pk-btn-sm"
+          title="Name each clip from where its speech starts"
+        >
+          Auto-chapters
+        </button>
+        {chapterNote && <span className="pk-help">{chapterNote}</span>}
       </div>
 
       {error && <p className="mt-2 rounded-md border bg-[#f7d4d6] px-2.5 py-1.5 text-xs" style={{ borderColor: "#ee0000", color: "#c50000" }}>{error}</p>}

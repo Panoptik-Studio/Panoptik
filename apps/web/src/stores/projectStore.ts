@@ -6,7 +6,7 @@
 "use client";
 
 import { create } from "zustand";
-import { projectDuration, resolveSegment, segmentDuration } from "@panoptik/engine";
+import { projectDuration, resolveSegment, segmentDuration , groupCaptionsIntoChapters } from "@panoptik/engine";
 import {
   migrateProject,
   type Project,
@@ -158,6 +158,13 @@ interface ProjectStore {
   selectAllSegments: () => void;
   /** Non-destructively divide the segment under timelineT into two. */
   splitAt: (timelineT: number) => void;
+  /** Name a single clip, or clear its name with "". */
+  setSegmentName: (segmentId: string, name: string) => void;
+  /**
+   * Name every clip that has captions, from where its speech starts (C2).
+   * Returns how many were named so the caller can report it.
+   */
+  autoChapters: () => number;
   /** Remove a segment from the timeline (when >1 segment exists). */
   deleteSegment: (id: string) => void;
   updateSegment: (id: string, updates: Partial<Segment>) => void;
@@ -360,6 +367,41 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       selectedSegmentIds: allIds,
       selectedSegmentId: allIds[0] ?? null,
     });
+  },
+
+  setSegmentName: (segmentId, name) => {
+    const state = get();
+    if (!state.project) return;
+    const trimmed = name.trim().slice(0, 120);
+    const project = {
+      ...state.project,
+      segments: state.project.segments.map((seg) =>
+        seg.id === segmentId ? { ...seg, name: trimmed || undefined } : seg,
+      ),
+    };
+    pushHistoryAndSet(project, state, set);
+  },
+
+  autoChapters: () => {
+    const state = get();
+    if (!state.project) return 0;
+
+    let named = 0;
+    const segments = state.project.segments.map((seg) => {
+      // Each clip is named from its own speech. Chapter grouping runs per
+      // segment because a segment is already the unit a name attaches to —
+      // splitting on the gaps inside one would need a timeline edit, which
+      // naming must not do on its own.
+      const chapters = groupCaptionsIntoChapters(seg.captions);
+      const title = chapters[0]?.title;
+      if (!title) return seg;
+      named++;
+      return { ...seg, name: title };
+    });
+
+    if (named === 0) return 0;
+    pushHistoryAndSet({ ...state.project, segments }, state, set);
+    return named;
   },
 
   splitAt: (timelineT) => {
