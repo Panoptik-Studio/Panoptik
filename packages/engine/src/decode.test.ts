@@ -183,6 +183,51 @@ describe("audio routing", () => {
   });
 });
 
+describe("activateMedia (multiclip swap)", () => {
+  // Node cannot fetch blob: URLs — stub fetch to resolve the registered blobs.
+  const blobUrls = new Map<string, Blob>();
+  vi.stubGlobal("fetch", async (u: string) => ({ blob: async () => blobUrls.get(u) }));
+
+  const blobUrl = (blob: Blob) => {
+    const u = URL.createObjectURL(blob);
+    blobUrls.set(u, blob);
+    return u;
+  };
+
+  it("opens a clip and swaps when the id changes", async () => {
+    const mod = await loadFresh();
+    const fileA = new File([new Uint8Array(2048)], "a.mp4", { type: "video/mp4" });
+    await mod.loadClip(fileA);
+    expect(mod.getActiveMediaId()).toBe("m1");
+
+    // clip B: activate by blob URL
+    const fileB = new File([new Uint8Array(2048)], "b.mp4", { type: "video/mp4" });
+    await mod.activateMedia("m2", blobUrl(fileB));
+    expect(mod.getActiveMediaId()).toBe("m2");
+    await mod.prepareFrame(1.5);
+    expect(mod.currentFrame()).not.toBeNull();
+  });
+
+  it("is idempotent for the same id — no teardown", async () => {
+    const mod = await loadFresh();
+    const file = new File([new Uint8Array(2048)], "a.mp4", { type: "video/mp4" });
+    await mod.loadClip(file);
+    await mod.activateMedia("m1", null);
+    expect(mod.getActiveMediaId()).toBe("m1");
+  });
+
+  it("swaps back to the first clip after activating a second", async () => {
+    const mod = await loadFresh();
+    await mod.loadClip(new File([new Uint8Array(2048)], "a.mp4", { type: "video/mp4" }));
+    await mod.activateMedia("m2", blobUrl(new File([new Uint8Array(2048)], "b.mp4", { type: "video/mp4" })));
+    expect(mod.getActiveMediaId()).toBe("m2");
+    await mod.activateMedia("m1", blobUrl(new File([new Uint8Array(2048)], "a.mp4", { type: "video/mp4" })));
+    expect(mod.getActiveMediaId()).toBe("m1");
+    await mod.prepareFrame(1);
+    expect(mod.currentFrame()).not.toBeNull();
+  });
+});
+
 describe("variable-rate footage", () => {
   const file = () => new File([new Uint8Array(2048)], "screen.webm", { type: "video/webm" });
 

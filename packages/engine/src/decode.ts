@@ -30,6 +30,11 @@ let input: Input | null = null;
 let sink: CanvasSink | null = null;
 let duration = 0;
 let objectUrl: string | null = null;
+let activeMediaId: string | null = null;
+
+export function getActiveMediaId(): string | null {
+  return activeMediaId;
+}
 // Screen debug — enable via localStorage.setItem("panoptik:debugScreen","1")
 let screenDebugLastLog = 0;
 let screenDebugFrames = 0;
@@ -414,15 +419,51 @@ export async function setFacecamBlob(blob: Blob | null, knownUrl?: string | null
 
 export async function loadClip(file: File): Promise<Project> {
   await teardown();
+  activeMediaId = null;
 
   if (file.size < 1024) {
     throw new Error(`File too small (${file.size} bytes) — recording failed or was too short. Try recording for at least 2-3 seconds.`);
   }
 
+  await openMedia(file);
+
+  objectUrl = URL.createObjectURL(file);
+  activeMediaId = FIRST_MEDIA_ID;
+  return {
+    id: crypto.randomUUID(),
+    media: [{ id: FIRST_MEDIA_ID, src: objectUrl, duration, width: inputWidth, height: inputHeight }],
+    audioSrc: null,
+    segments: [{
+      id: crypto.randomUUID(),
+      mediaId: FIRST_MEDIA_ID,
+      srcStart: 0,
+      srcEnd: duration,
+      speed: 1,
+      stagePadding: 0,
+      aspectPreset: "source",
+      background: { kind: "solid", color: "#000000" },
+      facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+      zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
+      captions: [], stagedCaptions: [],
+    }],
+    clickLog: [],
+  };
+}
+
+/** Dimensions of the clip most recently opened by `openMedia`. */
+let inputWidth = 0;
+let inputHeight = 0;
+
+/**
+ * Open the decode pipeline for a Blob/File. Sets `input`, `sink`, `duration`,
+ * surface and audio sink. Minting/revoking URLs stays the caller's job — a
+ * swap must not revoke project-owned sources.
+ */
+async function openMedia(blob: Blob): Promise<void> {
   try {
-    input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) });
+    input = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
   } catch (e) {
-    throw new Error(`Input has an unsupported or unrecognizable format (type=${file.type || "unknown"}, size=${file.size} bytes). Try a different browser (Chrome recommended) or import an MP4 file instead. Original: ${String(e)}`);
+    throw new Error(`Input has an unsupported or unrecognizable format (type=${blob.type || "unknown"}, size=${blob.size} bytes). Try a different browser (Chrome recommended) or import an MP4 file instead. Original: ${String(e)}`);
   }
   const track = await input.getPrimaryVideoTrack();
   if (!track) throw new Error("No video track found in file — the recording may be corrupted or too short.");
@@ -441,6 +482,8 @@ export async function loadClip(file: File): Promise<Project> {
     poolSize: POOL_SIZE,
   });
   duration = await track.computeDuration();
+  inputWidth = displayWidth;
+  inputHeight = displayHeight;
   createSurface(decodeW, decodeH);
 
   // ── Unified audio: same Input also yields audio track (single-pass demux) ──
@@ -454,27 +497,25 @@ export async function loadClip(file: File): Promise<Project> {
   } catch {
     setAudioSink(null);
   }
+}
 
-  objectUrl = URL.createObjectURL(file);
-  return {
-    id: crypto.randomUUID(),
-    media: [{ id: FIRST_MEDIA_ID, src: objectUrl, duration, width: displayWidth, height: displayHeight }],
-    audioSrc: null,
-    segments: [{
-      id: crypto.randomUUID(),
-      mediaId: FIRST_MEDIA_ID,
-      srcStart: 0,
-      srcEnd: duration,
-      speed: 1,
-      stagePadding: 0,
-      aspectPreset: "source",
-      background: { kind: "solid", color: "#000000" },
-      facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
-      zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
-      captions: [], stagedCaptions: [],
-    }],
-    clickLog: [],
-  };
+/**
+ * Swap the decode pipeline to a different clip. The caller (preview/export)
+ * drives this — `prepareFrame` only ever sees source time, so it cannot self-
+ * resolve which media a segment belongs to. Idempotent per media id.
+ *
+ * Project-owned blob URLs are NOT revoked here: `closePipeline` stops the
+ * decoder but leaves `objectUrl`/`liveObjectUrls` alone, so the old clip can
+ * be re-activated later (and still be exported/saved by its project src).
+ */
+export async function activateMedia(mediaId: string, src: string | null): Promise<void> {
+  if (mediaId === activeMediaId) return;
+  await closePipeline();
+  activeMediaId = null;
+  if (!src) return;
+  const blob = await (await fetch(src)).blob();
+  await openMedia(blob);
+  activeMediaId = mediaId;
 }
 
 /**
@@ -705,7 +746,15 @@ async function closeIterator(): Promise<void> {
   }
 }
 
-async function teardown(): Promise<void> {
+/**
+ * Stop the decode pipeline without revoking project-owned URLs.
+ *
+ * `teardown()` is the full teardown (this + URL revocation + audio/facecam
+ * reset) that fresh loads use. The swap path (activateMedia) calls only this —
+ * the old clip's blob URLs still belong to the project and must survive a swap
+ * so it can be re-activated, exported or saved later.
+ */
+async function closePipeline(): Promise<void> {
   sink = null;
   const inflight = pump;
   await closeIterator();
@@ -724,6 +773,18 @@ async function teardown(): Promise<void> {
   surfaceCtx = null;
   setCurrentFrame(null);
   setAudioSink(null);
+  if (input) {
+    try {
+      input.dispose();
+    } catch {
+      /* already disposed */
+    }
+    input = null;
+  }
+}
+
+async function teardown(): Promise<void> {
+  await closePipeline();
   await setFacecamBlob(null);
   await setAudioBlob(null);
   if (audioInput) {
@@ -746,14 +807,6 @@ async function teardown(): Promise<void> {
     }
   }
   liveObjectUrls.clear();
-  if (input) {
-    try {
-      input.dispose();
-    } catch {
-      /* already disposed */
-    }
-    input = null;
-  }
 }
 
 export function currentFrame(): CanvasImageSource | null {
