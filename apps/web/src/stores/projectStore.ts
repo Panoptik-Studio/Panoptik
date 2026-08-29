@@ -17,6 +17,7 @@ import {
   type Background,
   type ClickEvent,
   type AspectPreset,
+  type AudioTrack,
   type Facecam,
   type Media,
 } from "@panoptik/schema";
@@ -169,6 +170,11 @@ interface ProjectStore {
   deleteSegment: (id: string) => void;
   updateSegment: (id: string, updates: Partial<Segment>) => void;
   updateSelectedSegments: (updates: Partial<Segment>) => void;
+
+  // Audio tracks (music / voiceover) — wall-clock timeline assets
+  addAudioTrack: (track: AudioTrack) => void;
+  updateAudioTrack: (id: string, updates: Partial<AudioTrack>) => void;
+  removeAudioTrack: (id: string) => void;
 
   // Playback
   play: () => void;
@@ -533,6 +539,32 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         idSet.has(seg.id) ? { ...seg, ...applied } : seg,
       ),
     };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  // ── Audio tracks (Phase 2) ──
+
+  addAudioTrack: (track) => {
+    const s = get();
+    if (!s.project) return;
+    const project = { ...s.project, audioTracks: [...(s.project.audioTracks ?? []), track] };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  updateAudioTrack: (id, updates) => {
+    const s = get();
+    if (!s.project) return;
+    const project = {
+      ...s.project,
+      audioTracks: (s.project.audioTracks ?? []).map((t) => (t.id === id ? { ...t, ...updates } : t)),
+    };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  removeAudioTrack: (id) => {
+    const s = get();
+    if (!s.project) return;
+    const project = { ...s.project, audioTracks: (s.project.audioTracks ?? []).filter((t) => t.id !== id) };
     pushHistoryAndSet(project, s, set);
   },
 

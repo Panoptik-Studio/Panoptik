@@ -4,6 +4,7 @@ import { mockProject } from "../../../../packages/engine/src/test-fixtures";
 import { projectDuration, sourceToTimeline } from "@panoptik/engine";
 import {
   migrateProject,
+  type AudioTrack,
   type Project,
   type Segment,
 } from "@panoptik/schema";
@@ -610,5 +611,51 @@ describe("segment split + selection", () => {
     // Toggle off s2 from multi-selection
     useProjectStore.getState().selectSegment(s2!.id, true);
     expect(useProjectStore.getState().selectedSegmentIds).toEqual([s1!.id, s3!.id]);
+  });
+});
+
+const audioTrack = (id: string, partial: Partial<AudioTrack> = {}): AudioTrack => ({
+  id,
+  kind: "music",
+  src: "blob:x",
+  duration: 30,
+  volume: 1,
+  startT: 0,
+  ...partial,
+});
+
+describe("audio track actions", () => {
+  beforeEach(fresh);
+
+  it("addAudioTrack appends and pushes history", () => {
+    const before = useProjectStore.getState().historyIndex;
+    useProjectStore.getState().addAudioTrack(audioTrack("m1", { startT: 2 }));
+    const s = useProjectStore.getState();
+    expect(s.project!.audioTracks!.map((t) => t.id)).toEqual(["m1"]);
+    expect(s.historyIndex).toBe(before + 1);
+  });
+
+  it("updateAudioTrack patches one track and pushes history", () => {
+    useProjectStore.getState().addAudioTrack(audioTrack("m1"));
+    useProjectStore.getState().addAudioTrack(audioTrack("m2"));
+    useProjectStore.getState().updateAudioTrack("m2", { volume: 0.5, startT: 3 });
+    const s = useProjectStore.getState();
+    expect(s.project!.audioTracks!.find((t) => t.id === "m2")?.volume).toBe(0.5);
+    expect(s.project!.audioTracks!.find((t) => t.id === "m1")?.volume).toBe(1);
+  });
+
+  it("removeAudioTrack deletes and undo restores", () => {
+    useProjectStore.getState().addAudioTrack(audioTrack("m1"));
+    useProjectStore.getState().removeAudioTrack("m1");
+    expect(useProjectStore.getState().project!.audioTracks).toEqual([]);
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().project!.audioTracks!.map((t) => t.id)).toEqual(["m1"]);
+  });
+
+  it("actions are no-ops without a project", () => {
+    useProjectStore.getState().clearProject();
+    expect(() => useProjectStore.getState().addAudioTrack(audioTrack("x"))).not.toThrow();
+    expect(() => useProjectStore.getState().updateAudioTrack("x", { volume: 2 })).not.toThrow();
+    expect(() => useProjectStore.getState().removeAudioTrack("x")).not.toThrow();
   });
 });
