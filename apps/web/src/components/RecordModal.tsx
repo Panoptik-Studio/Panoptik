@@ -197,9 +197,17 @@ export function RecordModal() {
 
   const { setProject } = useProjectStore();
 
+  // When opened from the timeline's add-clip popover, the finished take appends
+  // to the current project instead of replacing it.
+  const [appendMode, setAppendMode] = useState(false);
+
   // Listen for open event
   useEffect(() => {
-    const handler = () => setIsOpen(true);
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ append?: boolean }>).detail;
+      setAppendMode(!!detail?.append);
+      setIsOpen(true);
+    };
     window.addEventListener("open-record-modal", handler);
     return () => window.removeEventListener("open-record-modal", handler);
   }, []);
@@ -514,7 +522,16 @@ export function RecordModal() {
           shape,
         };
       }
-      setProject(project);
+      if (appendMode && useProjectStore.getState().project) {
+        // Timeline "+" → append this take as a new clip instead of replacing.
+        useProjectStore.getState().appendRecordedProject(project);
+        // Make the engine's pipeline active for the recorded clip so the
+        // preview shows the correct first frame of the appended take.
+        await engine.activateMedia(project.media[0]!.id, project.media[0]!.src ?? null);
+      } else {
+        setProject(project);
+      }
+      setAppendMode(false);
       setIsOpen(false);
     } catch (err) {
       console.error("[Record] loadRecording failed", err);
@@ -533,7 +550,7 @@ export function RecordModal() {
       // would have stopped the device never runs.
       releaseCamera();
     }
-  }, [setProject, layout, shape, corner, camSize, closePipWindow, releaseCamera]);
+  }, [setProject, layout, shape, corner, camSize, closePipWindow, releaseCamera, appendMode]);
 
   const handleClose = useCallback(() => {
     if (state === "recording" || state === "countingDown") return;
