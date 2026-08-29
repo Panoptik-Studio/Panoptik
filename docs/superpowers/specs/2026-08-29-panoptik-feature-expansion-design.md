@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 **Status:** Approved (design reviewed section-by-section with owner)
-**Scope:** 9 features: A5 (export/preview improvements), B1 (music + ducking), B2 (segment fades), B3 (annotations), B5 (multi-clip), C1 (auto-polish), C2 (auto-chapters), C3 (voiceover), C4 (WebMCP restructuring tools)
+**Scope:** 10 features: A5 (export/preview improvements), B1 (music + ducking), B2 (segment fades), B3 (annotations), B5 (multi-clip), C1 (auto-polish), C2 (auto-chapters), C3 (voiceover), C4 (WebMCP restructuring tools), L1 (library "start new project")
 
 ---
 
@@ -17,6 +17,17 @@ The current data model (`schema v1.2`) has `Project.media: Media` (single clip) 
 1. **Multi-clip model:** one flat continuous timeline. Segments reference a `mediaId` into `Project.media: Media[]`. Clips can be interleaved and reordered.
 2. **Sequencing:** foundation first — Phase 1 data model (B5+C2) → Phase 2 audio (B1+C3) → Phase 3 visual (B2+B3+A5) → Phase 4 AI (C4+C1). No rework; later features build against the final model.
 3. **YAGNI cuts:** no crossfade transitions (timeline is strictly sequential), no music speed-stretch (music runs on wall-clock timeline time), no per-track EQ/compressor, no agent-supplied audio files.
+
+---
+
+## 0. Library "Start New Project" (L1)
+
+The library page (`/projects`, the birds-eye view of all clips) currently only opens existing projects — there is no way to begin a fresh one from there; "Open editor" restores whatever was last open.
+
+- A dashed **"+ New project"** card as the first tile in the grid (Figma/Canva pattern), sized like a `ProjectCard`; plus a **"New project"** button in the header next to "Open editor".
+- Behavior: clear the `LAST_PROJECT_KEY` localStorage pointer, `clearProject()` on the store, navigate to `/editor` — landing in the editor's fresh state (drop zone + Record entry), never silently restoring the last clip. This reuses the exact restore mechanism the cards use, keeping a single restore path.
+- The empty state's "Record or import" button stays as-is (same action).
+- No schema or engine changes — pure UI plus the two existing calls (`localStorage` + `clearProject()`).
 
 ---
 
@@ -175,7 +186,7 @@ Review panel = existing StagingPanel; Commit/Discard unchanged.
 
 | Phase | Features | Exit criteria |
 |---|---|---|
-| 1 | B5 + C2 | multi-clip import/reorder/export works end-to-end; chapters name segments; all tests green |
+| 1 | L1 + B5 + C2 | "New project" from library lands in a fresh editor; multi-clip import/reorder/export works end-to-end; chapters name segments; all tests green |
 | 2 | B1 + C3 | music + voiceover audible in preview & export; ducking verifiable; all tests green |
 | 3 | B2 + B3 + A5 | fades + annotations render in preview & export; export cancel works; quality toggle |
 | 4 | C4 + C1 | 4 tools tested through an agent session; auto-polish produces a committable staged diff |
