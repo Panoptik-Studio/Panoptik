@@ -42,11 +42,12 @@ function createMockFileSystem() {
 describe("opfs serialize/deserialize", () => {
   const mockProject: Project = {
     id: "test-123",
-    media: { src: "blob:http://localhost/test", duration: 10, width: 1920, height: 1080 },
+    media: [{ id: "m1", src: "blob:http://localhost/test", duration: 10, width: 1920, height: 1080 }],
     segments: [
       {
         id: "s1",
-        srcStart: 0,
+        mediaId: "m1",
+      srcStart: 0,
         srcEnd: 10,
         speed: 1,
         stagePadding: 0,
@@ -69,8 +70,8 @@ describe("opfs serialize/deserialize", () => {
     const deserialized = JSON.parse(serialized) as Project;
 
     expect(deserialized.id).toBe(mockProject.id);
-    expect(deserialized.media.duration).toBe(mockProject.media.duration);
-    expect(deserialized.media.width).toBe(mockProject.media.width);
+    expect(deserialized.media[0]!.duration).toBe(mockProject.media[0]!.duration);
+    expect(deserialized.media[0]!.width).toBe(mockProject.media[0]!.width);
     expect(deserialized.segments[0]!.background).toEqual(mockProject.segments[0]!.background);
     expect(deserialized.segments[0]!.aspectPreset).toBe(mockProject.segments[0]!.aspectPreset);
   });

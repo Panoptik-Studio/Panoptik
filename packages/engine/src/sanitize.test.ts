@@ -4,11 +4,12 @@ import type { Project } from "@panoptik/schema";
 
 const fresh = (): Project => ({
   id: "fresh-id",
-  media: { src: "blob:fresh-clip", duration: 10, width: 1920, height: 1080 },
+  media: [{ id: "m1", src: "blob:fresh-clip", duration: 10, width: 1920, height: 1080 }],
   audioSrc: "blob:fresh-audio",
   segments: [
     {
       id: "s1",
+      mediaId: "m1",
       srcStart: 0,
       srcEnd: 10,
       speed: 1,
@@ -30,14 +31,14 @@ const fresh = (): Project => ({
 describe("mergeSavedProject", () => {
   it("keeps every media source from the freshly opened media", () => {
     const out = mergeSavedProject(fresh(), {
-      media: { src: "blob:stale", duration: 99, width: 1, height: 1 },
+      media: [{ id: "m1", src: "blob:stale", duration: 99, width: 1, height: 1 }],
       audioSrc: "https://attacker.example/track.mp3",
       segments: [
         { facecam: { src: "https://attacker.example/cam.mp4", x: 0.1, y: 0.1, size: 0.3 } },
       ],
     } as unknown as Partial<Project>);
     // Stored URLs are dead on reload at best, and attacker-controlled at worst.
-    expect(out.media.src).toBe("blob:fresh-clip");
+    expect(out.media[0]!.src).toBe("blob:fresh-clip");
     expect(out.audioSrc).toBe("blob:fresh-audio");
     expect(out.segments[0]!.facecam.src).toBe("blob:fresh-cam");
     // Placement is still restored.
@@ -182,6 +183,7 @@ describe("mergeSavedProject", () => {
     const src = fresh();
     src.segments.push({
       id: "s2",
+      mediaId: "m1",
       srcStart: 10,
       srcEnd: 20,
       speed: 1,
@@ -217,7 +219,8 @@ describe("mergeSavedProject", () => {
       segments: [
         {
           id: "seg-a",
-          srcStart: 0,
+          mediaId: "m1",
+      srcStart: 0,
           srcEnd: 4,
           speed: 2,
           stagePadding: 12,
@@ -233,7 +236,8 @@ describe("mergeSavedProject", () => {
         },
         {
           id: "seg-b",
-          srcStart: 4,
+          mediaId: "m1",
+      srcStart: 4,
           srcEnd: 10,
           speed: 1,
           stagePadding: 0,
@@ -272,7 +276,7 @@ describe("mergeSavedProject", () => {
     expect(out.segments[0]!.zoomPoints.map((z) => z.t)).toEqual([2]);
     expect(out.segments[1]!.zoomPoints.map((z) => z.t)).toEqual([6]);
     // Sources come from the freshly re-opened media, never from storage.
-    expect(out.media.src).toBe("blob:fresh-clip");
+    expect(out.media[0]!.src).toBe("blob:fresh-clip");
     for (const s of out.segments) expect(s.facecam.src).toBe("blob:fresh-cam");
     expect(out.segments[0]!.facecam.x).toBeCloseTo(0.1);
   });
@@ -326,13 +330,15 @@ describe("mergeSavedProject", () => {
         segments: [
           {
             id: "s1",
-            srcStart: 0,
+            mediaId: "m1",
+      srcStart: 0,
             srcEnd: 5,
             facecam: { src: "blob:old-take", x: 0.8, y: 0.8, size: 0.2, shape: "square" },
           },
           {
             id: "s2",
-            srcStart: 5,
+            mediaId: "m1",
+      srcStart: 5,
             srcEnd: 10,
             facecam: {
               src: "blob:old-reshoot",

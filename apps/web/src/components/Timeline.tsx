@@ -192,8 +192,8 @@ export function Timeline() {
   } | null>(null);
 
   const { getThumbnail, version: thumbVersion } = useTimelineThumbnails(
-    project?.media?.src,
-    project?.media?.duration,
+    project?.media?.[0]?.src,
+    project?.media?.[0]?.duration,
   );
 
   // On-timeline duration across all segments.
@@ -1430,7 +1430,7 @@ export function Timeline() {
                 return null;
               }
 
-              const hFrac = (seg.facecam.size * (project?.media?.width ?? 1920) / (project?.media?.height ?? 1080)) / (16 / 9);
+              const hFrac = (seg.facecam.size * (project?.media?.[0]?.width ?? 1920) / (project?.media?.[0]?.height ?? 1080)) / (16 / 9);
               const { preset } = getClosestGridPreset(seg.facecam.x, seg.facecam.y, seg.facecam.size, hFrac);
               const positionText = preset.code;
               const shapeIcon = seg.facecam.shape === "circle" ? "●" : "■";

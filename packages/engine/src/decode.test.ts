@@ -60,9 +60,9 @@ describe("decode", () => {
     const { loadClip } = await loadFresh();
     const file = new File([new Uint8Array(2048)], "test.mp4", { type: "video/mp4" });
     const project = await loadClip(file);
-    expect(project.media.duration).toBe(10);
-    expect(project.media.width).toBe(1920);
-    expect(project.media.height).toBe(1080);
+    expect(project.media[0]!.duration).toBe(10);
+    expect(project.media[0]!.width).toBe(1920);
+    expect(project.media[0]!.height).toBe(1080);
     expect(project.segments).toHaveLength(1);
     expect(project.segments[0]!.srcStart).toBe(0);
     expect(project.segments[0]!.srcEnd).toBe(10);

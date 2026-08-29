@@ -11,8 +11,8 @@ type Ctx = CanvasRenderingContext2D;
 export const mockEngine = {
   loadClip: async (file: File): Promise<Project> => {
     const p = mockProject();
-    p.media = { src: URL.createObjectURL(file), duration: 15, width: 1920, height: 1080 };
-    p.segments[0]!.srcEnd = p.media.duration;
+    p.media = [{ id: "m1", src: URL.createObjectURL(file), duration: 15, width: 1920, height: 1080 }];
+    p.segments[0]!.srcEnd = p.media[0]!.duration;
     return p;
   },
   prepareFrame: async () => {},

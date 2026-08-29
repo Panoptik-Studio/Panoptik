@@ -81,7 +81,7 @@ describe("timeStretch (pitch-preserving WSOLA)", () => {
 
 describe("segment-windowed audio (sliceAndStretchAudio / concatAudio)", () => {
   const seg = (srcStart: number, srcEnd: number, speed: number): Segment => ({
-    id: "s", srcStart, srcEnd, speed, stagePadding: 0,
+    id: "s", mediaId: "m1", srcStart, srcEnd, speed, stagePadding: 0,
     aspectPreset: "source", background: { kind: "solid", color: "#000" },
     facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
     zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],

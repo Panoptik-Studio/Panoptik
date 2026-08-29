@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import type { Media } from "@panoptik/schema";
 import {
   cameraViewport,
   canvasToFrame,
@@ -106,13 +107,14 @@ describe("getProjectCameraTransform across multi-clip boundaries", () => {
   it("zoom in clip 1 continues holding and easing out smoothly into clip 2", () => {
     const proj: Project = {
       id: "p1",
-      media: { width: 1920, height: 1080, duration: 10, src: "blob:test" },
+      media: [{ id: "m1", width: 1920, height: 1080, duration: 10, src: "blob:test" }],
       audioSrc: null,
       clickLog: [],
       segments: [
         {
           id: "seg1",
-          srcStart: 0,
+          mediaId: "m1",
+      srcStart: 0,
           srcEnd: 5,
           speed: 1,
           aspectPreset: "source",
@@ -130,7 +132,8 @@ describe("getProjectCameraTransform across multi-clip boundaries", () => {
         },
         {
           id: "seg2",
-          srcStart: 5,
+          mediaId: "m1",
+      srcStart: 5,
           srcEnd: 10,
           speed: 1,
           aspectPreset: "source",
@@ -483,12 +486,17 @@ function makeProject(overrides: MakeProjectOverrides = {}): Project {
     clickLog = [],
   } = overrides;
 
-  const media = mediaOverride ?? {
-    src: clip?.src ?? "",
-    duration: clip?.duration ?? 15,
-    width: clip?.width ?? 1920,
-    height: clip?.height ?? 1080,
-  };
+  const media: Media[] = Array.isArray(mediaOverride)
+    ? mediaOverride
+    : [
+        {
+          id: "m1",
+          src: clip?.src ?? "",
+          duration: clip?.duration ?? 15,
+          width: clip?.width ?? 1920,
+          height: clip?.height ?? 1080,
+        },
+      ];
 
   return {
     id,
@@ -496,6 +504,7 @@ function makeProject(overrides: MakeProjectOverrides = {}): Project {
     segments: [
       {
         id: "s1",
+        mediaId: media[0]!.id,
         srcStart,
         srcEnd,
         speed,
@@ -597,12 +606,13 @@ describe("renderFrame segment resolution", () => {
 describe("resolveInterpolatedFacecam smooth size & position transitions", () => {
   const baseProject: Project = {
     id: "p-fc",
-    media: { src: "video.mp4", duration: 10, width: 1920, height: 1080 },
+    media: [{ id: "m1", src: "video.mp4", duration: 10, width: 1920, height: 1080 }],
     clickLog: [],
     segments: [
       {
         id: "seg-1",
-        srcStart: 0,
+        mediaId: "m1",
+      srcStart: 0,
         srcEnd: 5,
         speed: 1,
         stagePadding: 0,
@@ -618,7 +628,8 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
       },
       {
         id: "seg-2",
-        srcStart: 5,
+        mediaId: "m1",
+      srcStart: 5,
         srcEnd: 10,
         speed: 1,
         stagePadding: 0,

@@ -510,12 +510,12 @@ describe("segment split + selection", () => {
 
   it("undo and redo preserve the active session media and audio URLs even if history had older URLs", () => {
     const base = singleSegProject();
-    base.media.src = "blob:active-url";
+    base.media[0]!.src = "blob:active-url";
     base.audioSrc = "blob:active-audio";
 
     // Older history snapshot with obsolete URL
     const oldSnap = singleSegProject();
-    oldSnap.media.src = "blob:stale-url";
+    oldSnap.media[0]!.src = "blob:stale-url";
     oldSnap.audioSrc = "blob:stale-audio";
     oldSnap.segments[0]!.speed = 1.5;
 
@@ -525,14 +525,14 @@ describe("segment split + selection", () => {
     useProjectStore.getState().undo();
     const undone = useProjectStore.getState().project!;
     expect(undone.segments[0]!.speed).toBe(1.5);
-    expect(undone.media.src).toBe("blob:active-url");
+    expect(undone.media[0]!.src).toBe("blob:active-url");
     expect(undone.audioSrc).toBe("blob:active-audio");
 
     // Redo should also retain active media URLs
     useProjectStore.getState().redo();
     const redone = useProjectStore.getState().project!;
     expect(redone.segments[0]!.speed).toBe(1);
-    expect(redone.media.src).toBe("blob:active-url");
+    expect(redone.media[0]!.src).toBe("blob:active-url");
     expect(redone.audioSrc).toBe("blob:active-audio");
   });
 

@@ -13,6 +13,7 @@ import type {
   Segment,
   ZoomPoint,
 } from "@panoptik/schema";
+import { mediaForSegment, primaryMedia } from "@panoptik/schema";
 import { frameRect } from "./layout";
 import { resolveSegment, segmentDuration } from "./timeline";
 
@@ -229,7 +230,7 @@ export function renderFrame(
 ): void {
   const r = resolveSegment(project, timelineT);
   const seg = r?.segment ?? project.segments[project.segments.length - 1];
-  const srcT = r ? r.srcT : project.media.duration;
+  const srcT = r ? r.srcT : primaryMedia(project).duration;
   if (!seg) return;
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
@@ -247,7 +248,9 @@ export function renderFrame(
   drawBackground(ctx, seg.background, w, h);
 
   // ── Layer 2: Letterboxed frame with camera zoom (virtual camera, clamped, aspect-aware) ──
-  const media = project.media;
+  // The clip this segment cuts from — with several clips on the timeline the
+  // frame rect follows whichever one is on screen.
+  const media = mediaForSegment(project, seg);
   const paddingPx = (seg.stagePadding ?? 0) * (h / 1080) * 1.5;
   const rect = frameRect(w, h, media, seg.aspectPreset, paddingPx);
   if (currentFrame) {

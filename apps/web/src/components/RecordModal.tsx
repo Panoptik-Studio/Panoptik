@@ -9,6 +9,8 @@
  */
 "use client";
 
+import { primaryMedia } from "@panoptik/schema";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { PiPWindow } from "@/components/PiPWindow";
@@ -508,7 +510,7 @@ export function RecordModal() {
       if (seg) {
         seg.facecam = {
           ...seg.facecam,
-          ...facecamPlacement(corner, camSize, project.media.width / project.media.height),
+          ...facecamPlacement(corner, camSize, primaryMedia(project).width / primaryMedia(project).height),
           shape,
         };
       }

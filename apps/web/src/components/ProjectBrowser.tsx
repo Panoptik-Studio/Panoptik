@@ -7,6 +7,8 @@
  */
 "use client";
 
+import { primaryMedia } from "@panoptik/schema";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useProjectActions } from "@/lib/useProjectPersistence";
@@ -103,11 +105,11 @@ export function ProjectBrowser() {
                 {project.segments[0]?.facecam.src ? "Recording" : "Imported clip"}
               </span>
               <span className="pk-value shrink-0">
-                {project.media.width}×{project.media.height}
+                {primaryMedia(project).width}×{primaryMedia(project).height}
               </span>
             </div>
             <p className="pk-help mt-1" style={{ fontSize: 11 }}>
-              {project.media.duration.toFixed(1)}s · kept on this device · reopens automatically
+              {primaryMedia(project).duration.toFixed(1)}s · kept on this device · reopens automatically
             </p>
           </div>
 

@@ -39,7 +39,7 @@ function activeSourceWindow(): { lo: number; hi: number } {
   const seg = s.project?.segments.find(
     (x) => x.id === s.selectedSegmentId,
   );
-  const duration = s.project?.media.duration ?? 0;
+  const duration = s.project?.media[0]?.duration ?? 0;
   return seg ? { lo: seg.srcStart, hi: seg.srcEnd } : { lo: 0, hi: duration };
 }
 

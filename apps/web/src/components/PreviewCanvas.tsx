@@ -32,6 +32,7 @@ import {
   resolveSegment,
 } from "@panoptik/engine";
 import type { Facecam, Project, Segment, ZoomPoint } from "@panoptik/schema";
+import { mediaForSegment, primaryMedia } from "@panoptik/schema";
 
 /** Preview compositing cap — matches the decode cap in the engine. */
 const MAX_CANVAS_WIDTH = 1920;
@@ -54,7 +55,7 @@ function resolveActive(
   if (r) return { seg: r.segment, srcT: r.srcT };
   return {
     seg: project.segments[project.segments.length - 1]!,
-    srcT: project.media.duration,
+    srcT: primaryMedia(project).duration,
   };
 }
 
@@ -75,7 +76,9 @@ function canvasGeometry(
   const rect = frameRect(
     canvas.width,
     canvas.height,
-    project.media,
+    // The clip the active segment cuts from, so the frame follows whichever
+    // one is on screen.
+    mediaForSegment(project, seg),
     seg.aspectPreset,
     paddingPx,
   );
@@ -539,7 +542,7 @@ export function PreviewCanvas() {
       if (state.isPlaying) {
         const audio = audioRef.current;
         const fcAudio = facecamAudioRef.current;
-        const screenSrc = state.project.media.src;
+        const screenSrc = primaryMedia(state.project).src;
         const fcSrc = active.seg.facecam?.src;
 
         // Screen audio
@@ -638,7 +641,7 @@ export function PreviewCanvas() {
     const fcAudio = facecamAudioRef.current;
     if (!project) return;
     const active = resolveActive(project, currentTime);
-    const screenSrc = project.media.src;
+    const screenSrc = primaryMedia(project).src;
     const fcSrc = active.seg.facecam?.src;
 
     if (audio && screenSrc) {
@@ -668,7 +671,7 @@ export function PreviewCanvas() {
         fcAudio.pause();
       }
     }
-  }, [project?.media.src, currentTime, isPlaying]);
+  }, [project?.media[0]?.src, currentTime, isPlaying]);
 
   // Keep audio elements pitch-preserved
   useEffect(() => {
@@ -691,7 +694,7 @@ export function PreviewCanvas() {
     const fcAudio = facecamAudioRef.current;
     if (!project || isPlaying) return;
     const { seg, srcT } = resolveActive(project, currentTime);
-    const screenSrc = project.media.src;
+    const screenSrc = primaryMedia(project).src;
     const fcSrc = seg.facecam?.src;
 
     if (audio && screenSrc) {
@@ -726,7 +729,7 @@ export function PreviewCanvas() {
     const state = useProjectStore.getState();
     if (!state.project) return;
     const active = resolveActive(state.project, state.currentTime);
-    const screenSrc = state.project.media.src;
+    const screenSrc = primaryMedia(state.project).src;
     const fcSrc = active.seg.facecam?.src;
 
     if (audio && screenSrc) {
@@ -752,7 +755,7 @@ export function PreviewCanvas() {
       const st = useProjectStore.getState();
       if (!st.project || !st.isPlaying) return;
       const r = resolveActive(st.project, st.currentTime);
-      const curScreenSrc = st.project.media.src;
+      const curScreenSrc = primaryMedia(st.project).src;
       const curFcSrc = r.seg.facecam?.src;
 
       if (audio && curScreenSrc) {
@@ -1130,7 +1133,7 @@ export function PreviewCanvas() {
   useEffect(() => {
     if (!project) return;
     const size = outputSize(
-      project.media,
+      primaryMedia(project),
       activePreset,
       MAX_CANVAS_WIDTH,
     );
@@ -1138,7 +1141,7 @@ export function PreviewCanvas() {
       if (prev.w === size.width && prev.h === size.height) return prev;
       return { w: size.width, h: size.height };
     });
-  }, [project?.media.width, project?.media.height, activePreset]);
+  }, [project?.media[0]?.width, project?.media[0]?.height, activePreset]);
 
   // Redraw when canvas dimensions change
   useEffect(() => {

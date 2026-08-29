@@ -11,6 +11,7 @@
  */
 import { ALL_FORMATS, BlobSource, CanvasSink, Input, type WrappedCanvas } from "mediabunny";
 import type { Project } from "@panoptik/schema";
+import { FIRST_MEDIA_ID } from "@panoptik/schema";
 import { clearFacecamCache, getCurrentFrame, setCurrentFrame, setFacecamFrameSource } from "./render";
 import { setAudioBlobFallback, setAudioSink } from "./audio";
 
@@ -457,10 +458,11 @@ export async function loadClip(file: File): Promise<Project> {
   objectUrl = URL.createObjectURL(file);
   return {
     id: crypto.randomUUID(),
-    media: { src: objectUrl, duration, width: displayWidth, height: displayHeight },
+    media: [{ id: FIRST_MEDIA_ID, src: objectUrl, duration, width: displayWidth, height: displayHeight }],
     audioSrc: null,
     segments: [{
       id: crypto.randomUUID(),
+      mediaId: FIRST_MEDIA_ID,
       srcStart: 0,
       srcEnd: duration,
       speed: 1,

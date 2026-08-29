@@ -58,7 +58,7 @@ function mockOpfs() {
       getDirectoryHandle: async (name: string) => dirHandle(name),
       entries: async function* () {
         for (const name of dirs.keys()) {
-          yield [name, { kind: "directory" as const, ...dirHandle(name) }] as const;
+          yield [name, { ...dirHandle(name), kind: "directory" as const }] as const;
         }
       },
     },
@@ -67,7 +67,8 @@ function mockOpfs() {
 
 const segment = (over: Partial<Segment> = {}): Segment => ({
   id: "s",
-  srcStart: 0,
+  mediaId: "m1",
+      srcStart: 0,
   srcEnd: 10,
   speed: 1,
   stagePadding: 0,
@@ -85,7 +86,7 @@ const segment = (over: Partial<Segment> = {}): Segment => ({
 
 const project = (segments: Segment[]): Project => ({
   id: "proj",
-  media: { src: "blob:clip", duration: 10, width: 1920, height: 1080 },
+  media: [{ id: "m1", src: "blob:clip", duration: 10, width: 1920, height: 1080 }],
   segments,
   clickLog: [],
 });

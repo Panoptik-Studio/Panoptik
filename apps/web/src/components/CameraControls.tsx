@@ -9,6 +9,7 @@ import React, { useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { engine } from "@/lib/engineProvider";
 import type { Facecam } from "@panoptik/schema";
+import { primaryMedia } from "@panoptik/schema";
 
 const CAMERA_ASPECT = 16 / 9;
 
@@ -272,7 +273,7 @@ export function CameraControls() {
   const hasCameraTrack = !!seg.facecam.src;
 
   const camHeightFraction = (size: number) =>
-    size * (project.media.width / project.media.height);
+    size * (primaryMedia(project).width / primaryMedia(project).height);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

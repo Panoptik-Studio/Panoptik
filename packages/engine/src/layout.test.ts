@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { frameRect, outputSize } from "./layout";
 
 describe("frameRect", () => {
-  const media = (w: number, h: number) => ({ src: "", duration: 10, width: w, height: h });
+  const media = (w: number, h: number) => ({ id: "m1", src: "", duration: 10, width: w, height: h });
 
   it("16:9 media in 16:9 canvas fills it", () => {
     const r = frameRect(1920, 1080, media(1920, 1080), "16:9");
@@ -55,7 +55,7 @@ describe("outputSize", () => {
   const SCREEN_W = 1512;
   const SCREEN_H = 982;
 
-  const media = (w: number, h: number) => ({ src: "", duration: 10, width: w, height: h });
+  const media = (w: number, h: number) => ({ id: "m1", src: "", duration: 10, width: w, height: h });
 
   it("source keeps the media's shape, so frameRect fills the frame", () => {
     const { width, height } = outputSize(media(SCREEN_W, SCREEN_H), "source");

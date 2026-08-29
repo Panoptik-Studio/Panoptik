@@ -171,6 +171,7 @@ function restoreSegment(
   freshFacecamSrc: string | null,
   mediaDuration: number,
   backgroundImageSrc: string | null,
+  knownMediaIds: Set<string>,
 ): Segment | null {
   if (!saved || typeof saved !== "object") return null;
   const srcStart = num(saved.srcStart, fresh.srcStart, 0, mediaDuration);
@@ -180,6 +181,13 @@ function restoreSegment(
     {
       ...fresh,
       id: typeof saved.id === "string" ? saved.id.slice(0, 100) : fresh.id,
+      // Which clip this segment cuts from has to survive a reload, or a
+      // multi-clip project collapses onto whichever clip the template used.
+      // Only ids that name a real clip are accepted.
+      mediaId:
+        typeof saved.mediaId === "string" && knownMediaIds.has(saved.mediaId)
+          ? saved.mediaId
+          : fresh.mediaId,
       srcStart,
       srcEnd,
       facecam: { ...fresh.facecam, src: freshFacecamSrc },
@@ -205,6 +213,8 @@ function sanitizeSegment(
   const hi = base.srcEnd;
   return {
     ...base,
+    // Chapter/scene name (C2). Length-capped like every other stored string.
+    name: typeof saved?.name === "string" ? saved.name.slice(0, 120) : base.name,
     speed: speed(saved?.speed, base.speed),
     stagePadding: num(saved?.stagePadding, base.stagePadding, 0, 48),
     aspectPreset: aspectPreset(saved?.aspectPreset, base.aspectPreset),
@@ -271,8 +281,24 @@ export function mergeSavedProject(
     }
   }
 
-  const media = (saved.media ?? {}) as Partial<Media>;
-  const mediaDuration = fresh.media.duration;
+  // Per-clip merge. Dimensions are validated from storage; sources are always
+  // the freshly re-opened ones, same rule as every other media source.
+  const savedMedia = Array.isArray(saved.media) ? (saved.media as Partial<Media>[]) : [];
+  const mergedMedia: Media[] = fresh.media.map((m, i) => {
+    const stored = savedMedia.find((sm) => sm && sm.id === m.id) ?? savedMedia[i];
+    return {
+      ...m,
+      width: num(stored?.width, m.width, 1, 100_000),
+      height: num(stored?.height, m.height, 1, 100_000),
+    };
+  });
+  /** How far into a given clip a segment may reach. */
+  const durationOfMedia = (mediaId: unknown): number => {
+    const found = typeof mediaId === "string" ? mergedMedia.find((m) => m.id === mediaId) : undefined;
+    return (found ?? mergedMedia[0])?.duration ?? 0;
+  };
+  const mediaDuration = mergedMedia[0]?.duration ?? 0;
+  const knownMediaIds = new Set(mergedMedia.map((m) => m.id));
   const savedSegs = Array.isArray(saved.segments) ? saved.segments : [];
   const freshSeg = fresh.segments[0];
 
@@ -292,7 +318,10 @@ export function mergeSavedProject(
       .map((s, i) => {
         const segFcSrc = segmentFacecamSrcs ? segmentFacecamSrcs[i] ?? null : freshSeg.facecam.src;
         const bgUrl = bgUrls[i] ?? null;
-        return restoreSegment(s, freshSeg, segFcSrc, mediaDuration, bgUrl);
+        // Clamp against this segment's own clip, not the first one — a window
+        // valid in a long clip would otherwise survive on a short one.
+        const dur = durationOfMedia((s as Partial<Segment>)?.mediaId);
+        return restoreSegment(s, freshSeg, segFcSrc, dur, bgUrl, knownMediaIds);
       })
       .filter((s): s is Segment => s !== null);
     segments =
@@ -311,11 +340,7 @@ export function mergeSavedProject(
     // Shown as the card title in the library, so it is length-capped like any
     // other stored string.
     name: typeof saved.name === "string" ? saved.name.slice(0, 120) : fresh.name,
-    media: {
-      ...fresh.media,
-      width: num(media.width, fresh.media.width, 1, 100_000),
-      height: num(media.height, fresh.media.height, 1, 100_000),
-    },
+    media: mergedMedia,
     segments,
     clickLog: arr<unknown>(saved.clickLog, MAX_CLICKS)
       .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")

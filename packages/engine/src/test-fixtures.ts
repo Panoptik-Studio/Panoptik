@@ -6,11 +6,12 @@ import type { Project } from "@panoptik/schema";
 export function mockProject(): Project {
   return {
     id: "test",
-    media: { src: "", duration: 15, width: 1920, height: 1080 },
+    media: [{ id: "m1", src: "", duration: 15, width: 1920, height: 1080 }],
     audioSrc: null,
     segments: [
       {
         id: "s1",
+        mediaId: "m1",
         srcStart: 0,
         srcEnd: 15,
         speed: 1,

@@ -18,6 +18,7 @@ import {
   type ClickEvent,
   type AspectPreset,
   type Facecam,
+  type Media,
 } from "@panoptik/schema";
 
 /** Within this of the duration counts as "at the end" — the playhead lands on
@@ -47,6 +48,21 @@ function rewindIfEnded(s: { project: Project | null; currentTime: number }) {
  * Push a full-project history snapshot before committing a state change.
  * History holds whole `Project` copies, so undo/redo restore every field.
  */
+/**
+ * Re-point a history snapshot's clips at the object URLs that are live now.
+ *
+ * Snapshots are structured clones taken earlier in the session; their srcs can
+ * be stale, and a stale blob URL renders as nothing. Matching by media id keeps
+ * this correct once a project holds more than one clip — index alone would
+ * mis-assign after a reorder.
+ */
+function pinLiveMediaSrcs(snapshot: Project, live: Project): Media[] {
+  return snapshot.media.map((m, i) => {
+    const liveMedia = live.media.find((lm) => lm.id === m.id) ?? live.media[i];
+    return liveMedia ? { ...m, src: liveMedia.src } : m;
+  });
+}
+
 function pushHistoryAndSet(
   project: Project,
   state: ProjectStore,
@@ -248,7 +264,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setProject: (project, savedHistory, savedHistoryIndex) => {
     const p = migrateProject(project);
-    const validMediaSrc = p.media.src;
+    const validMediaSrc = p.media[0]?.src ?? "";
     const validAudioSrc = p.audioSrc;
     const validFacecamSrc = p.segments[0]?.facecam?.src ?? null;
 
@@ -258,10 +274,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         const migrated = migrateProject(snap);
         return {
           ...migrated,
-          media: {
-            ...migrated.media,
-            src: validMediaSrc,
-          },
+          // Same re-pinning as undo/redo. Spreading the media array into an
+          // object literal here produced {0: {...}, src} — shaped like neither
+          // a Media nor an array, and it only surfaced when something later
+          // called .map on it.
+          media: pinLiveMediaSrcs(migrated, p),
           audioSrc: validAudioSrc,
           segments: migrated.segments.map((seg) => ({
             ...seg,
@@ -850,12 +867,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           : [];
     const nextSelectedId = nextSelectedIds[0] ?? null;
 
-    const currentMediaSrc = state.project.media.src;
+    const liveProject = state.project;
     const currentAudioSrc = state.project.audioSrc;
     const currentFacecamSrc = state.project.segments[0]?.facecam?.src ?? null;
 
     const restoredProject = structuredClone(snap);
-    restoredProject.media.src = currentMediaSrc;
+    restoredProject.media = pinLiveMediaSrcs(restoredProject, liveProject);
     restoredProject.audioSrc = snap.audioSrc ?? currentAudioSrc;
     restoredProject.segments = restoredProject.segments.map((seg) => ({
       ...seg,
@@ -893,12 +910,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           : [];
     const nextSelectedId = nextSelectedIds[0] ?? null;
 
-    const currentMediaSrc = state.project.media.src;
+    const liveProject = state.project;
     const currentAudioSrc = state.project.audioSrc;
     const currentFacecamSrc = state.project.segments[0]?.facecam?.src ?? null;
 
     const restoredProject = structuredClone(snap);
-    restoredProject.media.src = currentMediaSrc;
+    restoredProject.media = pinLiveMediaSrcs(restoredProject, liveProject);
     restoredProject.audioSrc = snap.audioSrc ?? currentAudioSrc;
     restoredProject.segments = restoredProject.segments.map((seg) => ({
       ...seg,

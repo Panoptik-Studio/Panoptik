@@ -19,6 +19,7 @@ import {
 } from "mediabunny";
 import { registerAacEncoder } from "@mediabunny/aac-encoder";
 import type { ExportOpts, Project } from "@panoptik/schema";
+import { mediaForSegment, primaryMedia } from "@panoptik/schema";
 import { presetAspect } from "./layout";
 import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator } from "./decode";
 import { ensureBackgroundImages, renderFrame } from "./render";
@@ -84,7 +85,10 @@ function exportSize(
   const seg =
     project.segments.find((s) => s.id === selectedSegmentId) ??
     project.segments[0];
-  const aspect = presetAspect(seg?.aspectPreset ?? "source", project.media);
+  const aspect = presetAspect(
+    seg?.aspectPreset ?? "source",
+    seg ? mediaForSegment(project, seg) : primaryMedia(project),
+  );
   const height = RESOLUTION_HEIGHTS[resolution];
   const width = Math.round(height * aspect);
   return { width: width - (width % 2), height: height - (height % 2) };
@@ -240,7 +244,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           return null;
         };
 
-        const screenSrc = project.media.src;
+        const screenSrc = primaryMedia(project).src;
         const defaultScreenBuf = (await getBufferForSrc(screenSrc)) || audioBuffer;
 
         const parts: AudioBuffer[] = [];

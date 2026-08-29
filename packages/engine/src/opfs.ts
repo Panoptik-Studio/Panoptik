@@ -5,7 +5,7 @@
  * Degrades gracefully off secure context.
  */
 
-import { migrateProject, type Project } from "@panoptik/schema";
+import { migrateProject, primaryMedia, type Media, type Project } from "@panoptik/schema";
 
 function isSecureContext(): boolean {
   return (
@@ -177,11 +177,12 @@ export async function saveProject(
 
   if (!includeMedia) return;
 
-  // Save clip blob if it's a blob URL
-  if (project.media.src.startsWith("blob:")) {
-    if (includeMedia) {
-      await saveBlobFile("clip.webm", project.media.src, true);
-    }
+  // One file per clip, named by media id. The first clip keeps the historic
+  // "clip.webm" name so projects saved before multi-clip still load: renaming
+  // it would orphan every existing recording on the user's device.
+  for (const media of project.media) {
+    if (!media.src.startsWith("blob:")) continue;
+    await saveBlobFile(mediaFileName(project, media), media.src, true);
   }
 
   // Save audio blob if it's a blob URL
@@ -340,11 +341,23 @@ export async function loadProject(
 
     // Restore clip blob URL from OPFS
     try {
-      const clipFile = await projectDir.getFileHandle(
-        "clip.webm",
+      const media = await Promise.all(
+        project.media.map(async (m, i) => {
+          // Try this clip's own file, then the pre-multi-clip name for the
+          // first one, so older projects still open.
+          const names = i === 0 ? [mediaFileName(project, m), "clip.webm"] : [mediaFileName(project, m)];
+          for (const name of names) {
+            try {
+              const blob = await (await projectDir.getFileHandle(name)).getFile();
+              return { ...m, src: mintUrl(blob) };
+            } catch {
+              /* try the next name */
+            }
+          }
+          return m; // nothing stored — keep whatever src it had
+        }),
       );
-      const clipBlob = await clipFile.getFile();
-      project = { ...project, media: { ...project.media, src: mintUrl(clipBlob) } };
+      project = { ...project, media };
     } catch {
       // clip not saved — keep existing src
     }
@@ -430,6 +443,21 @@ export type ProjectSummary = {
   hasPoster: boolean;
 };
 
+/**
+ * On-disk name for a clip's media file.
+ *
+ * The first clip keeps "clip.webm" for backwards compatibility; later clips are
+ * keyed by media id.
+ */
+function mediaFileName(project: Project, media: Media): string {
+  return project.media[0]?.id === media.id ? "clip.webm" : `media-${media.id}.bin`;
+}
+
+/** Total footage across every clip, for the library card. */
+function totalMediaDuration(project: Project): number {
+  return project.media.reduce((sum, m) => sum + (Number.isFinite(m.duration) ? m.duration : 0), 0);
+}
+
 const POSTER = "poster.jpg";
 const EXPORTED = "exported.json";
 
@@ -478,9 +506,9 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
       out.push({
         id: name,
         name: project.name && project.name.trim() ? project.name : "Untitled clip",
-        duration: project.media.duration,
-        width: project.media.width,
-        height: project.media.height,
+        duration: totalMediaDuration(project),
+        width: primaryMedia(project).width,
+        height: primaryMedia(project).height,
         updatedAt: jsonFile.lastModified,
         bytes,
         exportedAt,
@@ -557,7 +585,7 @@ export async function listProjects(): Promise<
         );
         projects.push({
           id: name,
-          name: `Clip ${project.media.duration.toFixed(0)}s`,
+          name: `Clip ${primaryMedia(project).duration.toFixed(0)}s`,
         });
       } catch {
         // skip corrupt/empty dirs

@@ -61,10 +61,27 @@ export type ClickEvent = {
 /** "source" keeps the clip's own shape, so nothing is letterboxed. */
 export type AspectPreset = "source" | "16:9" | "9:16" | "1:1" | "4:3";
 
-export type Media = { src: string; duration: number; width: number; height: number };
+export type Media = {
+  /**
+   * Stable identity, referenced by Segment.mediaId.
+   *
+   * Assigned deterministically on migration ("m1", "m2", …) rather than
+   * randomly: a project is migrated on every load, and fresh ids each time
+   * would break the segments that point at them.
+   */
+  id: string;
+  src: string;
+  duration: number;
+  width: number;
+  height: number;
+};
 
 export type Segment = {
   id: string;
+  /** Which clip in Project.media this segment cuts from. */
+  mediaId: string;
+  /** Chapter/scene name, shown on the timeline. */
+  name?: string;
   srcStart: number;
   srcEnd: number;
   speed: number;
@@ -85,19 +102,67 @@ export type Project = {
   id: string;
   /** User-facing title, shown in the library. Absent until named. */
   name?: string;
-  media: Media;
+  /**
+   * Every clip in the project, in no particular order — the timeline order is
+   * the segment order, not this one.
+   */
+  media: Media[];
   audioSrc?: string | null;
   segments: Segment[];
   clickLog: ClickEvent[];
 };
 
+/** First media id. Deterministic so re-migrating the same file is a no-op. */
+export const FIRST_MEDIA_ID = "m1";
+
+/** Look a clip up by id. */
+export function mediaById(project: Project, id: string): Media | undefined {
+  return project.media.find((m) => m.id === id);
+}
+
+/**
+ * The clip a segment cuts from.
+ *
+ * Falls back to the first clip rather than throwing: a segment pointing at a
+ * removed media should degrade to something renderable, not take down the
+ * editor. Callers that care can check mediaById directly.
+ */
+export function mediaForSegment(project: Project, segment: Segment): Media {
+  return mediaById(project, segment.mediaId) ?? project.media[0]!;
+}
+
+/** The project's first clip — the only one until multi-clip import lands. */
+export function primaryMedia(project: Project): Media {
+  return project.media[0]!;
+}
+
 export function migrateProject(raw: unknown): Project {
   const r = (raw ?? {}) as Record<string, unknown>;
-  if (Array.isArray(r.segments) && r.media && typeof r.media === "object") {
-    return raw as Project; // already v1.2
+
+  // v1.3: media is an array. Checked before the v1.2 test below, because an
+  // array is also `typeof "object"` and would otherwise pass as v1.2.
+  if (Array.isArray(r.media) && Array.isArray(r.segments)) {
+    return raw as Project;
   }
+
+  // v1.2: one media object plus segments. Wrap the media in an array, give it
+  // an id, and point every segment at it.
+  if (Array.isArray(r.segments) && r.media && typeof r.media === "object") {
+    const v12 = raw as Omit<Project, "media"> & { media: Omit<Media, "id"> & { id?: string } };
+    const only: Media = { ...v12.media, id: v12.media.id ?? FIRST_MEDIA_ID };
+    return {
+      ...v12,
+      media: [only],
+      segments: v12.segments.map((seg) => ({
+        ...seg,
+        mediaId: (seg as Segment).mediaId ?? only.id,
+      })),
+    };
+  }
+  // v1.1: a single top-level clip with the edits alongside it.
   const clip = (r.clip ?? {}) as Record<string, unknown>;
   const media: Media = {
+    id: FIRST_MEDIA_ID,
     src: String(clip.src ?? ""),
     duration: num(clip.duration, 0),
     width: num(clip.width, 1920),
@@ -107,6 +172,7 @@ export function migrateProject(raw: unknown): Project {
   const baseZoom = (r.zoomPoints ?? []) as ZoomPoint[];
   const seg: Segment = {
     id: "s1",
+    mediaId: media.id,
     srcStart: 0,
     srcEnd: media.duration,
     speed: num(r.playbackRate, 1, 0.25, 3),
@@ -131,7 +197,7 @@ export function migrateProject(raw: unknown): Project {
   };
   return {
     id: String(r.id ?? crypto.randomUUID()),
-    media,
+    media: [media],
     audioSrc: r.audioSrc ? String(r.audioSrc) : null,
     segments: [seg],
     clickLog: ((r.clickLog ?? []) as ClickEvent[]).map((e) => ({ ...e })),

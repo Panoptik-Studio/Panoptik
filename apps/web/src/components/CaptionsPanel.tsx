@@ -4,6 +4,8 @@
  */
 "use client";
 
+import { primaryMedia } from "@panoptik/schema";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { extractMono16k } from "@/lib/audio16k";
@@ -40,7 +42,7 @@ export function CaptionsPanel() {
         audioBuffer = await engine.getAudioBuffer(project);
       } catch {
         try {
-          const response = await fetch(project.media.src);
+          const response = await fetch(primaryMedia(project).src);
           const arrayBuf = await response.arrayBuffer();
           const ctx = new AudioContext();
           try {

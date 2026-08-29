@@ -25,7 +25,7 @@ const { __test } = await import("./encode");
 const proj = (width: number, height: number): Project =>
   ({
     id: "p1",
-    media: { src: "", duration: 10, width, height },
+    media: [{ id: "m1", src: "", duration: 10, width, height }],
     audioSrc: null,
     segments: [seg({ srcEnd: 10 })],
     clickLog: [],
@@ -34,7 +34,8 @@ const proj = (width: number, height: number): Project =>
 function seg(overrides: Partial<Segment> = {}): Segment {
   return {
     id: "s1",
-    srcStart: 0,
+    mediaId: "m1",
+      srcStart: 0,
     srcEnd: 10,
     speed: 1,
     stagePadding: 0,
