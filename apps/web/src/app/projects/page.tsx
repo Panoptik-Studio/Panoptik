@@ -61,6 +61,19 @@ export default function ProjectsPage() {
     [router],
   );
 
+  /**
+   * Begin a fresh project.
+   *
+   * Same two calls the cards use, minus the id: drop the pointer the editor
+   * restores from and clear the store, so the editor lands in its empty state
+   * instead of silently reopening whatever was last edited.
+   */
+  const startNew = useCallback(() => {
+    localStorage.removeItem(LAST_PROJECT_KEY);
+    useProjectStore.getState().clearProject();
+    router.push("/editor");
+  }, [router]);
+
   const remove = useCallback(
     async (id: string) => {
       // Drop it from the screen first; re-listing OPFS is slow enough to feel
@@ -96,6 +109,7 @@ export default function ProjectsPage() {
           </Link>
           <div className="flex items-center gap-2">
             <Link href="/" className="pk-btn pk-btn-ghost pk-btn-sm">Home</Link>
+            <button onClick={startNew} className="pk-btn pk-btn-ghost pk-btn-sm">New project</button>
             <Link href="/editor" className="pk-btn pk-btn-primary pk-btn-sm">Open editor</Link>
           </div>
         </div>
@@ -165,6 +179,24 @@ export default function ProjectsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <button
+              onClick={startNew}
+              className="group flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-[var(--radius-pk-card)] border border-dashed border-pk-hairline bg-pk-surface transition-all hover:border-pk-blue hover:bg-[var(--color-pk-blue-soft)]"
+              title="Start a new project"
+            >
+              <span
+                className="flex h-10 w-10 items-center justify-center rounded-full transition-colors"
+                style={{ background: "var(--color-pk-surface-soft)", color: "var(--color-pk-faint)" }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </span>
+              <span className="pk-ui text-[13px] font-medium text-pk-body transition-colors group-hover:text-pk-blue">
+                New project
+              </span>
+            </button>
+
             {shown.map((p) => (
               <ProjectCard key={p.id} summary={p} onOpen={open} onDelete={remove} />
             ))}
