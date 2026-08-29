@@ -3,11 +3,12 @@
  * Wires decode.ts → render.ts → audio.ts into the MediaEngine interface.
  * Preview and export share renderFrame + prepareFrame.
  */
-import type { Media, Project } from "@panoptik/schema";
+import type { Media, Project, Segment } from "@panoptik/schema";
 import type { MediaEngine } from "./index";
 import type { ExportFrameOpts } from "./encode";
 import {
   loadClip as decodeLoadClip,
+  importClip as decodeImportClip,
   prepareFrame as decodePrepareFrame,
   prepareAllFrames,
   setAudioBlob,
@@ -27,6 +28,25 @@ export function createRealEngine(): MediaEngine {
       await decodePrepareFrame(0);
       return proj;
     },
+    async importClip(file: File) {
+      const media = await decodeImportClip(file);
+      // A full-clip segment at 1x, same defaults loadClip produces — the store
+      // appends it to the end of the timeline.
+      const segment: Segment = {
+        id: crypto.randomUUID(),
+        mediaId: media.id,
+        srcStart: 0,
+        srcEnd: media.duration,
+        speed: 1,
+        stagePadding: 0,
+        aspectPreset: "source",
+        background: { kind: "solid", color: "#000000" },
+        facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+        zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
+        captions: [], stagedCaptions: [],
+      };
+      return { media, segment };
+    },
     async prepareFrame(t: number): Promise<void> {
       // Clip and camera together — a half-decoded frame would composite stale
       // camera pixels over a fresh screen.
@@ -38,10 +58,12 @@ export function createRealEngine(): MediaEngine {
     renderFrame(ctx, project, t, options) {
       renderFrame(ctx, project, t, options);
     },
-    async loadRecording(screen: Blob, facecam: Blob | null, audio: Blob | null): Promise<Project> {
+    async loadRecording(screen: Blob, facecam: Blob | null, audio: Blob | null, opts?: { append?: boolean }): Promise<Project> {
       // Capture/ingest boundary: B's record.ts captures blobs, we demux screen blob as clip.
       const screenFile = new File([screen], "screen.webm", { type: screen.type || "video/webm" });
-      const proj = await decodeLoadClip(screenFile);
+      // Append mode keeps the previous project's blob URLs alive — a full
+      // teardown would revoke the other clips' media srcs.
+      const proj = await decodeLoadClip(screenFile, opts?.append ? { append: true } : undefined);
       // After loadClip: it tears down first, which revokes the previous take's
       // facecam URL and drops its cached <video>.
       const facecamSrc = await setFacecamBlob(facecam);

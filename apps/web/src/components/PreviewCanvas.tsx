@@ -62,43 +62,12 @@ function resolveActive(
   };
 }
 
-/** The boundary most recently prefetched — `null` means nothing warm in flight. */
-type PrefetchKey = { projectId: string; segId: string } | null;
-let prefetchedKey: PrefetchKey = null;
-
 /**
- * Warm the next clip's decode pipeline when a boundary is within 2s so the
- * swap at the boundary is invisible. Guarded per (project, segment) so the
- * same boundary never warms twice; the active pipeline is never touched here.
+ * NOTE on prefetch: the decode architecture holds exactly ONE pipeline, so a
+ * true parallel "warm" would thrash — activateMedia closes the active pipeline
+ * and the main loop would immediately swap back. Boundary swaps are a single
+ * ~100ms close+open, handled by the loop's per-frame activateMedia instead.
  */
-function prefetchNextMedia(
-  project: Project,
-  activeSeg: Segment,
-  tEff: number,
-): void {
-  let acc = 0;
-  let candidate: { seg: Segment; start: number } | null = null;
-  for (const seg of project.segments) {
-    const start = acc;
-    const d = segmentDuration(seg);
-    if (start > tEff && start <= tEff + 2) candidate = { seg, start };
-    acc += d;
-  }
-  if (!candidate) return;
-  if (candidate.seg.mediaId === activeSeg.mediaId) return;
-  const key = { projectId: project.id, segId: candidate.seg.id };
-  if (prefetchedKey && prefetchedKey.segId === key.segId && prefetchedKey.projectId === key.projectId) return;
-  prefetchedKey = key;
-  const media = mediaForSegment(project, candidate.seg);
-  if (!media) return;
-  void engine
-    .activateMedia(candidate.seg.mediaId ?? FIRST_MEDIA_ID, media.src ?? null)
-    .then(() => {
-      // Warm one frame at the boundary's source start.
-      const srcT = candidate.seg.srcStart;
-      void engine.prepareAllFrames(srcT);
-    });
-}
 
 /**
  * Everything needed to place a focal handle: the letterboxed frame, the camera
@@ -585,7 +554,9 @@ export function PreviewCanvas() {
       // Multiclip: point the decode pipeline at this segment's clip.
       // Idempotent when the segment is cut from the already-active clip.
       const segMedia = mediaForSegment(state.project, active.seg);
-      void engine.activateMedia(active.seg.mediaId ?? FIRST_MEDIA_ID, segMedia?.src ?? null);
+      engine
+        .activateMedia(active.seg.mediaId ?? FIRST_MEDIA_ID, segMedia?.src ?? null)
+        .catch((err) => console.warn("[Preview] activateMedia failed", err));
 
       // Facecam keying: swap the facecam source only when the segment's take
       // differs (two segments may share a clip with different camera takes).
@@ -604,14 +575,6 @@ export function PreviewCanvas() {
         } else {
           void engine.setFacecamBlob(null);
         }
-      }
-
-      // Prefetch the next clip when a boundary is within 2s (never in export —
-      // export drives its own sequential swaps).
-      const isExporting = typeof window !== "undefined" &&
-        (window as unknown as { __isExporting?: boolean }).__isExporting;
-      if (!isExporting) {
-        prefetchNextMedia(state.project, active.seg, tEff);
       }
 
       // Audio elements run their own clock — keep rate and volume glued to the
@@ -666,6 +629,7 @@ export function PreviewCanvas() {
       }
 
       // Don't contend with export's pump — it drives desiredTime at 30fps
+      const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
       if (!isExporting && tSrc !== requestedTime) {
         requestedTime = tSrc;
         const seg = active.seg;
@@ -843,32 +807,54 @@ export function PreviewCanvas() {
       const curFcSrc = r.seg.facecam?.src;
 
       if (audio && curScreenSrc) {
+        const drift = Math.abs(audio.currentTime - r.srcT);
+        const willSeek = drift > 1.0 && audio.src === curScreenSrc && !audio.paused && audio.readyState >= 2;
+        if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugAudio") === "1" && (willSeek || audio.src !== curScreenSrc)) {
+          console.log("[PreviewAudio] screen", { t: st.currentTime.toFixed(3), srcT: r.srcT.toFixed(3), audioTime: audio.currentTime.toFixed(3), drift: drift.toFixed(3), willSeek, srcChanged: audio.src !== curScreenSrc, paused: audio.paused, rate: audio.playbackRate, ready: audio.readyState });
+        }
         if (audio.src !== curScreenSrc) {
           audio.src = curScreenSrc;
           audio.currentTime = r.srcT;
           if (audio.volume > 0) audio.play().catch(() => {});
         } else if (audio.paused && (r.seg.audioVolume ?? 1) > 0) {
           audio.play().catch(() => {});
-        } else if (Math.abs(audio.currentTime - r.srcT) > 0.3) {
+        } else if (drift > 1.0 && audio.readyState >= 2) {
           audio.currentTime = r.srcT;
         }
-        audio.playbackRate = r.seg.speed;
+        // Drift correction without seek: nudge playbackRate to catch up.
+        // Seeking WebM/Opus causes pre-skip glitch → high-freq static.
+        const absDrift = r.srcT - audio.currentTime;
+        if (Math.abs(absDrift) > 0.35 && Math.abs(absDrift) <= 1.0 && audio.readyState >= 2 && !audio.paused) {
+          audio.playbackRate = absDrift > 0 ? 1.03 : 0.97;
+        } else {
+          audio.playbackRate = r.seg.speed;
+        }
         audio.volume = Math.max(0, Math.min(1, r.seg.audioVolume ?? 1));
       }
 
       if (fcAudio && curFcSrc) {
         const fcStartT = r.seg.facecam?.startT ?? 0;
         const targetFc = fcStartT > 0 ? Math.max(0, st.currentTime - fcStartT) : r.srcT;
+        const fcDrift = Math.abs(fcAudio.currentTime - targetFc);
+        const fcWillSeek = fcDrift > 1.0 && fcAudio.src === curFcSrc && !fcAudio.paused && fcAudio.readyState >= 2;
+        if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugAudio") === "1" && (fcWillSeek || fcAudio.src !== curFcSrc)) {
+          console.log("[PreviewAudio] facecam", { t: st.currentTime.toFixed(3), targetFc: targetFc.toFixed(3), fcTime: fcAudio.currentTime.toFixed(3), drift: fcDrift.toFixed(3), willSeek: fcWillSeek, srcChanged: fcAudio.src !== curFcSrc, paused: fcAudio.paused, ready: fcAudio.readyState });
+        }
         if (fcAudio.src !== curFcSrc) {
           fcAudio.src = curFcSrc;
           fcAudio.currentTime = targetFc;
           if (fcAudio.volume > 0) fcAudio.play().catch(() => {});
         } else if (fcAudio.paused && (r.seg.facecam?.audioVolume ?? 1) > 0) {
           fcAudio.play().catch(() => {});
-        } else if (Math.abs(fcAudio.currentTime - targetFc) > 0.3) {
+        } else if (fcDrift > 1.0 && fcAudio.readyState >= 2) {
           fcAudio.currentTime = targetFc;
         }
-        fcAudio.playbackRate = r.seg.speed;
+        const fcAbsDrift = targetFc - fcAudio.currentTime;
+        if (Math.abs(fcAbsDrift) > 0.35 && Math.abs(fcAbsDrift) <= 1.0 && fcAudio.readyState >= 2 && !fcAudio.paused) {
+          fcAudio.playbackRate = fcAbsDrift > 0 ? 1.03 : 0.97;
+        } else {
+          fcAudio.playbackRate = r.seg.speed;
+        }
         fcAudio.volume = Math.max(0, Math.min(1, r.seg.facecam?.audioVolume ?? 1));
       }
     }, 500);

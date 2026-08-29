@@ -159,7 +159,7 @@ export function Timeline() {
   const speedHideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [hoveredVolume, setHoveredVolume] = useState<{
-    type: "screen" | "facecam";
+    type: "screen" | "facecam" | "voiceover";
     segmentId: string;
     segmentIndex: number;
     x: number;
@@ -998,6 +998,28 @@ export function Timeline() {
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
           </button>
+          <button
+            className="pk-icon-btn ctrl-btn h-8 w-8"
+            title="Adjust Voiceover Volume"
+            onClick={() => {
+              const tracks = project.audioTracks?.filter((t) => t.kind === "voiceover") ?? [];
+              if (tracks.length === 0) {
+                alert("No voiceover track yet. Record one in the Audio panel.");
+                return;
+              }
+              const track = tracks[tracks.length - 1]!;
+              setHoveredVolume({
+                type: "voiceover",
+                segmentId: track.id,
+                segmentIndex: 0,
+                x: Math.min(canvasW - 252, Math.max(10, timeToX(currentTime) - 120)),
+                y: AUDIO_TRACK_Y,
+                volume: track.volume,
+              });
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10a7 7 0 0 1-14 0"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Split at playhead" disabled={exportProgress !== null} onClick={() => splitAt(currentTime)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="6.5" height="14" rx="1.5" /><rect x="14.5" y="5" width="6.5" height="14" rx="1.5" /><line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2.5 2" strokeWidth="1.6" /></svg></button>
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Mosaic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></button>
           <div
@@ -1202,10 +1224,9 @@ export function Timeline() {
                   if (!file) return;
                   setAddPopover(false);
                   try {
-                    const proj = await engine.loadClip(file);
-                    const media = proj.media[0];
-                    const segment = proj.segments[0];
-                    if (!media || !segment) return;
+                    // importClip reads metadata only — the playing clip's
+                    // pipeline and every project blob URL stay alive.
+                    const { media, segment } = await engine.importClip(file);
                     useProjectStore.getState().appendClip(media, segment);
                     // Park the playhead at the new end so the appended clip is
                     // what appears in the preview.
@@ -1784,12 +1805,16 @@ export function Timeline() {
             >
               {(() => {
                 const isScreen = hoveredVolume.type === "screen";
-                const seg = project.segments.find((s) => s.id === hoveredVolume.segmentId);
-                const currentVol = isScreen ? (seg?.audioVolume ?? 1) : (seg?.facecam?.audioVolume ?? 1);
+                const isVoiceover = hoveredVolume.type === "voiceover";
+                const seg = !isVoiceover ? project.segments.find((s) => s.id === hoveredVolume.segmentId) : null;
+                const track = isVoiceover ? project.audioTracks?.find((t) => t.id === hoveredVolume.segmentId) : null;
+                const currentVol = isVoiceover ? (track?.volume ?? 1) : isScreen ? (seg?.audioVolume ?? 1) : (seg?.facecam?.audioVolume ?? 1);
 
                 const applyVol = (val: number) => {
                   const clamped = Math.max(0, Math.min(2.0, Number(val.toFixed(2))));
-                  if (isScreen) {
+                  if (isVoiceover) {
+                    updateAudioTrack(hoveredVolume.segmentId, { volume: clamped });
+                  } else if (isScreen) {
                     setSegmentAudioVolume(hoveredVolume.segmentId, clamped);
                   } else {
                     setFacecamAudioVolume(hoveredVolume.segmentId, clamped);
@@ -1803,10 +1828,10 @@ export function Timeline() {
                     <div className="flex items-center justify-between text-[11px]">
                       <div className="flex items-center gap-1.5">
                         <span className="font-semibold text-[#111827]">
-                          {isScreen ? "Screen Audio" : "Cam Mic"}
+                          {isVoiceover ? "Voiceover" : isScreen ? "Screen Audio" : "Cam Mic"}
                         </span>
                         <span className="rounded bg-[#f3f4f6] px-1 py-0.2 text-[9.5px] font-medium text-[#4b5563]">
-                          Clip {hoveredVolume.segmentIndex + 1}
+                          {isVoiceover ? (track?.name ?? "Voiceover") : `Clip ${hoveredVolume.segmentIndex + 1}`}
                         </span>
                       </div>
                       <span className="font-mono text-[11px] font-bold text-[#0070f3]">
@@ -1848,10 +1873,10 @@ export function Timeline() {
                       />
                     </div>
 
-                    {/* Apply to all segments option */}
-                    {project.segments.length > 1 && (
+                    {/* Apply to all segments option — not for voiceover */}
+                    {!isVoiceover && project.segments.length > 1 && (
                       <button
-                        onClick={() => setAllSegmentsAudioVolume(hoveredVolume.type, currentVol)}
+                        onClick={() => setAllSegmentsAudioVolume(hoveredVolume.type as "screen" | "facecam", currentVol)}
                         className="mt-0.5 flex w-full items-center justify-center gap-1 rounded border border-[#e5e7eb] bg-[#f9fafb] py-1 text-[10px] font-medium text-[#4b5563] transition-all hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3] cursor-pointer"
                       >
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

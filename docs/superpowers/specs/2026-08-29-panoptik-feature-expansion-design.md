@@ -184,12 +184,12 @@ Review panel = existing StagingPanel; Commit/Discard unchanged.
 
 ## Rollout
 
-| Phase | Features | Exit criteria |
-|---|---|---|
-| 1 | L1 + B5 + C2 | "New project" from library lands in a fresh editor; multi-clip import/reorder/export works end-to-end; chapters name segments; all tests green |
-| 2 | B1 + C3 | music + voiceover audible in preview & export; ducking verifiable; all tests green |
-| 3 | B2 + B3 + A5 | fades + annotations render in preview & export; export cancel works; quality toggle |
-| 4 | C4 + C1 | 4 tools tested through an agent session; auto-polish produces a committable staged diff |
+| Phase | Features     | Exit criteria                                                                                                                                  |
+| -------| --------------| ------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1     | L1 + B5 + C2 | "New project" from library lands in a fresh editor; multi-clip import/reorder/export works end-to-end; chapters name segments; all tests green |
+| 2     | B1 + C3      | music + voiceover audible in preview & export; ducking verifiable; all tests green                                                             |
+| 3     | B2 + B3 + A5 | fades + annotations render in preview & export; export cancel works; quality toggle                                                            |
+| 4     | C4 + C1      | 4 tools tested through an agent session; auto-polish produces a committable staged diff                                                        |
 
 Each phase: TDD where logic is pure (mixing, envelopes, chapter grouping, geometry), `pnpm test && pnpm typecheck` green before moving on, conventional commits per feature, branch per phase.
 

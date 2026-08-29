@@ -119,7 +119,7 @@ export function useTimelineThumbnails(project: Project | null): ThumbnailCache {
       const abort = new AbortController();
       abortsRef.current.set(m.id, abort);
       const cache: MediaCache = existing && existing.key === key ? existing : { key, cache: new Map(), sorted: [] };
-      if (existing && existing.key !== key) cachesRef.current.set(m.id, cache);
+      if (!existing || existing.key !== key) cachesRef.current.set(m.id, cache);
 
       const video = document.createElement("video");
       video.muted = true;
@@ -226,17 +226,11 @@ export function useTimelineThumbnails(project: Project | null): ThumbnailCache {
       runExtraction();
     }
 
-    // Cleanup runs on unmount AND before every re-run (media changed). Abort
-    // in-flight extractions and drop their (possibly partial) caches — a
-    // fully-extracted cache untouched by this round survives, so appending one
-    // clip does not wipe the other clips' filmstrips.
-    return () => {
-      for (const [id, abort] of abortsRef.current.entries()) {
-        abort.abort();
-        cachesRef.current.delete(id);
-      }
-      abortsRef.current.clear();
-    };
+    // No generic cleanup — the first loop already aborts/deletes vanished
+    // media. Aborting all in-flight here would kill still-valid extractions
+    // when appending a second clip (mediaSignature changes but m1 is still
+    // wanted).
+    return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaSignature]);
 

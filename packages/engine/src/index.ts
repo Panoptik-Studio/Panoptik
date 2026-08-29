@@ -6,7 +6,7 @@
  *   DEV B: record.ts, opfs.ts (re-exported below in the B-region)
  */
 
-import type { AudioTrack, ExportOpts, Project } from "@panoptik/schema";
+import type { AudioTrack, ExportOpts, Media, Project, Segment } from "@panoptik/schema";
 import type { ExportFrameOpts } from "./encode";
 import type { RenderOptions } from "./render";
 
@@ -18,7 +18,13 @@ export interface MediaEngine {
   /** Sync draw of cached frame + full composition. Preview and export share this. */
   renderFrame(ctx: CanvasRenderingContext2D, project: Project, t: number, options?: RenderOptions): void;
   loadClip(file: File): Promise<Project>;
-  loadRecording(screen: Blob, facecam: Blob | null, audio: Blob | null): Promise<Project>;
+  /**
+   * Read a clip's metadata without touching the decode pipeline — the
+   * append flow uses this so the playing clip and every project-owned blob
+   * URL survive the import. The pipeline opens the returned media lazily.
+   */
+  importClip(file: File): Promise<{ media: Media; segment: Segment }>;
+  loadRecording(screen: Blob, facecam: Blob | null, audio: Blob | null, opts?: { append?: boolean }): Promise<Project>;
   /** Re-open a saved project's media and reapply its edits. */
   restoreProject(id: string): Promise<Project | null>;
   /** Full-clip mono AudioBuffer for transcription/export. null when no decodable audio. */

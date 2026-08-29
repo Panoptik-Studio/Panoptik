@@ -10,6 +10,7 @@
  */
 import type {
   AspectPreset,
+  AudioTrack,
   Background,
   Caption,
   Media,
@@ -334,6 +335,23 @@ export function mergeSavedProject(
     });
   }
 
+  // Audio tracks — wall-clock assets, not per-segment. Keep saved metadata;
+  // src blob URLs are re-minted from OPFS by restoreAudioTracks.
+  const audioTracks: AudioTrack[] = Array.isArray(saved.audioTracks)
+    ? (saved.audioTracks as AudioTrack[]).map((t) => ({
+        id: typeof t.id === "string" ? t.id.slice(0, 100) : crypto.randomUUID(),
+        kind: (t.kind === "voiceover" ? "voiceover" : "music") as AudioTrack["kind"],
+        name: typeof t.name === "string" ? t.name.slice(0, 120) : undefined,
+        src: typeof t.src === "string" ? t.src : "",
+        duration: num((t as unknown as { duration: unknown }).duration, 0, 0, 100000),
+        volume: num((t as unknown as { volume: unknown }).volume, 1, 0, 2),
+        startT: num((t as unknown as { startT: unknown }).startT, 0, 0, 100000),
+        fadeIn: (t as unknown as { fadeIn?: unknown }).fadeIn != null ? num((t as unknown as { fadeIn: unknown }).fadeIn as number, 0, 0, 30) : undefined,
+        fadeOut: (t as unknown as { fadeOut?: unknown }).fadeOut != null ? num((t as unknown as { fadeOut: unknown }).fadeOut as number, 0, 0, 30) : undefined,
+        ducking: (t as unknown as { ducking?: unknown }).ducking != null ? num((t as unknown as { ducking: unknown }).ducking as number, 0, 0, 1) : undefined,
+      } as AudioTrack)).filter((t) => t.duration > 0)
+    : ((fresh as unknown as { audioTracks?: AudioTrack[] }).audioTracks ?? []) as AudioTrack[];
+
   return {
     ...fresh,
     id: typeof saved.id === "string" ? saved.id.slice(0, 100) : fresh.id,
@@ -342,6 +360,7 @@ export function mergeSavedProject(
     name: typeof saved.name === "string" ? saved.name.slice(0, 120) : fresh.name,
     media: mergedMedia,
     segments,
+    audioTracks,
     clickLog: arr<unknown>(saved.clickLog, MAX_CLICKS)
       .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
       .map((e) => ({

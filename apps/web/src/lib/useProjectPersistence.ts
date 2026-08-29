@@ -18,14 +18,17 @@ export const HISTORY_KEY_PREFIX = "panoptik:history:";
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 
 /**
- * Which project's media is already on disk.
+ * Which project's media is already on disk — per-media, not per-project.
  *
  * Module scope, not a ref: only one project is open at a time, but the actions
  * below are used from panels while the effects run at the editor level. Held
- * per-instance, a panel would start at null, conclude the open project was new
+ * per-instance, a panel would start empty and conclude the open project was new
  * and re-copy the whole video to OPFS every time it mounted.
+ *
+ * For multiclip, a project can grow: appending a second clip must save that
+ * clip's blob even though the project id is already known.
  */
-let mediaSavedFor: string | null = null;
+const mediaSavedFor = new Map<string, Set<string>>();
 
 /** Track ids already written to OPFS per project — avoids re-fetch+rewrite each debounce. */
 const audioSavedFor = new Map<string, Set<string>>();
@@ -68,15 +71,29 @@ function markTrackSaved(projectId: string, trackId: string): void {
  * video.
  */
 export function needsMediaCopy(projectId: string): boolean {
-  return mediaSavedFor !== projectId;
+  return !mediaSavedFor.has(projectId);
 }
 
-export function markMediaSaved(projectId: string): void {
-  mediaSavedFor = projectId;
+export function hasUnsavedMedia(project: Project): boolean {
+  const saved = mediaSavedFor.get(project.id);
+  if (!saved) return true;
+  return project.media.some((m) => m.src.startsWith("blob:") && !saved.has(m.id));
+}
+
+export function markMediaSaved(projectId: string, mediaIds?: string[]): void {
+  if (mediaIds) {
+    const set = mediaSavedFor.get(projectId) ?? new Set<string>();
+    for (const id of mediaIds) set.add(id);
+    mediaSavedFor.set(projectId, set);
+  } else {
+    // Legacy: mark at least the project as known. Per-media ids will be
+    // filled on the next hasUnsavedMedia check via the autosave path.
+    if (!mediaSavedFor.has(projectId)) mediaSavedFor.set(projectId, new Set<string>());
+  }
 }
 
 export function forgetMediaSaved(): void {
-  mediaSavedFor = null;
+  mediaSavedFor.clear();
   audioSavedFor.clear();
 }
 
@@ -121,7 +138,10 @@ export function useProjectPersistence() {
       .restoreProject(id)
       .then(async (restored) => {
         if (restored) {
-          markMediaSaved(restored.id);
+          markMediaSaved(
+            restored.id,
+            restored.media.map((m) => m.id),
+          );
           await restoreAudioTracks(restored);
           const savedHistory = readSavedHistory(restored.id);
           if (savedHistory?.history && savedHistory.history.length > 0) {
@@ -151,6 +171,8 @@ export function useProjectPersistence() {
   useEffect(() => {
     if (!project) return;
     const isNewProject = needsMediaCopy(project.id);
+    const hasNewMedia = hasUnsavedMedia(project);
+    const shouldSaveMedia = isNewProject || hasNewMedia;
     const state = useProjectStore.getState();
 
     // Persist history to localStorage immediately
@@ -174,8 +196,10 @@ export function useProjectPersistence() {
           setPersistStatus("saving");
           const { saveProject } = await import("@panoptik/engine");
           const currentState = useProjectStore.getState();
-          // Copying the media is expensive, so only the first save carries it.
-          await saveProject(project, isNewProject, {
+          // Copying the media is expensive, so only saves that carry new blobs.
+          // For multiclip, appending a second clip must save that clip's blob
+          // even though the project id is already known.
+          await saveProject(project, shouldSaveMedia, {
             history: currentState.history,
             historyIndex: currentState.historyIndex,
           });
@@ -192,7 +216,13 @@ export function useProjectPersistence() {
               /* skip this track this round */
             }
           }
-          if (isNewProject) {
+          if (shouldSaveMedia) {
+            markMediaSaved(
+              project.id,
+              project.media.filter((m) => m.src.startsWith("blob:")).map((m) => m.id),
+            );
+            localStorage.setItem(LAST_PROJECT_KEY, project.id);
+          } else if (isNewProject) {
             markMediaSaved(project.id);
             localStorage.setItem(LAST_PROJECT_KEY, project.id);
           }
@@ -201,7 +231,7 @@ export function useProjectPersistence() {
           setPersistStatus("idle");
         }
       },
-      isNewProject ? 0 : AUTOSAVE_DEBOUNCE_MS,
+      shouldSaveMedia ? 0 : AUTOSAVE_DEBOUNCE_MS,
     );
     return () => clearTimeout(timer);
   }, [project, setPersistStatus]);
@@ -243,7 +273,10 @@ export function useProjectActions() {
       try {
         const restored = await engine.restoreProject(id);
         if (restored) {
-          markMediaSaved(restored.id);
+          markMediaSaved(
+            restored.id,
+            restored.media.map((m) => m.id),
+          );
           await restoreAudioTracks(restored);
           localStorage.setItem(LAST_PROJECT_KEY, restored.id);
           const savedHistory = readSavedHistory(restored.id);

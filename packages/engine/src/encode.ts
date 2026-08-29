@@ -253,10 +253,17 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           const screenVol = seg.audioVolume ?? 1;
           const fcVol = seg.facecam?.audioVolume ?? 1;
 
-          // 1. Process Screen Audio — null when there's no decodable screen audio (e.g. WebCodecs path without audio or silent import)
+          // 1. Process Screen Audio — per-segment media (multiclip).
           let screenPart: AudioBuffer | null = null;
-          if (defaultScreenBuf) {
-            screenPart = sliceAndStretchAudio(defaultScreenBuf, seg);
+          const segMedia = mediaForSegment(project, seg);
+          const segScreenBuf = segMedia ? await getBufferForSrc(segMedia.src) : null;
+          // For the primary clip, fall back to the pre-decoded default buffer
+          // (covers single-clip case where getBufferForSrc fails but AudioSink
+          // succeeded). For other clips, no fallback — silence is correct.
+          const isPrimary = segMedia?.id === primaryMedia(project).id;
+          const screenBufForSeg = segScreenBuf ?? (isPrimary ? defaultScreenBuf : null);
+          if (screenBufForSeg) {
+            screenPart = sliceAndStretchAudio(screenBufForSeg, seg);
           }
 
           // 2. Process Facecam / Mic Audio
@@ -289,7 +296,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           } else {
             // Neither source has audio for this segment — produce silence of correct timeline duration
             const dur = segmentDuration(seg);
-            const sr = (defaultScreenBuf ?? fcPart ?? audioBuffer)?.sampleRate ?? 48000;
+            const sr = (screenBufForSeg ?? fcPart ?? audioBuffer)?.sampleRate ?? 48000;
             const len = Math.max(1, Math.round(dur * sr));
             const { makeBuffer } = await import("./timeStretch");
             mixedSegAudio = makeBuffer(1, len, sr, [new Float32Array(len)]);

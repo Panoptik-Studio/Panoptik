@@ -17,6 +17,25 @@ export const mockEngine = {
   },
   prepareFrame: async () => {},
   activateMedia: async () => {},
+  importClip: async (file: File) => {
+    const media = { id: crypto.randomUUID(), src: URL.createObjectURL(file), duration: 12, width: 1920, height: 1080 };
+    return {
+      media,
+      segment: {
+        id: crypto.randomUUID(),
+        mediaId: media.id,
+        srcStart: 0,
+        srcEnd: media.duration,
+        speed: 1,
+        stagePadding: 0,
+        aspectPreset: "source" as const,
+        background: { kind: "solid" as const, color: "#000000" },
+        facecam: { src: null, x: 0.8, y: 0.8, size: 0.2, shape: "circle" as const },
+        zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
+        captions: [], stagedCaptions: [],
+      },
+    };
+  },
   renderFrame: (ctx: Ctx, project: Project, t: number) => {
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;

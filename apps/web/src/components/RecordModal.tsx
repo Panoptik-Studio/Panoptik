@@ -504,12 +504,15 @@ export function RecordModal() {
       }
       const { engine } = await import("@/lib/engineProvider");
       const hasFacecamMedia = facecamBlob.size > 0;
+      const willAppend = appendMode && !!useProjectStore.getState().project;
       const project = await engine.loadRecording(
         layout === "cameraOnly" ? facecamBlob : screenBlob,
         // Only a screen+camera take gets a picture-in-picture.
         layout === "screenAndCamera" && hasFacecamMedia ? facecamBlob : null,
         // The mic is narration only when there is no facecam video (screen-only layout)
         layout === "screenOnly" && hasFacecamMedia ? facecamBlob : null,
+        // Append mode keeps the other clips' blob URLs alive.
+        willAppend ? { append: true } : undefined,
       );
       // Carry the chosen shape and corner through to the composed frame, so the
       // exported video puts the camera where the recorder UI said it would.
@@ -522,7 +525,7 @@ export function RecordModal() {
           shape,
         };
       }
-      if (appendMode && useProjectStore.getState().project) {
+      if (willAppend) {
         // Timeline "+" → append this take as a new clip instead of replacing.
         useProjectStore.getState().appendRecordedProject(project);
         // Make the engine's pipeline active for the recorded clip so the

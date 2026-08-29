@@ -90,13 +90,18 @@ export function syncTrackPlayback(
   tracks: AudioTrack[],
   buffers: Map<string, AudioBuffer>,
 ): void {
+  const debug = typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugAudio") === "1";
   if (!isPlaying || tracks.length === 0) {
-    if (nodes.size > 0) stopTrackPlayback();
+    if (nodes.size > 0) {
+      if (debug) console.log("[AudioTrack] stopTrackPlayback (not playing or no tracks)", { timelineT, nodes: nodes.size });
+      stopTrackPlayback();
+    }
     return;
   }
   if (nodes.size > 0 && ctx) {
     const scheduled = baseTimelineT + (ctx.currentTime - baseCtxTime);
-    if (Math.abs(scheduled - timelineT) < 0.15) {
+    const drift = scheduled - timelineT;
+    if (Math.abs(drift) < 0.15) {
       for (const track of tracks) {
         const node = nodes.get(track.id);
         if (node) node.gain.gain.value = currentGain(track, timelineT - track.startT);
@@ -107,8 +112,12 @@ export function syncTrackPlayback(
           nodes.delete(id);
         }
       }
+      if (debug && Math.abs(drift) > 0.05) console.log("[AudioTrack] drift ok", { timelineT: timelineT.toFixed(3), scheduled: scheduled.toFixed(3), drift: drift.toFixed(3) });
       return;
     }
+    if (debug) console.log("[AudioTrack] RESTART drift exceeded", { timelineT: timelineT.toFixed(3), scheduled: scheduled.toFixed(3), drift: drift.toFixed(3), baseTimelineT, baseCtxTime, ctxTime: ctx.currentTime });
+  } else if (debug && nodes.size === 0) {
+    console.log("[AudioTrack] restart (no nodes or no ctx)", { timelineT: timelineT.toFixed(3), nodes: nodes.size, hasCtx: !!ctx });
   }
   restart(timelineT, tracks, buffers);
 }
