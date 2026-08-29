@@ -27,6 +27,38 @@ const AUTOSAVE_DEBOUNCE_MS = 1200;
  */
 let mediaSavedFor: string | null = null;
 
+/** Track ids already written to OPFS per project — avoids re-fetch+rewrite each debounce. */
+const audioSavedFor = new Map<string, Set<string>>();
+
+/**
+ * Audio track srcs are object URLs that die with the session — re-mint them
+ * from OPFS and re-register the decoded buffers the preview/export read.
+ */
+async function restoreAudioTracks(project: Project): Promise<void> {
+  const tracks = project.audioTracks ?? [];
+  if (tracks.length === 0) return;
+  const { loadAudioTrackFiles, decodeViaAudioContext, registerTrackBuffer } = await import("@panoptik/engine");
+  const files = await loadAudioTrackFiles(project.id);
+  for (const track of tracks) {
+    const file = files.find((f) => f.id === track.id);
+    if (!file) continue;
+    try {
+      const buffer = await decodeViaAudioContext(file.blob);
+      if (buffer) registerTrackBuffer(track.id, buffer);
+      track.src = URL.createObjectURL(file.blob);
+      markTrackSaved(project.id, track.id);
+    } catch {
+      /* leave the dead src; the track shows but stays silent until re-added */
+    }
+  }
+}
+
+function markTrackSaved(projectId: string, trackId: string): void {
+  const set = audioSavedFor.get(projectId) ?? new Set<string>();
+  set.add(trackId);
+  audioSavedFor.set(projectId, set);
+}
+
 /**
  * Does this project still need its media copied to OPFS?
  *
@@ -45,6 +77,7 @@ export function markMediaSaved(projectId: string): void {
 
 export function forgetMediaSaved(): void {
   mediaSavedFor = null;
+  audioSavedFor.clear();
 }
 
 function readSavedHistory(projectId: string): { history?: Project[]; historyIndex?: number } | null {
@@ -89,6 +122,7 @@ export function useProjectPersistence() {
       .then(async (restored) => {
         if (restored) {
           markMediaSaved(restored.id);
+          await restoreAudioTracks(restored);
           const savedHistory = readSavedHistory(restored.id);
           if (savedHistory?.history && savedHistory.history.length > 0) {
             setProject(restored, savedHistory.history, savedHistory.historyIndex);
@@ -145,6 +179,19 @@ export function useProjectPersistence() {
             history: currentState.history,
             historyIndex: currentState.historyIndex,
           });
+          // Persist any audio track whose file isn't on OPFS yet.
+          const savedAudio = audioSavedFor.get(project.id) ?? new Set<string>();
+          for (const track of project.audioTracks ?? []) {
+            if (savedAudio.has(track.id) || !track.src.startsWith("blob:")) continue;
+            try {
+              const blob = await (await fetch(track.src)).blob();
+              const { saveAudioTrackFile } = await import("@panoptik/engine");
+              await saveAudioTrackFile(project.id, track.id, blob);
+              markTrackSaved(project.id, track.id);
+            } catch {
+              /* skip this track this round */
+            }
+          }
           if (isNewProject) {
             markMediaSaved(project.id);
             localStorage.setItem(LAST_PROJECT_KEY, project.id);
@@ -197,6 +244,7 @@ export function useProjectActions() {
         const restored = await engine.restoreProject(id);
         if (restored) {
           markMediaSaved(restored.id);
+          await restoreAudioTracks(restored);
           localStorage.setItem(LAST_PROJECT_KEY, restored.id);
           const savedHistory = readSavedHistory(restored.id);
           if (savedHistory?.history && savedHistory.history.length > 0) {
