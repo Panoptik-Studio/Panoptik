@@ -406,24 +406,9 @@ export function Timeline() {
 
     // ── 2c. Drag reorder drop indicator ──
     if (draggingSegment && dragOverIndex !== null && project) {
-      const ds = draggingSegment as unknown as { fromIndex: number; groupStart: number; groupEnd: number; groupSize: number };
-      const isGroup = ds.groupSize > 1;
       let acc = 0;
       for (let i = 0; i < dragOverIndex; i++) acc += segmentDuration(project.segments[i]!);
-      // Adjust for removal of dragged item(s)
-      if (isGroup) {
-        if (dragOverIndex > ds.groupEnd) {
-          let groupDur = 0;
-          for (let j = ds.groupStart; j <= ds.groupEnd; j++) groupDur += segmentDuration(project.segments[j]!);
-          acc -= groupDur;
-        } else if (dragOverIndex >= ds.groupStart && dragOverIndex <= ds.groupEnd) {
-          // Hovering over itself — show at original position
-          acc = 0;
-          for (let i = 0; i < ds.groupStart; i++) acc += segmentDuration(project.segments[i]!);
-        }
-      } else {
-        if (dragOverIndex > ds.fromIndex) acc -= segmentDuration(project.segments[ds.fromIndex]!);
-      }
+      if (dragOverIndex > draggingSegment.fromIndex) acc -= segmentDuration(project.segments[draggingSegment.fromIndex]!);
       const dropX = timeToX(acc);
       ctx.save();
       ctx.strokeStyle = "#0070f3";
@@ -860,30 +845,16 @@ export function Timeline() {
     const seg = project.segments[i]!;
     // Select on pointer down (like click) and start dragging
     selectSegment(seg.id, false);
-    // For clip group drag: find contiguous block with same mediaId
-    const targetMediaId = seg.mediaId;
-    let groupStart = i;
-    let groupEnd = i;
-    // Expand left
-    for (let j = i - 1; j >= 0; j--) {
-      if (project.segments[j]!.mediaId === targetMediaId) groupStart = j;
-      else break;
-    }
-    // Expand right
-    for (let j = i + 1; j < project.segments.length; j++) {
-      if (project.segments[j]!.mediaId === targetMediaId) groupEnd = j;
-      else break;
-    }
     setDraggingSegment({
       id: seg.id,
-      fromIndex: groupStart,
+      fromIndex: i,
       startX: x,
-      groupStart,
-      groupEnd,
-      groupSize: groupEnd - groupStart + 1,
+      groupStart: i,
+      groupEnd: i,
+      groupSize: 1,
     });
-    setDragOverIndex(groupStart);
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    setDragOverIndex(i);
+    scrollRef.current?.setPointerCapture?.(e.pointerId);
     e.preventDefault();
     e.stopPropagation();
     return true;
@@ -951,12 +922,6 @@ export function Timeline() {
         acc += d;
       }
       if (hovered === null) hovered = project.segments.length - 1;
-      // For group drag, adjust hovered to be the group's insertion point
-      // If hovering over a segment that is part of the dragged group, keep original
-      if (hovered >= draggingSegment.groupStart && hovered <= draggingSegment.groupEnd) {
-        hovered = draggingSegment.groupStart;
-      }
-      // Adjust for dragging item removal
       if (hovered > draggingSegment.fromIndex) hovered = Math.max(0, hovered);
       setDragOverIndex(hovered);
       return;
@@ -975,29 +940,10 @@ export function Timeline() {
     }
     const from = draggingSegment.fromIndex;
     const to = dragOverIndex;
-    const groupStart = (draggingSegment as unknown as { groupStart: number }).groupStart ?? from;
-    const groupEnd = (draggingSegment as unknown as { groupEnd: number }).groupEnd ?? from;
-    const groupSize = (draggingSegment as unknown as { groupSize: number }).groupSize ?? 1;
     setDraggingSegment(null);
     setDragOverIndex(null);
-    if (to === null) return;
-    if (groupSize > 1) {
-      // Clip group drag — move contiguous block
-      if (to >= groupStart && to <= groupEnd) return; // dropped inside itself
-      // For group, `to` is the hovered segment index; convert to insertion index
-      // If dropping after the group, adjust for removal
-      let target = to;
-      if (to > groupEnd) target = to - groupSize + 1;
-      // If dragging left, target is the hovered index
-      if (to < groupStart) target = to;
-      useProjectStore.getState().moveClipGroup(groupStart, groupEnd, target);
-    } else {
-      if (to !== from && to >= 0 && to < project.segments.length) {
-        let target = to;
-        if (from < to) target = to;
-        useProjectStore.getState().reorderSegments(from, target);
-      }
-    }
+    if (to === null || to === from || to < 0 || to >= project.segments.length) return;
+    useProjectStore.getState().reorderSegments(from, to);
   }, [draggingSegment, dragOverIndex, project]);
 
   const handleAudioTrackDrag = useCallback((e: React.PointerEvent) => {
@@ -1334,9 +1280,9 @@ export function Timeline() {
         onClick={handleCanvasClick}
         onContextMenu={handleContextMenu}
         onPointerDown={handleTimelinePointerDown}
-        onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); handleAudioTrackDrag(e); if (draggingSegment) handleTimelinePointerMove(e as unknown as React.PointerEvent); }}
+        onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); handleAudioTrackDrag(e); }}
         onPointerUp={(e) => { handleSegmentDragEnd(e as unknown as React.PointerEvent); setDraggingDiamond(null); setIsDraggingPlayhead(false); setDraggingAudio(null); }}
-        onPointerLeave={() => { if (draggingSegment) handleSegmentDragEnd({} as React.PointerEvent); setIsDraggingPlayhead(false); }}
+        onPointerLeave={() => { setIsDraggingPlayhead(false); }}
       >
         <div className="relative" style={{ width: canvasW, height: canvasH }}>
           <canvas ref={canvasRef} className="timeline-canvas block" style={{ width: canvasW, height: canvasH }} />
