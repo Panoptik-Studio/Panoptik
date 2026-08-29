@@ -123,6 +123,8 @@ export function Timeline() {
   const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [draggingAudio, setDraggingAudio] = useState<{ id: string; grabOffset: number } | null>(null);
+  const [draggingSegment, setDraggingSegment] = useState<{ id: string; fromIndex: number; startX: number } | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [transitionPopover, setTransitionPopover] = useState<{
     x: number;
     y: number;
@@ -399,6 +401,30 @@ export function Timeline() {
       ctx.lineWidth = 1;
       drawRoundRect(ctx, addX, VIDEO_TRACK_Y, ADD_CLIP_ZONE_W, VIDEO_TRACK_HEIGHT, 4);
       ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── 2c. Drag reorder drop indicator ──
+    if (draggingSegment && dragOverIndex !== null && project) {
+      let acc = 0;
+      for (let i = 0; i < dragOverIndex; i++) acc += segmentDuration(project.segments[i]!);
+      // Adjust for removal of dragged item
+      if (dragOverIndex > draggingSegment.fromIndex) acc -= segmentDuration(project.segments[draggingSegment.fromIndex]!);
+      const dropX = timeToX(acc);
+      ctx.save();
+      ctx.strokeStyle = "#0070f3";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(dropX, VIDEO_TRACK_Y - 4);
+      ctx.lineTo(dropX, VIDEO_TRACK_Y + VIDEO_TRACK_HEIGHT + 4);
+      ctx.stroke();
+      ctx.fillStyle = "#0070f3";
+      ctx.beginPath();
+      ctx.moveTo(dropX, VIDEO_TRACK_Y - 6);
+      ctx.lineTo(dropX - 5, VIDEO_TRACK_Y - 12);
+      ctx.lineTo(dropX + 5, VIDEO_TRACK_Y - 12);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
     }
 
@@ -726,10 +752,10 @@ export function Timeline() {
 
     // ── 7. Audio Track Lane (music/voiceover, wall-clock) ──
     drawAudioTracks(ctx, project?.audioTracks ?? [], timeToX, AUDIO_TRACK_Y, AUDIO_LANE_HEIGHT);
-  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying, exportProgress]);
+  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying, exportProgress, draggingSegment, dragOverIndex]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
-    if (isDraggingPlayhead || draggingDiamond) return;
+    if (isDraggingPlayhead || draggingDiamond || draggingSegment) return;
     const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
     // Multi-select is handled on pointerdown; avoid double-toggling
     if (isMulti) return;
@@ -786,6 +812,34 @@ export function Timeline() {
     updateZoomPoint(draggingDiamond.id, { t: srcT });
   }, [draggingDiamond, project, selectSegment, updateZoomPoint, xToTime]);
 
+  const handleSegmentDragStart = useCallback((e: React.PointerEvent) => {
+    if (!scrollRef.current || !project || draggingDiamond || isDraggingPlayhead || draggingAudio) return false;
+    const rect = scrollRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+    const y = e.clientY - rect.top;
+    if (y < VIDEO_TRACK_Y || y >= VIDEO_TRACK_Y + VIDEO_TRACK_HEIGHT) return false;
+    // Find which segment is under the pointer
+    let acc = 0;
+    for (let i = 0; i < project.segments.length; i++) {
+      const seg = project.segments[i]!;
+      const d = segmentDuration(seg);
+      const x0 = timeToX(acc);
+      const x1 = timeToX(acc + d);
+      if (x >= x0 && x <= x1) {
+        // Select on pointer down (like click) and start dragging
+        selectSegment(seg.id, false);
+        setDraggingSegment({ id: seg.id, fromIndex: i, startX: x });
+        setDragOverIndex(i);
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        e.preventDefault();
+        e.stopPropagation();
+        return true;
+      }
+      acc += d;
+    }
+    return false;
+  }, [project, draggingDiamond, isDraggingPlayhead, draggingAudio, timeToX, selectSegment]);
+
   const handleTimelinePointerDown = useCallback((e: React.PointerEvent) => {
     if (contextMenu) setContextMenu(null);
     if (!scrollRef.current || draggingDiamond) return;
@@ -793,6 +847,8 @@ export function Timeline() {
     if (target.closest('#facecam-transition-popover, #timeline-context-menu, #timeline-volume-popover, input, button')) {
       return;
     }
+    // Try segment drag first (only on video track)
+    if (handleSegmentDragStart(e)) return;
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     const px = timeToX(currentTime);
@@ -823,11 +879,58 @@ export function Timeline() {
   }, [contextMenu, currentTime, draggingDiamond, project, selectSegment, seek, timeToX, xToTime]);
 
   const handleTimelinePointerMove = useCallback((e: React.PointerEvent) => {
+    if (draggingSegment && scrollRef.current && project) {
+      const rect = scrollRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+      // Find hovered index by x position
+      let acc = 0;
+      let hovered: number | null = null;
+      for (let i = 0; i < project.segments.length; i++) {
+        const d = segmentDuration(project.segments[i]!);
+        const x0 = timeToX(acc);
+        const x1 = timeToX(acc + d);
+        // Use midpoint to decide drop position
+        const mid = (x0 + x1) / 2;
+        if (x < mid) {
+          hovered = i;
+          break;
+        }
+        if (x >= x0 && x <= x1) {
+          hovered = i;
+          break;
+        }
+        acc += d;
+      }
+      if (hovered === null) hovered = project.segments.length - 1;
+      // Adjust for dragging item removal
+      if (hovered > draggingSegment.fromIndex) hovered = Math.max(0, hovered);
+      setDragOverIndex(hovered);
+      return;
+    }
     if (!isDraggingPlayhead || !scrollRef.current) return;
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     seek(xToTime(x));
-  }, [isDraggingPlayhead, seek, xToTime]);
+  }, [isDraggingPlayhead, seek, xToTime, draggingSegment, project, timeToX]);
+
+  const handleSegmentDragEnd = useCallback((e: React.PointerEvent) => {
+    if (!draggingSegment || !project) {
+      setDraggingSegment(null);
+      setDragOverIndex(null);
+      return;
+    }
+    const from = draggingSegment.fromIndex;
+    const to = dragOverIndex;
+    setDraggingSegment(null);
+    setDragOverIndex(null);
+    if (to !== null && to !== from && to >= 0 && to < project.segments.length) {
+      // Need to adjust target index for removal offset
+      let target = to;
+      if (from < to) target = to;
+      // Use store's reorder which handles splice correctly
+      useProjectStore.getState().reorderSegments(from, target);
+    }
+  }, [draggingSegment, dragOverIndex, project]);
 
   const handleAudioTrackDrag = useCallback((e: React.PointerEvent) => {
     if (!draggingAudio || !scrollRef.current) return;
@@ -1163,9 +1266,9 @@ export function Timeline() {
         onClick={handleCanvasClick}
         onContextMenu={handleContextMenu}
         onPointerDown={handleTimelinePointerDown}
-        onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); handleAudioTrackDrag(e); }}
-        onPointerUp={() => { setDraggingDiamond(null); setIsDraggingPlayhead(false); setDraggingAudio(null); }}
-        onPointerLeave={() => setIsDraggingPlayhead(false)}
+        onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); handleAudioTrackDrag(e); if (draggingSegment) handleTimelinePointerMove(e as unknown as React.PointerEvent); }}
+        onPointerUp={(e) => { handleSegmentDragEnd(e as unknown as React.PointerEvent); setDraggingDiamond(null); setIsDraggingPlayhead(false); setDraggingAudio(null); }}
+        onPointerLeave={() => { if (draggingSegment) handleSegmentDragEnd({} as React.PointerEvent); setIsDraggingPlayhead(false); }}
       >
         <div className="relative" style={{ width: canvasW, height: canvasH }}>
           <canvas ref={canvasRef} className="timeline-canvas block" style={{ width: canvasW, height: canvasH }} />
