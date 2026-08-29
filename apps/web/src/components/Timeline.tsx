@@ -831,49 +831,62 @@ export function Timeline() {
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     const y = e.clientY - rect.top;
-    // Video track is at y=30, height 32, but allow a bit of padding for easier grab
-    if (y < VIDEO_TRACK_Y - 4 || y >= VIDEO_TRACK_Y + VIDEO_TRACK_HEIGHT + 8) return false;
-    // Find which segment is under the pointer
+    // Video track is at y=30, height 32 — allow generous padding and also check
+    // the whole timeline height for clip group (user may grab near the label)
+    if (y < VIDEO_TRACK_Y - 12 || y >= VIDEO_TRACK_Y + VIDEO_TRACK_HEIGHT + 20) return false;
+    // Find which segment is under the pointer (with fallback to nearest)
     let acc = 0;
+    let hitIndex: number | null = null;
+    let closestDist = Infinity;
     for (let i = 0; i < project.segments.length; i++) {
       const seg = project.segments[i]!;
       const d = segmentDuration(seg);
       const x0 = timeToX(acc);
       const x1 = timeToX(acc + d);
       if (x >= x0 && x <= x1) {
-        // Select on pointer down (like click) and start dragging
-        selectSegment(seg.id, false);
-        // For clip group drag: find contiguous block with same mediaId
-        const targetMediaId = seg.mediaId;
-        let groupStart = i;
-        let groupEnd = i;
-        // Expand left
-        for (let j = i - 1; j >= 0; j--) {
-          if (project.segments[j]!.mediaId === targetMediaId) groupStart = j;
-          else break;
-        }
-        // Expand right
-        for (let j = i + 1; j < project.segments.length; j++) {
-          if (project.segments[j]!.mediaId === targetMediaId) groupEnd = j;
-          else break;
-        }
-        setDraggingSegment({
-          id: seg.id,
-          fromIndex: groupStart,
-          startX: x,
-          groupStart,
-          groupEnd,
-          groupSize: groupEnd - groupStart + 1,
-        });
-        setDragOverIndex(groupStart);
-        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-        e.preventDefault();
-        e.stopPropagation();
-        return true;
+        hitIndex = i;
+        break;
+      }
+      const mid = (x0 + x1) / 2;
+      const dist = Math.abs(x - mid);
+      if (dist < closestDist) {
+        closestDist = dist;
+        hitIndex = i;
       }
       acc += d;
     }
-    return false;
+    if (hitIndex === null) return false;
+    const i = hitIndex;
+    const seg = project.segments[i]!;
+    // Select on pointer down (like click) and start dragging
+    selectSegment(seg.id, false);
+    // For clip group drag: find contiguous block with same mediaId
+    const targetMediaId = seg.mediaId;
+    let groupStart = i;
+    let groupEnd = i;
+    // Expand left
+    for (let j = i - 1; j >= 0; j--) {
+      if (project.segments[j]!.mediaId === targetMediaId) groupStart = j;
+      else break;
+    }
+    // Expand right
+    for (let j = i + 1; j < project.segments.length; j++) {
+      if (project.segments[j]!.mediaId === targetMediaId) groupEnd = j;
+      else break;
+    }
+    setDraggingSegment({
+      id: seg.id,
+      fromIndex: groupStart,
+      startX: x,
+      groupStart,
+      groupEnd,
+      groupSize: groupEnd - groupStart + 1,
+    });
+    setDragOverIndex(groupStart);
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
   }, [project, draggingDiamond, isDraggingPlayhead, draggingAudio, timeToX, selectSegment]);
 
   const handleTimelinePointerDown = useCallback((e: React.PointerEvent) => {
