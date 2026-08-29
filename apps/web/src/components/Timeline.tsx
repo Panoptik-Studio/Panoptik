@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useTimelineThumbnails } from "@/lib/useTimelineThumbnails";
+import { engine } from "@/lib/engineProvider";
 import {
   segmentDuration,
   projectDuration,
@@ -22,6 +23,7 @@ import { AUDIO_TRACK_Y, AUDIO_LANE_HEIGHT, audioBlockGeometry, drawAudioTracks }
 const RULER_HEIGHT = 26;
 const VIDEO_TRACK_Y = 30;
 const VIDEO_TRACK_HEIGHT = 32;
+const ADD_CLIP_ZONE_W = 40;
 const SCREEN_AUDIO_TRACK_Y = 66;
 const SCREEN_AUDIO_TRACK_HEIGHT = 24;
 const FACECAM_TRACK_Y = 94;
@@ -128,6 +130,8 @@ export function Timeline() {
     fromSegIdx: number;
     toSegIdx: number;
   } | null>(null);
+  const [addPopover, setAddPopover] = useState<boolean>(false);
+  const addClipFileRef = useRef<HTMLInputElement>(null);
 
   const project = useProjectStore((s) => s.project);
   const currentTime = useProjectStore((s) => s.currentTime);
@@ -384,6 +388,18 @@ export function Timeline() {
       }
 
       vidAcc += d;
+    }
+
+    // ── 2b. Add-clip affordance: dashed zone at the end of the video track ──
+    if (project && exportProgress === null) {
+      const addX = timeToX(duration);
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = "rgba(0, 112, 243, 0.45)";
+      ctx.lineWidth = 1;
+      drawRoundRect(ctx, addX, VIDEO_TRACK_Y, ADD_CLIP_ZONE_W, VIDEO_TRACK_HEIGHT, 4);
+      ctx.stroke();
+      ctx.restore();
     }
 
     // ── 3. Screen Audio Track (Track 2) ──
@@ -710,7 +726,7 @@ export function Timeline() {
 
     // ── 7. Audio Track Lane (music/voiceover, wall-clock) ──
     drawAudioTracks(ctx, project?.audioTracks ?? [], timeToX, AUDIO_TRACK_Y, AUDIO_LANE_HEIGHT);
-  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying]);
+  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying, exportProgress]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (isDraggingPlayhead || draggingDiamond) return;
@@ -867,14 +883,16 @@ export function Timeline() {
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target?.closest("#timeline-context-menu") || target?.closest("#facecam-transition-popover")) return;
+      if (target?.closest("#timeline-context-menu") || target?.closest("#facecam-transition-popover") || target?.closest("#add-clip-popover")) return;
       setContextMenu(null);
       setTransitionPopover(null);
+      setAddPopover(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setContextMenu(null);
         setTransitionPopover(null);
+        setAddPopover(false);
       }
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
@@ -1159,6 +1177,79 @@ export function Timeline() {
           </div>
           {/* End line */}
           <div className="end-line pointer-events-none absolute top-0 h-full w-px" style={{ transform: `translateX(${endX}px)`, borderLeft: "1px solid rgba(0,0,0,0.08)" }} />
+          {/* Add-clip affordance: "+" at the end of the video filmstrip */}
+          {exportProgress === null && (
+            <>
+              <button
+                className="absolute z-20 flex h-[26px] w-[26px] items-center justify-center rounded-full border border-[#0070f3]/40 bg-white text-[#0070f3] shadow-sm transition-colors hover:bg-[#f0f7ff] hover:text-[#0070f3]"
+                style={{ left: timeToX(duration) + 6, top: VIDEO_TRACK_Y + 3 }}
+                title="Add clip"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAddPopover((v) => !v);
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              </button>
+              <input
+                ref={addClipFileRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setAddPopover(false);
+                  try {
+                    const proj = await engine.loadClip(file);
+                    const media = proj.media[0];
+                    const segment = proj.segments[0];
+                    if (!media || !segment) return;
+                    useProjectStore.getState().appendClip(media, segment);
+                    // Park the playhead at the new end so the appended clip is
+                    // what appears in the preview.
+                    const newEnd = useProjectStore
+                      .getState()
+                      .project!.segments.reduce((a, s) => a + segmentDuration(s), 0);
+                    useProjectStore.getState().seek(newEnd);
+                  } catch (err) {
+                    console.error("import failed", err);
+                  }
+                }}
+              />
+              {addPopover && (
+                <div
+                  id="add-clip-popover"
+                  className="absolute z-30 flex w-44 flex-col rounded-xl border bg-white p-1.5"
+                  style={{ left: timeToX(duration) + 14, top: VIDEO_TRACK_Y + VIDEO_TRACK_HEIGHT + 10, borderColor: "#ebebeb", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <button
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium text-[#333] hover:bg-[#f0f7ff] hover:text-[#0070f3]"
+                    onClick={() => {
+                      setAddPopover(false);
+                      addClipFileRef.current?.click();
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+                    Import video file
+                  </button>
+                  <button
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium text-[#333] hover:bg-[#f0f7ff] hover:text-[#0070f3]"
+                    onClick={() => {
+                      setAddPopover(false);
+                      window.dispatchEvent(new CustomEvent("open-record-modal", { detail: { append: true } }));
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>
+                    Record take
+                  </button>
+                  <span className="mt-1 border-t pt-1.5 text-center text-[10px] text-[#999]" style={{ borderTopColor: "#ebebeb" }}>Appends to end of timeline</span>
+                </div>
+              )}
+            </>
+          )}
           {/* Diamond hit areas on Dedicated Zoom Track (transparent, for dragging) */}
           {project.segments.flatMap((seg) =>
             [...seg.zoomPoints, ...seg.stagedZoomPoints].map((zp) => {
