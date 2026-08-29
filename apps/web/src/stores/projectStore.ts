@@ -176,6 +176,10 @@ interface ProjectStore {
   updateAudioTrack: (id: string, updates: Partial<AudioTrack>) => void;
   removeAudioTrack: (id: string) => void;
 
+  // Multiclip — append assets to the end of the timeline
+  appendClip: (media: Media, segment: Segment) => void;
+  appendRecordedProject: (recorded: Project) => void;
+
   // Playback
   play: () => void;
   pause: () => void;
@@ -565,6 +569,48 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const s = get();
     if (!s.project) return;
     const project = { ...s.project, audioTracks: (s.project.audioTracks ?? []).filter((t) => t.id !== id) };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  // ── Multiclip (append) ──
+
+  appendClip: (media, segment) => {
+    const s = get();
+    if (!s.project || s.exportProgress !== null) return;
+    const project: Project = {
+      ...s.project,
+      media: [...s.project.media, media],
+      segments: [...s.project.segments, segment],
+    };
+    pushHistoryAndSet(project, s, set);
+  },
+
+  appendRecordedProject: (recorded) => {
+    const s = get();
+    if (!s.project || s.exportProgress !== null) return;
+    // Media ids must be unique project-wide — a recorded take may reuse an id
+    // (e.g. re-append after undo). Rename on collision.
+    const used = new Set(s.project.media.map((m) => m.id));
+    const renamedIds = new Map<string, string>();
+    const media = recorded.media.map((m): Media => {
+      let id = m.id;
+      if (used.has(id)) {
+        id = crypto.randomUUID();
+        renamedIds.set(m.id, id);
+      }
+      used.add(id);
+      return { ...m, id, src: m.src };
+    });
+    const segments = recorded.segments.map((seg) => ({
+      ...seg,
+      id: crypto.randomUUID(),
+      mediaId: renamedIds.get(seg.mediaId) ?? seg.mediaId,
+    }));
+    const project: Project = {
+      ...s.project,
+      media: [...s.project.media, ...media],
+      segments: [...s.project.segments, ...segments],
+    };
     pushHistoryAndSet(project, s, set);
   },
 

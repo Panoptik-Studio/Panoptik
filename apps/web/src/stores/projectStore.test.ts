@@ -659,3 +659,72 @@ describe("audio track actions", () => {
     expect(() => useProjectStore.getState().removeAudioTrack("x")).not.toThrow();
   });
 });
+
+const extraMedia = () => ({
+  id: "m2",
+  src: "blob:second",
+  duration: 8,
+  width: 1280,
+  height: 720,
+});
+
+const extraSegment = (): Segment => ({
+  id: "s2",
+  mediaId: "m2",
+  srcStart: 0,
+  srcEnd: 8,
+  speed: 1,
+  stagePadding: 0,
+  aspectPreset: "16:9",
+  background: { kind: "solid", color: "#000000" },
+  facecam: { src: null, x: 0.8, y: 0.8, size: 0.2, shape: "circle" },
+  zoomPoints: [],
+  stagedZoomPoints: [],
+  textOverlays: [],
+  stagedTextOverlays: [],
+  captions: [],
+  stagedCaptions: [],
+});
+
+describe("appendClip (multiclip)", () => {
+  beforeEach(fresh);
+
+  it("appends media + segment and pushes history", () => {
+    const before = useProjectStore.getState().project!.media.length;
+    useProjectStore.getState().appendClip(extraMedia(), extraSegment());
+    const st = useProjectStore.getState();
+    expect(st.project!.media).toHaveLength(before + 1);
+    expect(st.project!.media[before]!.id).toBe("m2");
+    expect(st.project!.segments.at(-1)!.mediaId).toBe("m2");
+    expect(st.historyIndex).toBeGreaterThan(0);
+  });
+
+  it("undo removes the appended clip, redo restores it", () => {
+    useProjectStore.getState().appendClip(extraMedia(), extraSegment());
+    const withClip = structuredClone(useProjectStore.getState().project!);
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().project!.media).not.toHaveLength(withClip.media.length);
+    useProjectStore.getState().redo();
+    expect(useProjectStore.getState().project!.media).toHaveLength(withClip.media.length);
+    expect(useProjectStore.getState().project!.media.some((m) => m.id === "m2")).toBe(true);
+  });
+
+  it("appendRecordedProject merges all media and segments, renames id collisions", () => {
+    useProjectStore.getState().appendClip(extraMedia(), extraSegment());
+    // A recorded project whose media ids collide with the current ones.
+    const recorded = structuredClone(useProjectStore.getState().project!) as Project;
+    recorded.segments = recorded.segments.map((s) => ({ ...s, id: `rec-${s.id}` }));
+    useProjectStore.getState().appendRecordedProject(recorded);
+    const st = useProjectStore.getState();
+    // All media ids unique — the recorded m1/m2 were renamed.
+    expect(new Set(st.project!.media.map((m) => m.id)).size).toBe(st.project!.media.length);
+    // Both the original and the recorded clip survive (media and segments):
+    // 2 current media + 2 recorded (renamed), 2 current segments + 2 recorded.
+    expect(st.project!.media.length).toBe(4);
+    expect(st.project!.segments.length).toBe(4);
+    // Segment mediaIds still point at real media.
+    for (const seg of st.project!.segments) {
+      expect(st.project!.media.some((m) => m.id === seg.mediaId)).toBe(true);
+    }
+  });
+});
