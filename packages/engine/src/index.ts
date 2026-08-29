@@ -53,6 +53,8 @@ export {
 export type { Transform, Viewport, RenderOptions } from "./render";
 
 export { segmentDuration, projectDuration, resolveSegment, sourceToTimeline } from "./timeline";
+export { chapterTitle, groupCaptionsIntoChapters, DEFAULT_GAP_SECONDS } from "./chapters";
+export type { Chapter } from "./chapters";
 export { startRecording, openCameraTrack, openMicrophoneTrack } from "./record";
 export type { RecordingHandles } from "./record";
 export { setFacecamBlob, setAudioBlob } from "./decode";
