@@ -134,7 +134,7 @@ export type Project = {
   clickLog: ClickEvent[];
   /** Always present at runtime (migration defaults it to `[]`); optional in the type so
    *  existing Project literals across the app need not change until they use it. */
-  audioTracks?: AudioTrack[];
+  audioTracks: AudioTrack[];
 };
 
 /** First media id. Deterministic so re-migrating the same file is a no-op. */

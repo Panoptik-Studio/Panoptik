@@ -595,3 +595,65 @@ export async function listProjects(): Promise<
 
   return projects;
 }
+
+// ── Audio track files (Phase 2) ─────────────────────────────────────────────
+// Laid under <projectId>/audio/<trackId>.<ext>, beside the clip/facecam/poster.
+// Extensions come from the blob type; loadAudioTrackFiles strips them back to
+// track ids so a track resolves to exactly one file.
+
+function audioExt(type: string): string {
+  if (type.includes("mpeg")) return "mp3";
+  if (type.includes("wav")) return "wav";
+  if (type.includes("ogg")) return "ogg";
+  if (type.includes("mp4") || type.includes("m4a")) return "m4a";
+  return "webm";
+}
+
+export async function saveAudioTrackFile(projectId: string, trackId: string, blob: Blob): Promise<void> {
+  if (!isSecureContext()) return;
+  const root = await navigator.storage.getDirectory();
+  const dir = await root.getDirectoryHandle(projectId, { create: true });
+  const audioDir = await dir.getDirectoryHandle("audio", { create: true });
+  const fh = await audioDir.getFileHandle(`${trackId}.${audioExt(blob.type)}`, { create: true });
+  const w = await fh.createWritable();
+  await w.write(blob);
+  await w.close();
+}
+
+export async function loadAudioTrackFiles(projectId: string): Promise<{ id: string; blob: Blob }[]> {
+  const out: { id: string; blob: Blob }[] = [];
+  if (!isSecureContext()) return out;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(projectId);
+    const audioDir = await dir.getDirectoryHandle("audio");
+    for await (const [name, handle] of (audioDir as unknown as {
+      entries: () => AsyncIterable<[string, FileSystemHandle]>;
+    }).entries()) {
+      if (handle.kind !== "file") continue;
+      const file = await (handle as FileSystemFileHandle).getFile();
+      out.push({ id: name.replace(/\.[^.]+$/, ""), blob: file });
+    }
+  } catch {
+    /* no audio dir for this project */
+  }
+  return out;
+}
+
+export async function deleteAudioTrackFile(projectId: string, trackId: string): Promise<void> {
+  if (!isSecureContext()) return;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(projectId);
+    const audioDir = await dir.getDirectoryHandle("audio");
+    const doomed: string[] = [];
+    for await (const [name, handle] of (audioDir as unknown as {
+      entries: () => AsyncIterable<[string, FileSystemHandle]>;
+    }).entries()) {
+      if (handle.kind === "file" && name.startsWith(trackId)) doomed.push(name);
+    }
+    for (const name of doomed) await audioDir.removeEntry(name);
+  } catch {
+    /* nothing stored for it */
+  }
+}
