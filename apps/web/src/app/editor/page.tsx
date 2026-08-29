@@ -6,6 +6,7 @@
 "use client";
 
 import * as React from "react";
+import { AudioPanel } from "@/components/AudioPanel";
 import { CameraControls } from "@/components/CameraControls";
 import { CaptionsPanel } from "@/components/CaptionsPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -23,7 +24,7 @@ import { Toolbar } from "@/components/Toolbar";
 import { ZoomPanel } from "@/components/ZoomPanel";
 import { useProjectPersistence } from "@/lib/useProjectPersistence";
 
-type LeftTab = "media" | "zoom" | "text" | "captions" | "camera" | "stage";
+type LeftTab = "media" | "zoom" | "text" | "captions" | "audio" | "camera" | "stage";
 export default function EditorPage() {
   const [activeTab, setActiveTab] = React.useState<LeftTab>("media");
   // Above the tabs: the clip must come back on reload regardless of which
@@ -40,6 +41,7 @@ export default function EditorPage() {
           <ToolBtn icon="zoom" label="Zoom" kbd="Z" active={activeTab === "zoom"} onClick={() => setActiveTab("zoom")} />
           <ToolBtn icon="text" label="Text" kbd="T" active={activeTab === "text"} onClick={() => setActiveTab("text")} />
           <ToolBtn icon="captions" label="Captions" active={activeTab === "captions"} onClick={() => setActiveTab("captions")} />
+          <ToolBtn icon="audio" label="Audio" active={activeTab === "audio"} onClick={() => setActiveTab("audio")} />
           <ToolBtn icon="camera" label="Camera" active={activeTab === "camera"} onClick={() => setActiveTab("camera")} />
           <ToolBtn icon="stage" label="Stage" active={activeTab === "stage"} onClick={() => setActiveTab("stage")} />
           <div className="mt-auto flex flex-col items-center gap-2 pb-2">
@@ -67,6 +69,7 @@ export default function EditorPage() {
           )}
           {activeTab === "text" && <Inspector />}
           {activeTab === "captions" && <CaptionsSlot />}
+          {activeTab === "audio" && <AudioPanel />}
           {activeTab === "camera" && <CameraControls />}
           {activeTab === "stage" && <StageControls />}
           {/* Export always reachable via header, but also show in media tab */}
@@ -112,6 +115,9 @@ function ToolBtn({ icon, label, kbd, active, onClick }: { icon: string; label: s
     ),
     captions: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M3 7h18"/><path d="M3 12h10"/><path d="M3 17h14"/><path d="M17 7v10"/><path d="M7 12v5"/></svg>
+    ),
+    audio: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
     ),
     camera: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
