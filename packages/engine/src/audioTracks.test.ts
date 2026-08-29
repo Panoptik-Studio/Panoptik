@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyTrackEnvelope,
   clearTrackBuffers,
+  computeDuckingEnvelope,
   getTrackBuffer,
   registerTrackBuffer,
   trackGainAt,
@@ -55,5 +56,33 @@ describe("buffer registry", () => {
     expect(getTrackBuffer("a")).toBe(b);
     clearTrackBuffers();
     expect(getTrackBuffer("a")).toBeNull();
+  });
+});
+
+describe("computeDuckingEnvelope", () => {
+  it("amount 0 returns all ones", () => {
+    const g = computeDuckingEnvelope(constBuffer(1), 0);
+    expect(g[0]).toBe(1);
+    expect(g[g.length - 1]).toBe(1);
+  });
+  it("silence keeps gain at 1", () => {
+    const g = computeDuckingEnvelope(constBuffer(1, 0), 0.8);
+    expect(g[Math.floor(g.length / 2)]).toBe(1);
+  });
+  it("loud uniform audio ducks to ~1-amount", () => {
+    const g = computeDuckingEnvelope(constBuffer(1, 0.5), 0.8);
+    const mid = g[Math.floor(g.length / 2)];
+    expect(mid).toBeGreaterThan(0.1);
+    expect(mid).toBeLessThan(0.3); // 1 - 0.8 = 0.2 with smoothing
+  });
+  it("silence→speech transition ramps, not jumps", () => {
+    const buf = makeBuffer(1, 2 * sr, sr, [new Float32Array(2 * sr)]);
+    for (let i = sr; i < 2 * sr; i++) buf.getChannelData(0)[i] = 0.5;
+    const g = computeDuckingEnvelope(buf, 1);
+    expect(g[0]).toBe(1);                      // silence
+    expect(g[2 * sr - 1]).toBeLessThan(0.2);   // speech
+    const atBoundary = g[sr];
+    expect(atBoundary).toBeGreaterThan(0.2);   // smoothed edge
+    expect(atBoundary).toBeLessThan(1);
   });
 });

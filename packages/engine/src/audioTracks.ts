@@ -57,3 +57,60 @@ export function applyTrackEnvelope(buffer: AudioBuffer, track: AudioTrack): Audi
   }
   return out;
 }
+
+// ── Dialogue ducking ─────────────────────────────────────────────────────────
+/** Per-window RMS of a channel-averaged mixdown. */
+function windowRms(base: AudioBuffer, windowMs: number): { rms: Float32Array; winLen: number } {
+  const winLen = Math.max(1, Math.round((windowMs / 1000) * base.sampleRate));
+  const nWindows = Math.max(1, Math.ceil(base.length / winLen));
+  const rms = new Float32Array(nWindows);
+  const mono = new Float32Array(base.length);
+  for (let ch = 0; ch < base.numberOfChannels; ch++) {
+    const d = base.getChannelData(ch);
+    for (let i = 0; i < base.length; i++) mono[i] += d[i] / base.numberOfChannels;
+  }
+  for (let w = 0; w < nWindows; w++) {
+    const start = w * winLen;
+    const end = Math.min(base.length, start + winLen);
+    let sum = 0;
+    for (let i = start; i < end; i++) sum += mono[i] * mono[i];
+    rms[w] = Math.sqrt(sum / Math.max(1, end - start));
+  }
+  return { rms, winLen };
+}
+
+/**
+ * Per-sample gain (0..1) ducking `base` where speech is present.
+ * Deterministic: presence = clamp((rms - noiseFloor) / (speechRef - noiseFloor))
+ * with noiseFloor = peak*0.1, speechRef = peak*0.5, smoothed by a 3-window box.
+ * amount 0 → all ones; amount 1 → near-silence under loud dialogue.
+ */
+export function computeDuckingEnvelope(base: AudioBuffer, amount: number, windowMs = 50): Float32Array {
+  const n = base.length;
+  const gain = new Float32Array(n);
+  gain.fill(1);
+  if (amount <= 0 || n === 0) return gain;
+  const { rms, winLen } = windowRms(base, windowMs);
+  let peak = 0;
+  for (let i = 0; i < rms.length; i++) if (rms[i] > peak) peak = rms[i];
+  if (peak === 0) return gain;
+  const noiseFloor = peak * 0.1;
+  const speechRef = peak * 0.5;
+  const presence = new Float32Array(rms.length);
+  for (let i = 0; i < rms.length; i++) {
+    presence[i] = Math.min(1, Math.max(0, (rms[i] - noiseFloor) / (speechRef - noiseFloor)));
+  }
+  const smooth = new Float32Array(rms.length);
+  for (let i = 0; i < rms.length; i++) {
+    const a = presence[Math.max(0, i - 1)] ?? 0;
+    const c = presence[Math.min(rms.length - 1, i + 1)] ?? 0;
+    smooth[i] = (a + presence[i] + c) / 3;
+  }
+  for (let w = 0; w < rms.length; w++) {
+    const g = 1 - amount * smooth[w];
+    const start = w * winLen;
+    const end = Math.min(n, start + winLen);
+    for (let i = start; i < end; i++) gain[i] = g;
+  }
+  return gain;
+}
