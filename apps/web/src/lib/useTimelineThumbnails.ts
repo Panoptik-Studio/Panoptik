@@ -2,13 +2,18 @@
  * Hook to extract and cache video frame thumbnails across the timeline.
  * Samples frames at regular intervals using an offscreen HTMLVideoElement and draws them
  * to lightweight canvas tiles for instant, high-performance timeline filmstrip rendering.
+ *
+ * Multiclip: one cache per media id, keyed independently so segments cut from
+ * different clips each show their own filmstrip — and one clip's extraction
+ * never forces another's to re-run.
  */
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import type { Media, Project } from "@panoptik/schema";
 
 export interface ThumbnailCache {
-  getThumbnail: (time: number) => HTMLCanvasElement | null;
+  getThumbnail: (mediaId: string, time: number) => HTMLCanvasElement | null;
   version: number;
 }
 
@@ -71,167 +76,176 @@ export function findClosestThumbnailTimestamp(
   return Math.abs(cand1 - target) <= Math.abs(cand2 - target) ? cand1 : cand2;
 }
 
-export function useTimelineThumbnails(
-  mediaSrc: string | undefined | null,
-  duration: number | undefined | null,
-): ThumbnailCache {
+/** One media id's extracted thumbnails + its source identity. */
+type MediaCache = {
+  key: string;
+  cache: Map<number, HTMLCanvasElement>;
+  sorted: number[];
+};
+
+const mediaKey = (m: Media) => `${m.id}:${m.src}:${m.duration}`;
+
+export function useTimelineThumbnails(project: Project | null): ThumbnailCache {
   const [version, setVersion] = useState(0);
-  const cacheRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
-  const sortedTimesRef = useRef<number[]>([]);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const lastSrcRef = useRef<string | null>(null);
-  const lastDurationRef = useRef<number | null>(null);
+  const cachesRef = useRef<Map<string, MediaCache>>(new Map());
+  const abortsRef = useRef<Map<string, AbortController>>(new Map());
+
+  // Re-run extraction only when the set/properties of media change — not on
+  // every store write.
+  const mediaSignature = (project?.media ?? []).map(mediaKey).join("|");
 
   useEffect(() => {
-    // If media source and duration haven't changed and cache is populated, preserve thumbnails
-    if (
-      mediaSrc === lastSrcRef.current &&
-      duration === lastDurationRef.current &&
-      cacheRef.current.size > 0
-    ) {
-      return;
+    const media = project?.media ?? [];
+
+    // 1. Drop caches + kill in-flight extractions for media that vanished or
+    //    changed (src/duration). Keyed by media id.
+    for (const [id, entry] of cachesRef.current.entries()) {
+      const m = media.find((x) => x.id === id);
+      if (!m || mediaKey(m) !== entry.key) {
+        abortsRef.current.get(id)?.abort();
+        abortsRef.current.delete(id);
+        cachesRef.current.delete(id);
+      }
     }
 
-    lastSrcRef.current = mediaSrc ?? null;
-    lastDurationRef.current = duration ?? null;
+    // 2. Start extraction for each media entry that has none in flight yet.
+    for (const m of media) {
+      if (!m.src || m.duration <= 0) continue;
+      const key = mediaKey(m);
+      if (abortsRef.current.has(m.id)) continue; // extraction in flight
+      const existing = cachesRef.current.get(m.id);
+      if (existing && existing.key === key && existing.cache.size > 0) continue;
 
-    // Clear previous thumbnails when media source changes
-    cacheRef.current.clear();
-    sortedTimesRef.current = [];
-    setVersion((v) => v + 1);
+      const abort = new AbortController();
+      abortsRef.current.set(m.id, abort);
+      const cache: MediaCache = existing && existing.key === key ? existing : { key, cache: new Map(), sorted: [] };
+      if (existing && existing.key !== key) cachesRef.current.set(m.id, cache);
 
-    if (!mediaSrc || !duration || duration <= 0 || typeof window === "undefined" || typeof document === "undefined") {
-      return;
-    }
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      video.src = m.src;
 
-    const abort = new AbortController();
-    abortControllerRef.current = abort;
+      let destroyed = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const bump = () => {
+        if (timer || destroyed) return;
+        timer = setTimeout(() => {
+          timer = null;
+          if (!destroyed) setVersion((v) => v + 1);
+        }, 100);
+      };
 
-    const video = document.createElement("video");
-    video.crossOrigin = "anonymous";
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = "auto";
-    video.src = mediaSrc;
-
-    let isDestroyed = false;
-    let updateTimer: NodeJS.Timeout | null = null;
-
-    const scheduleVersionBump = () => {
-      if (updateTimer || isDestroyed) return;
-      updateTimer = setTimeout(() => {
-        updateTimer = null;
-        if (!isDestroyed) {
-          setVersion((v) => v + 1);
-        }
-      }, 100);
-    };
-
-    const cleanup = () => {
-      isDestroyed = true;
-      if (updateTimer) clearTimeout(updateTimer);
-      abort.abort();
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    };
-
-    const runExtraction = async () => {
-      // Wait for video metadata to read dimensions & duration
-      await new Promise<void>((resolve) => {
-        if (video.readyState >= 1) {
-          resolve();
-          return;
-        }
-        const onLoaded = () => {
-          video.removeEventListener("loadedmetadata", onLoaded);
-          video.removeEventListener("error", onError);
-          resolve();
-        };
-        const onError = () => {
-          video.removeEventListener("loadedmetadata", onLoaded);
-          video.removeEventListener("error", onError);
-          resolve();
-        };
-        video.addEventListener("loadedmetadata", onLoaded);
-        video.addEventListener("error", onError);
-      });
-
-      if (isDestroyed || abort.signal.aborted) return;
-
-      const dur = duration;
-      const aspect = (video.videoWidth && video.videoHeight)
-        ? video.videoWidth / video.videoHeight
-        : 16 / 9;
-
-      const thumbHeight = 72;
-      const thumbWidth = Math.max(36, Math.round(thumbHeight * aspect));
-
-      const timestamps = generateThumbnailTimestamps(dur);
-
-      for (const t of timestamps) {
-        if (isDestroyed || abort.signal.aborted) break;
-
+      const runExtraction = async () => {
         await new Promise<void>((resolve) => {
-          let timeoutId: NodeJS.Timeout | null = null;
-          const onSeeked = () => {
-            if (timeoutId) clearTimeout(timeoutId);
-            video.removeEventListener("seeked", onSeeked);
-            video.removeEventListener("error", onErr);
+          if (video.readyState >= 1) {
+            resolve();
+            return;
+          }
+          const onLoaded = () => {
+            video.removeEventListener("loadedmetadata", onLoaded);
+            video.removeEventListener("error", onError);
             resolve();
           };
-          const onErr = () => {
-            if (timeoutId) clearTimeout(timeoutId);
-            video.removeEventListener("seeked", onSeeked);
-            video.removeEventListener("error", onErr);
+          const onError = () => {
+            video.removeEventListener("loadedmetadata", onLoaded);
+            video.removeEventListener("error", onError);
             resolve();
           };
-          timeoutId = setTimeout(() => {
-            video.removeEventListener("seeked", onSeeked);
-            video.removeEventListener("error", onErr);
-            resolve();
-          }, 350);
-
-          video.addEventListener("seeked", onSeeked, { once: true });
-          video.addEventListener("error", onErr, { once: true });
-          video.currentTime = Math.max(0, Math.min(dur, t));
+          video.addEventListener("loadedmetadata", onLoaded);
+          video.addEventListener("error", onError);
         });
 
-        if (isDestroyed || abort.signal.aborted) break;
+        if (destroyed || abort.signal.aborted) return;
 
-        try {
-          const canvas = document.createElement("canvas");
-          canvas.width = thumbWidth;
-          canvas.height = thumbHeight;
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            ctx.drawImage(video, 0, 0, thumbWidth, thumbHeight);
-            cacheRef.current.set(t, canvas);
-            sortedTimesRef.current.push(t);
-            sortedTimesRef.current.sort((a, b) => a - b);
-            scheduleVersionBump();
+        const dur = m.duration;
+        const aspect = (video.videoWidth && video.videoHeight)
+          ? video.videoWidth / video.videoHeight
+          : 16 / 9;
+
+        const thumbHeight = 72;
+        const thumbWidth = Math.max(36, Math.round(thumbHeight * aspect));
+        const timestamps = generateThumbnailTimestamps(dur);
+
+        for (const t of timestamps) {
+          if (destroyed || abort.signal.aborted) break;
+
+          await new Promise<void>((resolve) => {
+            let timeoutId: ReturnType<typeof setTimeout> | null = null;
+            const onSeeked = () => {
+              if (timeoutId) clearTimeout(timeoutId);
+              video.removeEventListener("seeked", onSeeked);
+              video.removeEventListener("error", onErr);
+              resolve();
+            };
+            const onErr = () => {
+              if (timeoutId) clearTimeout(timeoutId);
+              video.removeEventListener("seeked", onSeeked);
+              video.removeEventListener("error", onErr);
+              resolve();
+            };
+            timeoutId = setTimeout(() => {
+              video.removeEventListener("seeked", onSeeked);
+              video.removeEventListener("error", onErr);
+              resolve();
+            }, 350);
+
+            video.addEventListener("seeked", onSeeked, { once: true });
+            video.addEventListener("error", onErr, { once: true });
+            video.currentTime = Math.max(0, Math.min(dur, t));
+          });
+
+          if (destroyed || abort.signal.aborted) break;
+
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = thumbWidth;
+            canvas.height = thumbHeight;
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+              ctx.drawImage(video, 0, 0, thumbWidth, thumbHeight);
+              const entry = cachesRef.current.get(m.id);
+              if (entry) {
+                entry.cache.set(t, canvas);
+                entry.sorted.push(t);
+                entry.sorted.sort((a, b) => a - b);
+                bump();
+              }
+            }
+          } catch {
+            // If canvas draw fails (e.g. tainted canvas or decode error), continue
           }
-        } catch {
-          // If canvas draw fails (e.g. tainted canvas or decode error), continue
         }
-      }
 
-      // Final version bump when extraction completes
-      if (!isDestroyed && !abort.signal.aborted) {
-        setVersion((v) => v + 1);
+        if (!destroyed && !abort.signal.aborted) {
+          setVersion((v) => v + 1);
+        }
+      };
+
+      runExtraction();
+    }
+
+    // Cleanup runs on unmount AND before every re-run (media changed). Abort
+    // in-flight extractions and drop their (possibly partial) caches — a
+    // fully-extracted cache untouched by this round survives, so appending one
+    // clip does not wipe the other clips' filmstrips.
+    return () => {
+      for (const [id, abort] of abortsRef.current.entries()) {
+        abort.abort();
+        cachesRef.current.delete(id);
       }
+      abortsRef.current.clear();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaSignature]);
 
-    runExtraction();
-
-    return cleanup;
-  }, [mediaSrc, duration]);
-
-  const getThumbnail = useCallback((time: number): HTMLCanvasElement | null => {
-    const times = sortedTimesRef.current;
-    const closest = findClosestThumbnailTimestamp(times, time);
+  const getThumbnail = useCallback((mediaId: string, time: number): HTMLCanvasElement | null => {
+    const entry = cachesRef.current.get(mediaId);
+    if (!entry) return null;
+    const closest = findClosestThumbnailTimestamp(entry.sorted, time);
     if (closest === null) return null;
-    return cacheRef.current.get(closest) ?? null;
+    return entry.cache.get(closest) ?? null;
   }, []);
 
   return { getThumbnail, version };

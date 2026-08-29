@@ -194,10 +194,7 @@ export function Timeline() {
     timelineT: number;
   } | null>(null);
 
-  const { getThumbnail, version: thumbVersion } = useTimelineThumbnails(
-    project?.media?.[0]?.src,
-    project?.media?.[0]?.duration,
-  );
+  const { getThumbnail, version: thumbVersion } = useTimelineThumbnails(project);
 
   // On-timeline duration across all segments.
   const duration = project ? Math.max(projectDuration(project), 0.001) : 0.001;
@@ -294,7 +291,7 @@ export function Timeline() {
         const progress = Math.max(0, Math.min(1, (tx + currentTileW / 2 - x0) / segW));
         const srcT = seg.srcStart + progress * (seg.srcEnd - seg.srcStart);
 
-        const thumb = getThumbnail(srcT);
+        const thumb = getThumbnail(seg.mediaId ?? "m1", srcT);
         if (thumb) {
           ctx.drawImage(thumb, 0, 0, thumb.width, thumb.height, tx, VIDEO_TRACK_Y, currentTileW, tileH);
         } else {
