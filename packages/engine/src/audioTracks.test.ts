@@ -4,6 +4,7 @@ import {
   clearTrackBuffers,
   computeDuckingEnvelope,
   getTrackBuffer,
+  mixTracksIntoBase,
   registerTrackBuffer,
   trackGainAt,
 } from "./audioTracks";
@@ -84,5 +85,40 @@ describe("computeDuckingEnvelope", () => {
     const atBoundary = g[sr];
     expect(atBoundary).toBeGreaterThan(0.2);   // smoothed edge
     expect(atBoundary).toBeLessThan(1);
+  });
+});
+
+describe("mixTracksIntoBase", () => {
+  it("places a track at startT with volume applied", () => {
+    const base = constBuffer(1, 0);
+    const music = constBuffer(0.5, 0.5);
+    const out = mixTracksIntoBase(base, [{ track: track({ startT: 0.25, volume: 1, duration: 0.5 }), buffer: music }]);
+    expect(out.getChannelData(0)[Math.floor(0.2 * sr)]).toBe(0);
+    expect(out.getChannelData(0)[Math.floor(0.3 * sr)]).toBeCloseTo(0.5);
+    expect(out.getChannelData(0)[Math.floor(0.8 * sr)]).toBe(0); // track ended at 0.75
+  });
+  it("extends output when the track runs past the base", () => {
+    const base = constBuffer(1, 0);
+    const out = mixTracksIntoBase(base, [{ track: track({ startT: 0.5, duration: 1 }), buffer: constBuffer(1, 0.2) }]);
+    expect(out.duration).toBeCloseTo(1.5, 5);
+  });
+  it("sums on top of the base without clipping the base away", () => {
+    const base = constBuffer(1, 0.2);
+    const out = mixTracksIntoBase(base, [{ track: track({ startT: 0, duration: 1, volume: 1 }), buffer: constBuffer(1, 0.3) }]);
+    expect(out.getChannelData(0)[0]).toBeCloseTo(0.5);
+  });
+  it("applies ducking to music where the base is loud", () => {
+    const speech = makeBuffer(1, 1 * sr, sr, [new Float32Array(1 * sr).fill(0.5)]);
+    const out = mixTracksIntoBase(speech, [
+      { track: track({ startT: 0, duration: 1, volume: 1, ducking: 1 }), buffer: constBuffer(1, 0.4) },
+    ]);
+    // base 0.5 + music 0.4*(1-ducking~1) ≈ 0.5 + small
+    expect(out.getChannelData(0)[Math.floor(0.5 * sr)]).toBeLessThan(0.62);
+  });
+  it("resamples a differently-rated track into place", () => {
+    const base = constBuffer(1, 0); // sr 1000
+    const hi = makeBuffer(1, 1 * 2000, 2000, [new Float32Array(2000).fill(0.5)]);
+    const out = mixTracksIntoBase(base, [{ track: track({ startT: 0, duration: 1 }), buffer: hi }]);
+    expect(out.getChannelData(0)[Math.floor(0.5 * sr)]).toBeCloseTo(0.5, 2);
   });
 });

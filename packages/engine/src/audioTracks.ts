@@ -114,3 +114,64 @@ export function computeDuckingEnvelope(base: AudioBuffer, amount: number, window
   }
   return gain;
 }
+
+// ── Timeline mixing ──────────────────────────────────────────────────────────
+export type ResolvedTrack = { track: AudioTrack; buffer: AudioBuffer };
+
+/** Linear-resample `src` into `out`'s rate/channels and ADD it at `offsetSamples`. */
+function addResampled(
+  out: AudioBuffer,
+  src: AudioBuffer,
+  offsetSamples: number,
+  gainPerSample: ((i: number) => number) | null,
+): void {
+  const ratio = src.sampleRate / out.sampleRate;
+  const srcLen = src.length;
+  for (let ch = 0; ch < out.numberOfChannels; ch++) {
+    const dst = out.getChannelData(ch);
+    const srcCh = src.getChannelData(Math.min(ch, src.numberOfChannels - 1));
+    for (let i = 0; ; i++) {
+      const idx = offsetSamples + i;
+      if (idx >= dst.length) break;
+      const s = i * ratio;
+      const i0 = Math.floor(s);
+      if (i0 >= srcLen) break;
+      const i1 = Math.min(srcLen - 1, i0 + 1);
+      const sample = srcCh[i0] + (srcCh[i1] - srcCh[i0]) * (s - i0);
+      dst[idx] += sample * (gainPerSample ? gainPerSample(idx) : 1);
+    }
+  }
+}
+
+/**
+ * Sum tracks onto the timeline buffer at wall-clock positions. Output is at
+ * `base` rate/channels, extended when a track runs past the end. Music tracks
+ * with `ducking` get the dialogue envelope of `base` applied to their
+ * contribution; voiceover (being dialogue itself) never ducks.
+ */
+export function mixTracksIntoBase(base: AudioBuffer, tracks: ResolvedTrack[]): AudioBuffer {
+  const sr = base.sampleRate;
+  let endSample = base.length;
+  for (const { track, buffer } of tracks) {
+    endSample = Math.max(endSample, Math.round((track.startT + buffer.duration) * sr));
+  }
+  const out = makeBuffer(
+    base.numberOfChannels,
+    endSample,
+    sr,
+    Array.from({ length: base.numberOfChannels }, () => new Float32Array(endSample)),
+  );
+  for (let ch = 0; ch < base.numberOfChannels; ch++) {
+    out.getChannelData(ch).set(base.getChannelData(ch));
+  }
+  for (const { track, buffer } of tracks) {
+    const enveloped = applyTrackEnvelope(buffer, track);
+    const offset = Math.max(0, Math.round(track.startT * sr));
+    const duck =
+      track.kind === "music" && track.ducking
+        ? computeDuckingEnvelope(base, track.ducking)
+        : null;
+    addResampled(out, enveloped, offset, duck ? (i) => duck[i] ?? 1 : null);
+  }
+  return out;
+}
