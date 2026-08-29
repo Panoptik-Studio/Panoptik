@@ -17,6 +17,7 @@ import {
 } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { engine } from "@/lib/engineProvider";
+import { syncTrackPlayback, trackBufferMap } from "@/lib/trackPlayback";
 import {
   IDENTITY,
   cameraViewport,
@@ -578,6 +579,13 @@ export function PreviewCanvas() {
             fcAudio.pause();
           }
         }
+      }
+
+      // Music/voiceover — wall-clock timeline time via Web Audio. Runs every
+      // frame (not just while playing) so a pause stops the sources.
+      {
+        const audioTracks = state.project?.audioTracks ?? [];
+        syncTrackPlayback(tEff, state.isPlaying, audioTracks, trackBufferMap(audioTracks));
       }
 
       // Don't contend with export's pump — it drives desiredTime at 30fps
