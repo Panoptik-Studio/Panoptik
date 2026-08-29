@@ -51,6 +51,28 @@ export type Facecam = {
   audioVolume?: number; // 0.0 - 2.0 (1.0 = 100%)
 }; // all normalized 0-1, shape for PiP
 
+/**
+ * An audio asset laid on the timeline at wall-clock speed (music, voiceover).
+ * Ignores segment speed on purpose — background music must not be stretched.
+ */
+export type AudioTrack = {
+  id: string;
+  kind: "music" | "voiceover";
+  name?: string;
+  /** Object URL for this session; re-minted from OPFS on load (same rule as background images). */
+  src: string;
+  duration: number;
+  /** 0–2 (1 = unchanged). */
+  volume: number;
+  /** Timeline seconds where the track begins. */
+  startT: number;
+  /** Fade-in/out in seconds. */
+  fadeIn?: number;
+  fadeOut?: number;
+  /** 0–1: how much to duck under dialogue. null/undefined = off. Music only. */
+  ducking?: number | null;
+};
+
 export type ClickEvent = {
   t: number;
   x: number; // normalized 0-1
@@ -110,6 +132,7 @@ export type Project = {
   audioSrc?: string | null;
   segments: Segment[];
   clickLog: ClickEvent[];
+  audioTracks: AudioTrack[];
 };
 
 /** First media id. Deterministic so re-migrating the same file is a no-op. */
@@ -142,7 +165,9 @@ export function migrateProject(raw: unknown): Project {
   // v1.3: media is an array. Checked before the v1.2 test below, because an
   // array is also `typeof "object"` and would otherwise pass as v1.2.
   if (Array.isArray(r.media) && Array.isArray(r.segments)) {
-    return raw as Project;
+    const p = raw as Project;
+    if (!Array.isArray(p.audioTracks)) p.audioTracks = [];
+    return p;
   }
 
   // v1.2: one media object plus segments. Wrap the media in an array, give it
@@ -150,9 +175,13 @@ export function migrateProject(raw: unknown): Project {
   if (Array.isArray(r.segments) && r.media && typeof r.media === "object") {
     const v12 = raw as Omit<Project, "media"> & { media: Omit<Media, "id"> & { id?: string } };
     const only: Media = { ...v12.media, id: v12.media.id ?? FIRST_MEDIA_ID };
+    const audioTracks = Array.isArray((v12 as unknown as { audioTracks?: unknown }).audioTracks)
+      ? (v12 as Project).audioTracks
+      : ((r.audioTracks ?? []) as AudioTrack[]);
     return {
       ...v12,
       media: [only],
+      audioTracks,
       segments: v12.segments.map((seg) => ({
         ...seg,
         mediaId: (seg as Segment).mediaId ?? only.id,
@@ -201,6 +230,7 @@ export function migrateProject(raw: unknown): Project {
     audioSrc: r.audioSrc ? String(r.audioSrc) : null,
     segments: [seg],
     clickLog: ((r.clickLog ?? []) as ClickEvent[]).map((e) => ({ ...e })),
+    audioTracks: ((r.audioTracks ?? []) as AudioTrack[]).map((t) => ({ ...t })),
   };
 }
 

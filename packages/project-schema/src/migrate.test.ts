@@ -5,6 +5,7 @@ import {
   mediaForSegment,
   migrateProject,
   primaryMedia,
+  type AudioTrack,
   type Media,
   type Project,
   type Segment,
@@ -115,6 +116,7 @@ describe("migrateProject v1.3", () => {
     segments: [v12Segment({ mediaId: "m1" })],
     audioSrc: null,
     clickLog: [],
+    audioTracks: [],
   });
 
   it("passes an already-migrated project straight through", () => {
@@ -143,6 +145,7 @@ describe("migrateProject v1.3", () => {
       segments: [v12Segment({ id: "s1", mediaId: "m1" }), v12Segment({ id: "s2", mediaId: "m2" })],
       audioSrc: null,
       clickLog: [],
+      audioTracks: [],
     };
     const p = migrateProject(many);
     expect(p.media).toHaveLength(2);
@@ -160,6 +163,7 @@ describe("media accessors", () => {
     segments: [v12Segment({ id: "s1", mediaId: "m2" })],
     audioSrc: null,
     clickLog: [],
+    audioTracks: [],
   };
 
   it("resolves a segment to the clip it cuts from", () => {
@@ -179,5 +183,33 @@ describe("media accessors", () => {
 
   it("primaryMedia is the first clip", () => {
     expect(primaryMedia(project).id).toBe("m1");
+  });
+});
+
+describe("audioTracks (phase 2)", () => {
+  const media = { id: "m1", src: "blob:x", duration: 10, width: 1280, height: 720 } as Media;
+  const seg: Segment = {
+    id: "s1", mediaId: "m1", srcStart: 0, srcEnd: 10, speed: 1,
+    stagePadding: 0, aspectPreset: "source",
+    background: { kind: "solid", color: "#000" },
+    facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+    zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
+    captions: [], stagedCaptions: [],
+  };
+
+  it("fast-path v1.2 projects gain an empty audioTracks array", () => {
+    const p = migrateProject({ id: "p1", media, segments: [seg], clickLog: [] });
+    expect(p.audioTracks).toEqual([]);
+  });
+
+  it("legacy clip projects gain audioTracks through the migration path", () => {
+    const p = migrateProject({ id: "old", clip: { src: "blob:y", duration: 5, width: 640, height: 360 } });
+    expect(p.audioTracks).toEqual([]);
+  });
+
+  it("existing audioTracks survive migration", () => {
+    const track: AudioTrack = { id: "t1", kind: "music", src: "blob:z", duration: 30, volume: 1, startT: 2, ducking: 0.5 };
+    const p = migrateProject({ id: "p2", media, segments: [], audioTracks: [track], clickLog: [] });
+    expect(p.audioTracks).toEqual([track]);
   });
 });
