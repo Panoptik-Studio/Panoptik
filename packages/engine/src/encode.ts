@@ -242,7 +242,8 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
     // segment: each segment's source window is sliced out and stretched to its
     // own timeline length, then concatenated so the muxed audio matches video.
     let spedAudioBuffer: AudioBuffer | null = audioBuffer;
-    if (audioBuffer) {
+    const hasAnyFacecamAudio = project.segments.some((s) => !!s.facecam?.src);
+    if (audioBuffer || hasAnyFacecamAudio) {
       try {
         const screenSrc = primaryMedia(project).src;
         const defaultScreenBuf = (await getBufferForSrc(screenSrc)) || audioBuffer;
@@ -252,8 +253,11 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           const screenVol = seg.audioVolume ?? 1;
           const fcVol = seg.facecam?.audioVolume ?? 1;
 
-          // 1. Process Screen Audio
-          const screenPart = sliceAndStretchAudio(defaultScreenBuf, seg);
+          // 1. Process Screen Audio — null when there's no decodable screen audio (e.g. WebCodecs path without audio or silent import)
+          let screenPart: AudioBuffer | null = null;
+          if (defaultScreenBuf) {
+            screenPart = sliceAndStretchAudio(defaultScreenBuf, seg);
+          }
 
           // 2. Process Facecam / Mic Audio
           const fcSrc = seg.facecam?.src;
@@ -275,11 +279,20 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           }
 
           // 3. Dual-track mixing with volume scaling
-          let mixedSegAudio: AudioBuffer;
-          if (fcPart) {
+          let mixedSegAudio: AudioBuffer | null = null;
+          if (screenPart && fcPart) {
             mixedSegAudio = mixAudio(screenPart, screenVol, fcPart, fcVol);
-          } else {
+          } else if (screenPart) {
             mixedSegAudio = applyVolume(screenPart, screenVol);
+          } else if (fcPart) {
+            mixedSegAudio = applyVolume(fcPart, fcVol);
+          } else {
+            // Neither source has audio for this segment — produce silence of correct timeline duration
+            const dur = segmentDuration(seg);
+            const sr = (defaultScreenBuf ?? fcPart ?? audioBuffer)?.sampleRate ?? 48000;
+            const len = Math.max(1, Math.round(dur * sr));
+            const { makeBuffer } = await import("./timeStretch");
+            mixedSegAudio = makeBuffer(1, len, sr, [new Float32Array(len)]);
           }
 
           parts.push(mixedSegAudio);
@@ -290,13 +303,29 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         }
         console.log("[Export] per-segment audio windows", {
           parts: parts.length,
-          from: audioBuffer.duration.toFixed(2),
+          from: audioBuffer ? audioBuffer.duration.toFixed(2) : "0 (no screen audio)",
           to: spedAudioBuffer ? spedAudioBuffer.duration.toFixed(2) : "0",
           segments: project.segments.map((s) => `${s.srcStart}-${s.srcEnd}@${s.speed}x`),
         });
       } catch (e) {
         console.warn("[Export] audio time-stretch failed, using original", e);
         spedAudioBuffer = audioBuffer;
+        // If we failed but facecam audio exists and base was null, try to build from facecam alone as fallback
+        if (!spedAudioBuffer && hasAnyFacecamAudio) {
+          try {
+            const fallbackParts: AudioBuffer[] = [];
+            for (const seg of project.segments) {
+              const fcSrc = seg.facecam?.src;
+              if (!fcSrc) continue;
+              const fcBuf = await getBufferForSrc(fcSrc);
+              if (fcBuf) fallbackParts.push(sliceAndStretchAudio(fcBuf, seg));
+            }
+            if (fallbackParts.length > 0) {
+              const { concatAudio: ca } = await import("./timeStretch");
+              spedAudioBuffer = ca(fallbackParts);
+            }
+          } catch { /* leave null */ }
+        }
       }
     }
 
@@ -314,8 +343,20 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
             (track.src.startsWith("blob:") ? await getBufferForSrc(track.src) : null);
           if (buffer) resolved.push({ track, buffer });
         }
-        if (resolved.length > 0 && spedAudioBuffer) {
-          spedAudioBuffer = at.mixTracksIntoBase(spedAudioBuffer, resolved);
+        if (resolved.length > 0) {
+          if (spedAudioBuffer) {
+            spedAudioBuffer = at.mixTracksIntoBase(spedAudioBuffer, resolved);
+          } else {
+            // No base audio (silent clip, no mic) but music/voiceover exists — create silence base
+            const totalDur = Math.max(
+              projectDuration(project),
+              ...resolved.map((r) => r.track.startT + r.buffer.duration),
+            );
+            const sr = resolved[0]!.buffer.sampleRate;
+            const { makeBuffer } = await import("./timeStretch");
+            const silence = makeBuffer(1, Math.max(1, Math.round(totalDur * sr)), sr, [new Float32Array(Math.round(totalDur * sr))]);
+            spedAudioBuffer = at.mixTracksIntoBase(silence, resolved);
+          }
           console.log("[Export] mixed audio tracks", resolved.map((r) => `${r.track.kind}:"${r.track.name}"@${r.track.startT}s`));
         } else {
           console.warn("[Export] audioTracks present but none resolvable -> skipped");

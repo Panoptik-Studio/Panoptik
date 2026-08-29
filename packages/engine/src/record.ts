@@ -48,7 +48,7 @@ async function tryWebCodecsScreen(
   screenStream: MediaStream,
 ): Promise<{ output: import("mediabunny").Output; start: () => Promise<void>; stop: () => Promise<Blob> } | null> {
   try {
-    const { Output, WebMOutputFormat, BufferTarget, MediaStreamVideoTrackSource } = await import("mediabunny");
+    const { Output, WebMOutputFormat, BufferTarget, MediaStreamVideoTrackSource, MediaStreamAudioTrackSource } = await import("mediabunny");
     const track = screenStream.getVideoTracks()[0];
     if (!track) return null;
     // Probe: will throw if codec/HW not supported
@@ -61,6 +61,23 @@ async function tryWebCodecsScreen(
       keyFrameInterval: 2,
     } as unknown as import("mediabunny").VideoEncodingConfig);
     output.addVideoTrack(source);
+    let audioSource: InstanceType<typeof MediaStreamAudioTrackSource> | null = null;
+    const audioTrack = screenStream.getAudioTracks()[0];
+    if (audioTrack) {
+      try {
+        audioSource = new MediaStreamAudioTrackSource(audioTrack as unknown as MediaStreamAudioTrack, {
+          codec: "opus",
+          bitrate: 128_000,
+        } as unknown as import("mediabunny").AudioEncodingConfig);
+        output.addAudioTrack(audioSource);
+        console.log("[Record] screen: WebCodecs audio track added (system audio)");
+      } catch (e) {
+        console.warn("[Record] screen: WebCodecs audio track failed, continuing video-only", e);
+        audioSource = null;
+      }
+    } else {
+      console.log("[Record] screen: no system audio track in stream (user may have declined 'Share audio')");
+    }
     return {
       output,
       // Starting the Output is what makes it consume the track, so it is held
@@ -68,10 +85,11 @@ async function tryWebCodecsScreen(
       start: () => output.start(),
       stop: async () => {
         source.close?.();
+        audioSource?.close?.();
         await output.finalize();
         const buf = (output.target as InstanceType<typeof BufferTarget>).buffer;
         if (!buf) throw new Error("WebCodecs output produced no data");
-        return new Blob([buf], { type: "video/webm;codecs=vp09" });
+        return new Blob([buf], { type: "video/webm;codecs=vp09" + (audioSource ? ";codecs=opus" : "") });
       },
     };
   } catch {
