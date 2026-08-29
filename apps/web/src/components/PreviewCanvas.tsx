@@ -34,6 +34,8 @@ import {
 } from "@panoptik/engine";
 import type { Facecam, Project, Segment, ZoomPoint } from "@panoptik/schema";
 import { mediaForSegment, primaryMedia } from "@panoptik/schema";
+import { segmentDuration } from "@panoptik/engine";
+import { FIRST_MEDIA_ID } from "@panoptik/schema";
 
 /** Preview compositing cap — matches the decode cap in the engine. */
 const MAX_CANVAS_WIDTH = 1920;
@@ -58,6 +60,44 @@ function resolveActive(
     seg: project.segments[project.segments.length - 1]!,
     srcT: primaryMedia(project).duration,
   };
+}
+
+/** The boundary most recently prefetched — `null` means nothing warm in flight. */
+type PrefetchKey = { projectId: string; segId: string } | null;
+let prefetchedKey: PrefetchKey = null;
+
+/**
+ * Warm the next clip's decode pipeline when a boundary is within 2s so the
+ * swap at the boundary is invisible. Guarded per (project, segment) so the
+ * same boundary never warms twice; the active pipeline is never touched here.
+ */
+function prefetchNextMedia(
+  project: Project,
+  activeSeg: Segment,
+  tEff: number,
+): void {
+  let acc = 0;
+  let candidate: { seg: Segment; start: number } | null = null;
+  for (const seg of project.segments) {
+    const start = acc;
+    const d = segmentDuration(seg);
+    if (start > tEff && start <= tEff + 2) candidate = { seg, start };
+    acc += d;
+  }
+  if (!candidate) return;
+  if (candidate.seg.mediaId === activeSeg.mediaId) return;
+  const key = { projectId: project.id, segId: candidate.seg.id };
+  if (prefetchedKey && prefetchedKey.segId === key.segId && prefetchedKey.projectId === key.projectId) return;
+  prefetchedKey = key;
+  const media = mediaForSegment(project, candidate.seg);
+  if (!media) return;
+  void engine
+    .activateMedia(candidate.seg.mediaId ?? FIRST_MEDIA_ID, media.src ?? null)
+    .then(() => {
+      // Warm one frame at the boundary's source start.
+      const srcT = candidate.seg.srcStart;
+      void engine.prepareAllFrames(srcT);
+    });
 }
 
 /**
@@ -439,6 +479,10 @@ export function PreviewCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+  // Multiclip: the facecam source currently loaded by the engine — keyed on
+  // the segment's facecam src, never the media id (two segments can share a
+  // clip with different takes).
+  const lastFacecamSrcRef = useRef<string | null>(null);
 
   // Selectors only — a full-store subscription would re-render this component
   // on every currentTime tick during playback.
@@ -538,12 +582,45 @@ export function PreviewCanvas() {
       const active = resolveActive(state.project, tEff);
       const tSrc = active.srcT;
 
+      // Multiclip: point the decode pipeline at this segment's clip.
+      // Idempotent when the segment is cut from the already-active clip.
+      const segMedia = mediaForSegment(state.project, active.seg);
+      void engine.activateMedia(active.seg.mediaId ?? FIRST_MEDIA_ID, segMedia?.src ?? null);
+
+      // Facecam keying: swap the facecam source only when the segment's take
+      // differs (two segments may share a clip with different camera takes).
+      const wantFc = active.seg.facecam?.src ?? null;
+      if (wantFc !== lastFacecamSrcRef.current) {
+        lastFacecamSrcRef.current = wantFc;
+        if (wantFc) {
+          void (async () => {
+            try {
+              const blob = await (await fetch(wantFc)).blob();
+              await engine.setFacecamBlob(blob);
+            } catch {
+              /* keep the previous take on failure */
+            }
+          })();
+        } else {
+          void engine.setFacecamBlob(null);
+        }
+      }
+
+      // Prefetch the next clip when a boundary is within 2s (never in export —
+      // export drives its own sequential swaps).
+      const isExporting = typeof window !== "undefined" &&
+        (window as unknown as { __isExporting?: boolean }).__isExporting;
+      if (!isExporting) {
+        prefetchNextMedia(state.project, active.seg, tEff);
+      }
+
       // Audio elements run their own clock — keep rate and volume glued to the
       // active segment's speed, volume, and sources so they cross boundaries in sync.
       if (state.isPlaying) {
         const audio = audioRef.current;
         const fcAudio = facecamAudioRef.current;
-        const screenSrc = primaryMedia(state.project).src;
+        const segMedia = mediaForSegment(state.project, active.seg);
+        const screenSrc = segMedia?.src ?? null;
         const fcSrc = active.seg.facecam?.src;
 
         // Screen audio
@@ -589,7 +666,6 @@ export function PreviewCanvas() {
       }
 
       // Don't contend with export's pump — it drives desiredTime at 30fps
-      const isExporting = typeof window !== "undefined" && (window as unknown as { __isExporting?: boolean }).__isExporting;
       if (!isExporting && tSrc !== requestedTime) {
         requestedTime = tSrc;
         const seg = active.seg;
@@ -649,7 +725,7 @@ export function PreviewCanvas() {
     const fcAudio = facecamAudioRef.current;
     if (!project) return;
     const active = resolveActive(project, currentTime);
-    const screenSrc = primaryMedia(project).src;
+    const screenSrc = mediaForSegment(project, active.seg)?.src ?? null;
     const fcSrc = active.seg.facecam?.src;
 
     if (audio && screenSrc) {
@@ -702,7 +778,7 @@ export function PreviewCanvas() {
     const fcAudio = facecamAudioRef.current;
     if (!project || isPlaying) return;
     const { seg, srcT } = resolveActive(project, currentTime);
-    const screenSrc = primaryMedia(project).src;
+    const screenSrc = mediaForSegment(project, seg)?.src ?? null;
     const fcSrc = seg.facecam?.src;
 
     if (audio && screenSrc) {
@@ -737,7 +813,7 @@ export function PreviewCanvas() {
     const state = useProjectStore.getState();
     if (!state.project) return;
     const active = resolveActive(state.project, state.currentTime);
-    const screenSrc = primaryMedia(state.project).src;
+    const screenSrc = mediaForSegment(state.project, active.seg)?.src ?? null;
     const fcSrc = active.seg.facecam?.src;
 
     if (audio && screenSrc) {
@@ -763,7 +839,7 @@ export function PreviewCanvas() {
       const st = useProjectStore.getState();
       if (!st.project || !st.isPlaying) return;
       const r = resolveActive(st.project, st.currentTime);
-      const curScreenSrc = primaryMedia(st.project).src;
+      const curScreenSrc = mediaForSegment(st.project, r.seg)?.src ?? null;
       const curFcSrc = r.seg.facecam?.src;
 
       if (audio && curScreenSrc) {
@@ -1140,8 +1216,11 @@ export function PreviewCanvas() {
 
   useEffect(() => {
     if (!project) return;
+    // Multiclip: size to the active segment's clip, not media[0].
+    const activeSeg = resolveSegment(project, useProjectStore.getState().currentTime)?.segment;
+    const sizeMedia = activeSeg ? mediaForSegment(project, activeSeg) : null;
     const size = outputSize(
-      primaryMedia(project),
+      sizeMedia ?? primaryMedia(project),
       activePreset,
       MAX_CANVAS_WIDTH,
     );
