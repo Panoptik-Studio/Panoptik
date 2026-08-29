@@ -12,6 +12,7 @@ import {
   prepareAllFrames,
   setAudioBlob,
   setFacecamBlob,
+  activateMedia as decodeActivateMedia,
 } from "./decode";
 import { renderFrame } from "./render";
 import { getAudioBuffer as audioGetBuffer } from "./audio";
@@ -112,6 +113,9 @@ export function createRealEngine(): MediaEngine {
         await setAudioBlob(audio);
       }
       return facecamSrc;
+    },
+    async activateMedia(mediaId: string, src: string | null): Promise<void> {
+      return decodeActivateMedia(mediaId, src);
     },
     async exportProject(project: Project, opts: ExportFrameOpts): Promise<Blob> {
       return encodeProject(project, opts);

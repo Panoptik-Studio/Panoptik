@@ -25,6 +25,8 @@ export interface MediaEngine {
   getAudioBuffer(project: Project): Promise<AudioBuffer | null>;
   /** Load/replace facecam media and optional audio track without replacing the screen recording. */
   setFacecamBlob(facecam: Blob | null, audio?: Blob | null): Promise<string | null>;
+  /** Make `mediaId`'s clip the active decode pipeline (no-op if already active). */
+  activateMedia(mediaId: string, src: string | null): Promise<void>;
   /** Encode the project. `opts.selectedSegmentId` picks which segment's aspect
    *  preset sets the output frame — the preview sizes to the same selection, so
    *  export matches what the user is looking at. */

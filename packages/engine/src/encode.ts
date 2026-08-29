@@ -21,7 +21,7 @@ import { registerAacEncoder } from "@mediabunny/aac-encoder";
 import type { ExportOpts, Project } from "@panoptik/schema";
 import { mediaForSegment, primaryMedia } from "@panoptik/schema";
 import { presetAspect } from "./layout";
-import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator } from "./decode";
+import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator, activateMedia } from "./decode";
 import { ensureBackgroundImages, renderFrame } from "./render";
 import { applyVolume, concatAudio, mixAudio, sliceAndStretchAudio } from "./timeStretch";
 import { projectDuration, segmentDuration } from "./timeline";
@@ -378,7 +378,19 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
       // segment speed; present times are timeline time.
       let timelineCursor = 0;
       let activeFacecamSrc: string | null = null;
+      let activeMediaId: string | null = null;
       for (const seg of project.segments) {
+        // Multiclip: swap the decode pipeline to this segment's clip once per
+        // boundary. Adjacent same-clip segments group into one swap.
+        const segMedia = mediaForSegment(project, seg);
+        if (segMedia?.id !== activeMediaId) {
+          try {
+            await activateMedia(segMedia?.id ?? "", segMedia?.src ?? null);
+            activeMediaId = segMedia?.id ?? null;
+          } catch (e) {
+            console.warn("[Export] Failed to activate media for segment:", e);
+          }
+        }
         const segFcSrc = seg.facecam?.src ?? null;
         if (segFcSrc && segFcSrc !== activeFacecamSrc && segFcSrc.startsWith("blob:")) {
           try {

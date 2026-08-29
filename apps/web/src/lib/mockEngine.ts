@@ -16,6 +16,7 @@ export const mockEngine = {
     return p;
   },
   prepareFrame: async () => {},
+  activateMedia: async () => {},
   renderFrame: (ctx: Ctx, project: Project, t: number) => {
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
