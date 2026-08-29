@@ -117,6 +117,28 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
     const requestedIsMp4 = opts.format === "mp4";
     console.log("[Export]", project.segments.map((s) => `seg ${s.id} ${s.srcStart}-${s.srcEnd} @${s.speed}x`).join(" | "));
 
+    // Shared AudioBuffer resolver for any blob src (screen, facecam, music,
+    // voiceover) — hoisted so the audio-track mix below can reuse it.
+    const { decodeViaAudioContext } = await import("./audio");
+    const audioBufferCache = new Map<string, AudioBuffer | null>();
+    const getBufferForSrc = async (src: string | null | undefined): Promise<AudioBuffer | null> => {
+      if (!src) return null;
+      if (audioBufferCache.has(src)) return audioBufferCache.get(src) || null;
+      if (src.startsWith("blob:")) {
+        try {
+          const res = await fetch(src);
+          const blob = await res.blob();
+          const decoded = await decodeViaAudioContext(blob);
+          audioBufferCache.set(src, decoded);
+          return decoded;
+        } catch {
+          audioBufferCache.set(src, null);
+          return null;
+        }
+      }
+      return null;
+    };
+
     // Need audioBuffer early to decide container when aac not encodable.
     // For maximal compatibility: mp4+avc+aac is the gold standard for every
     // native player (VLC, MPV, COSMIC/GStreamer, QuickTime). Linux Chrome
@@ -222,28 +244,6 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
     let spedAudioBuffer: AudioBuffer | null = audioBuffer;
     if (audioBuffer) {
       try {
-        const audioBufferCache = new Map<string, AudioBuffer | null>();
-        audioBufferCache.set("default", audioBuffer);
-        const { decodeViaAudioContext } = await import("./audio");
-
-        const getBufferForSrc = async (src: string | null | undefined): Promise<AudioBuffer | null> => {
-          if (!src) return null;
-          if (audioBufferCache.has(src)) return audioBufferCache.get(src) || null;
-          if (src.startsWith("blob:")) {
-            try {
-              const res = await fetch(src);
-              const blob = await res.blob();
-              const decoded = await decodeViaAudioContext(blob);
-              audioBufferCache.set(src, decoded);
-              return decoded;
-            } catch {
-              audioBufferCache.set(src, null);
-              return null;
-            }
-          }
-          return null;
-        };
-
         const screenSrc = primaryMedia(project).src;
         const defaultScreenBuf = (await getBufferForSrc(screenSrc)) || audioBuffer;
 
@@ -297,6 +297,31 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
       } catch (e) {
         console.warn("[Export] audio time-stretch failed, using original", e);
         spedAudioBuffer = audioBuffer;
+      }
+    }
+
+    // Music/voiceover ride on wall-clock timeline time — no speed stretching.
+    // Buffers come from the preview registry, or are decoded from the track's
+    // blob URL on the spot (fresh page → straight-to-export).
+    const audioTracks = project.audioTracks ?? [];
+    if (audioTracks.length > 0) {
+      try {
+        const at = await import("./audioTracks");
+        const resolved: { track: (typeof audioTracks)[number]; buffer: AudioBuffer }[] = [];
+        for (const track of audioTracks) {
+          const buffer =
+            at.getTrackBuffer(track.id) ??
+            (track.src.startsWith("blob:") ? await getBufferForSrc(track.src) : null);
+          if (buffer) resolved.push({ track, buffer });
+        }
+        if (resolved.length > 0 && spedAudioBuffer) {
+          spedAudioBuffer = at.mixTracksIntoBase(spedAudioBuffer, resolved);
+          console.log("[Export] mixed audio tracks", resolved.map((r) => `${r.track.kind}:"${r.track.name}"@${r.track.startT}s`));
+        } else {
+          console.warn("[Export] audioTracks present but none resolvable -> skipped");
+        }
+      } catch (e) {
+        console.warn("[Export] audio track mix failed, exporting base audio only", e);
       }
     }
 
