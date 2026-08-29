@@ -3,7 +3,7 @@
  * Wires decode.ts → render.ts → audio.ts into the MediaEngine interface.
  * Preview and export share renderFrame + prepareFrame.
  */
-import type { Project } from "@panoptik/schema";
+import type { Media, Project } from "@panoptik/schema";
 import type { MediaEngine } from "./index";
 import type { ExportFrameOpts } from "./encode";
 import {
@@ -65,6 +65,28 @@ export function createRealEngine(): MediaEngine {
       // and facecam pipeline are all opened — loading only the JSON would give
       // a project whose blob URLs point at nothing decodable.
       const proj = await this.loadRecording(saved.media, saved.facecam, saved.audio);
+
+      // Multiclip: mint blob URLs for every additional clip and join them to the
+      // demuxed project so mergeSavedProject restores the full media array (its
+      // per-clip merge maps over fresh.media). Decode opens them lazily when a
+      // segment from them becomes active.
+      if (saved.project.media && saved.project.media.length > 1) {
+        const additional: (Media & { src: string })[] = [];
+        for (let i = 1; i < saved.project.media.length; i++) {
+          const blob = saved.mediaFiles?.[i];
+          const stored = saved.project.media[i];
+          if (blob && stored) {
+            additional.push({
+              ...(stored as Media),
+              id: stored.id ?? `m${i + 1}`,
+              src: mintUrl(blob),
+            });
+          }
+        }
+        if (additional.length > 0) {
+          proj.media = [...proj.media, ...additional];
+        }
+      }
 
       // Mint blob URLs for all loaded facecam takes
       const mintedTakes = new Map<string, string>();

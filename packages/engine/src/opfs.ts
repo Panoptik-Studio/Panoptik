@@ -200,6 +200,8 @@ export async function saveProject(
 export async function loadProjectRecord(id: string): Promise<{
   project: Project;
   media: Blob | null;
+  /** One blob per media entry, aligned with project.media order. */
+  mediaFiles?: (Blob | null)[];
   facecam: Blob | null;
   audio: Blob | null;
   facecamTakes?: Map<string, Blob>;
@@ -297,6 +299,18 @@ export async function loadProjectRecord(id: string): Promise<{
     return {
       project,
       media: await read("clip.webm"),
+      mediaFiles: await Promise.all(
+        project.media.map(async (m, i) => {
+          // The first clip keeps the historic clip.webm name; later clips are
+          // keyed by media id (see mediaFileName).
+          const names = i === 0 ? [mediaFileName(project, m), "clip.webm"] : [mediaFileName(project, m)];
+          for (const name of names) {
+            const blob = await read(name);
+            if (blob) return blob;
+          }
+          return null;
+        }),
+      ),
       facecam: primaryFacecamBlob,
       audio: await read("audio.webm"),
       facecamTakes,

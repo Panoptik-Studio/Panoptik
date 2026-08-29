@@ -215,4 +215,19 @@ describe("background image storage", () => {
     // Same object, so the caller mints one object URL rather than two.
     expect(imgs[1]).toBe(imgs[0]);
   });
+
+  it("roundtrips multiple media files (multiclip)", async () => {
+    const { saveProject, loadProjectRecord } = await import("./opfs");
+    const two = project([
+      segment(),
+      segment({ id: "s2", mediaId: "m2" }),
+    ]);
+    two.media.push({ id: "m2", src: "blob:other", duration: 5, width: 1280, height: 720 });
+    await saveProject(two, true);
+
+    const rec = await loadProjectRecord("proj");
+    expect(rec?.mediaFiles?.length).toBe(2);
+    expect(rec?.mediaFiles?.[0]).toBeTruthy();
+    expect(rec?.mediaFiles?.[1]).toBeTruthy();
+  });
 });
