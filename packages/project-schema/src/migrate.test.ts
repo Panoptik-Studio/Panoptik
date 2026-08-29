@@ -8,8 +8,7 @@ import {
   type AudioTrack,
   type Media,
   type Project,
-  type Segment,
-} from "./index";
+  type Segment } from "./index";
 
 /** A v1.2 segment: no mediaId, since there was only ever one clip. */
 const v12Segment = (over: Record<string, unknown> = {}) =>
@@ -25,11 +24,7 @@ const v12Segment = (over: Record<string, unknown> = {}) =>
     zoomPoints: [],
     stagedZoomPoints: [],
     textOverlays: [],
-    stagedTextOverlays: [],
-    captions: [],
-    stagedCaptions: [],
-    ...over,
-  }) as unknown as Segment;
+    stagedTextOverlays: [], ...over }) as unknown as Segment;
 
 describe("migrateProject v1.1 → v1.3", () => {
   it("builds one full-range segment from a legacy single-clip project", () => {
@@ -42,17 +37,12 @@ describe("migrateProject v1.1 → v1.3", () => {
       zoomPoints: [{ id: "z1", t: 3, to: { scale: 2, x: 0.5, y: 0.5 }, dur: 0.7, ease: "easeInOutCubic", staged: false }],
       stagedZoomPoints: [],
       textOverlays: [],
-      stagedTextOverlays: [],
-      captions: [],
-      stagedCaptions: [],
-      background: { kind: "solid", color: "#000000" },
-      clickLog: [],
-    } as unknown as Record<string, unknown>;
+      stagedTextOverlays: [], background: { kind: "solid", color: "#000000" },
+      clickLog: [] } as unknown as Record<string, unknown>;
 
     const p = migrateProject(legacy);
     expect(p.media).toEqual([
-      { id: FIRST_MEDIA_ID, src: "blob:x", duration: 10, width: 1920, height: 1080 },
-    ]);
+      { id: FIRST_MEDIA_ID, src: "blob:x", duration: 10, width: 1920, height: 1080 } ]);
     expect(p.segments).toHaveLength(1);
     const seg = p.segments[0]!;
     // The lone segment has to point at the clip it was built from.
@@ -73,8 +63,7 @@ describe("migrateProject v1.2 → v1.3", () => {
     media: { src: "blob:x", duration: 5, width: 800, height: 600 },
     segments: [v12Segment()],
     audioSrc: null,
-    clickLog: [],
-  });
+    clickLog: [] });
 
   it("wraps the single clip into the media array and keeps its values", () => {
     const p = migrateProject(v12());
@@ -100,12 +89,10 @@ describe("migrateProject v1.2 → v1.3", () => {
   it("preserves every edit on the segment", () => {
     const p = migrateProject({
       ...v12(),
-      segments: [v12Segment({ speed: 2, srcEnd: 4, captions: [{ text: "hi", start: 0, end: 1 }] })],
-    });
+      segments: [v12Segment({ speed: 2, srcEnd: 4 })] });
     const seg = p.segments[0]!;
     expect(seg.speed).toBe(2);
     expect(seg.srcEnd).toBe(4);
-    expect(seg.captions).toHaveLength(1);
   });
 });
 
@@ -116,8 +103,7 @@ describe("migrateProject v1.3", () => {
     segments: [v12Segment({ mediaId: "m1" })],
     audioSrc: null,
     clickLog: [],
-    audioTracks: [],
-  });
+    audioTracks: [] });
 
   it("passes an already-migrated project straight through", () => {
     const p = v13();
@@ -140,13 +126,11 @@ describe("migrateProject v1.3", () => {
       id: "n",
       media: [
         { id: "m1", src: "blob:a", duration: 5, width: 800, height: 600 },
-        { id: "m2", src: "blob:b", duration: 8, width: 1920, height: 1080 },
-      ],
+        { id: "m2", src: "blob:b", duration: 8, width: 1920, height: 1080 } ],
       segments: [v12Segment({ id: "s1", mediaId: "m1" }), v12Segment({ id: "s2", mediaId: "m2" })],
       audioSrc: null,
       clickLog: [],
-      audioTracks: [],
-    };
+      audioTracks: [] };
     const p = migrateProject(many);
     expect(p.media).toHaveLength(2);
     expect(p.segments.map((s) => s.mediaId)).toEqual(["m1", "m2"]);
@@ -158,13 +142,11 @@ describe("media accessors", () => {
     id: "n",
     media: [
       { id: "m1", src: "blob:a", duration: 5, width: 800, height: 600 },
-      { id: "m2", src: "blob:b", duration: 8, width: 1920, height: 1080 },
-    ],
+      { id: "m2", src: "blob:b", duration: 8, width: 1920, height: 1080 } ],
     segments: [v12Segment({ id: "s1", mediaId: "m2" })],
     audioSrc: null,
     clickLog: [],
-    audioTracks: [],
-  };
+    audioTracks: [] };
 
   it("resolves a segment to the clip it cuts from", () => {
     expect(mediaForSegment(project, project.segments[0]!).src).toBe("blob:b");
@@ -193,9 +175,7 @@ describe("audioTracks (phase 2)", () => {
     stagePadding: 0, aspectPreset: "source",
     background: { kind: "solid", color: "#000" },
     facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
-    zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
-    captions: [], stagedCaptions: [],
-  };
+    zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [] };
 
   it("fast-path v1.2 projects gain an empty audioTracks array", () => {
     const p = migrateProject({ id: "p1", media, segments: [seg], clickLog: [] });

@@ -2,7 +2,7 @@
  * OWNER: DEV A — ROADMAP-A.md Tasks 1.3 + 2.1.
  * getCameraTransform (sequential fold, ignores staged points) + renderFrame
  * composition pipeline (background → letterboxed zoomed frame → facecam PiP →
- * text overlays → captions; staged text/captions drawn amber #f59e0b).
+ * text overlays; staged text drawn amber #f59e0b).
  * Keyframe semantics: at k.t ease FROM current state TO k.to over k.dur, then hold.
  */
 import { EASINGS, easeInOutCubic, easeOutCubic, lerp } from "@panoptik/utils";
@@ -217,8 +217,8 @@ export type RenderOptions = {
 };
 
 /**
- * 5-layer synchronous composition. Preview and export share this exact codepath.
- * Layer order: background → frame (zoomed) → facecam PiP → text → captions.
+ * 4-layer synchronous composition. Preview and export share this exact codepath.
+ * Layer order: background → frame (zoomed) → facecam PiP → text.
  * `timelineT` is ON-TIMELINE time: it is resolved to the active segment and its
  * source time, falling back to the last segment at media.duration when out of range.
  */
@@ -288,9 +288,6 @@ export function renderFrame(
 
   // ── Layer 4: Text overlays ──
   drawTextOverlays(ctx, seg, srcT, w, h);
-
-  // ── Layer 5: Captions ──
-  drawCaptions(ctx, seg, srcT, w, h);
 }
 
 export function resolveInterpolatedFacecam(
@@ -503,24 +500,6 @@ function drawTextOverlays(
       ctx.textAlign = "center";
       const y = to.position === "top" ? 60 : to.position === "bottom" ? h - 60 : h / 2;
       ctx.fillText(to.text, w / 2, y);
-    }
-  }
-}
-
-function drawCaptions(
-  ctx: CanvasRenderingContext2D,
-  seg: Segment,
-  t: number,
-  w: number,
-  h: number,
-): void {
-  const all = [...seg.captions, ...seg.stagedCaptions];
-  for (const c of all) {
-    if (t >= c.start && t <= c.end) {
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "28px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(c.text, w / 2, h - 40);
     }
   }
 }

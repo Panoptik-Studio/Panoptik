@@ -12,7 +12,6 @@ import type {
   AspectPreset,
   AudioTrack,
   Background,
-  Caption,
   Media,
   Project,
   Segment,
@@ -27,7 +26,6 @@ const POSITIONS = ["top", "bottom", "center"] as const;
 /** Ceilings that keep a corrupt file from stalling the renderer. */
 const MAX_ZOOMS = 500;
 const MAX_TEXT_OVERLAYS = 200;
-const MAX_CAPTIONS = 5000;
 const MAX_CLICKS = 5000;
 const MAX_TEXT_LENGTH = 500;
 
@@ -75,15 +73,6 @@ function overlay(v: unknown, lo: number, hi: number): TextOverlay | null {
       : "bottom",
     staged: o.staged === true,
   };
-}
-
-function caption(v: unknown, lo: number, hi: number): Caption | null {
-  if (!v || typeof v !== "object") return null;
-  const c = v as Partial<Caption>;
-  const body = text(c.text);
-  if (!body) return null;
-  const start = num(c.start, 0, lo, hi);
-  return { text: body, start, end: num(c.end, start, start, hi) };
 }
 
 /** Speed 0.25–3, quantized to the 0.05 grid the UI/engine uses. */
@@ -234,12 +223,6 @@ function sanitizeSegment(
     stagedTextOverlays: arr<unknown>(saved?.stagedTextOverlays, MAX_TEXT_OVERLAYS)
       .map((o) => overlay(o, lo, hi))
       .filter((o): o is TextOverlay => o !== null),
-    captions: arr<unknown>(saved?.captions, MAX_CAPTIONS)
-      .map((c) => caption(c, lo, hi))
-      .filter((c): c is Caption => c !== null),
-    stagedCaptions: arr<unknown>(saved?.stagedCaptions, MAX_CAPTIONS)
-      .map((c) => caption(c, lo, hi))
-      .filter((c): c is Caption => c !== null),
   };
 }
 

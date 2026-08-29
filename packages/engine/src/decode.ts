@@ -452,11 +452,8 @@ export async function loadClip(file: File, opts?: { append?: boolean }): Promise
         aspectPreset: "source",
         background: { kind: "solid", color: "#000000" },
         facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
-        zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
-        captions: [], stagedCaptions: [],
-      }],
-      clickLog: [],
-    };
+        zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [] }],
+      clickLog: [] };
   };
   swapChain = swapChain.then(runLoad, runLoad);
   await swapChain;
@@ -492,8 +489,7 @@ async function openMedia(blob: Blob): Promise<void> {
     width: decodeW,
     height: decodeH,
     fit: "fill",
-    poolSize: POOL_SIZE,
-  });
+    poolSize: POOL_SIZE });
   duration = await track.computeDuration();
   inputWidth = displayWidth;
   inputHeight = displayHeight;
@@ -569,8 +565,7 @@ export async function importClip(file: File): Promise<Media> {
       src: URL.createObjectURL(file),
       duration,
       width,
-      height,
-    };
+      height };
   } finally {
     try {
       await probe.dispose();

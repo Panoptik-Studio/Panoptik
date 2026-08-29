@@ -13,8 +13,7 @@ import {
   prepareAllFrames,
   setAudioBlob,
   setFacecamBlob,
-  activateMedia as decodeActivateMedia,
-} from "./decode";
+  activateMedia as decodeActivateMedia } from "./decode";
 import { renderFrame } from "./render";
 import { getAudioBuffer as audioGetBuffer } from "./audio";
 import { exportProject as encodeProject } from "./encode";
@@ -42,9 +41,7 @@ export function createRealEngine(): MediaEngine {
         aspectPreset: "source",
         background: { kind: "solid", color: "#000000" },
         facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
-        zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
-        captions: [], stagedCaptions: [],
-      };
+        zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [] };
       return { media, segment };
     },
     async prepareFrame(t: number): Promise<void> {
@@ -101,8 +98,7 @@ export function createRealEngine(): MediaEngine {
             additional.push({
               ...(stored as Media),
               id: stored.id ?? `m${i + 1}`,
-              src: mintUrl(blob),
-            });
+              src: mintUrl(blob) });
           }
         }
         if (additional.length > 0) {
@@ -163,6 +159,5 @@ export function createRealEngine(): MediaEngine {
     },
     async exportProject(project: Project, opts: ExportFrameOpts): Promise<Blob> {
       return encodeProject(project, opts);
-    },
-  };
+    } };
 }

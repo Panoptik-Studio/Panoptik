@@ -12,12 +12,10 @@ vi.mock("mediabunny", () => ({
   Output: class {},
   QUALITY_VERY_HIGH: "very-high",
   getFirstEncodableVideoCodec: vi.fn(),
-  getFirstEncodableAudioCodec: vi.fn(),
-}));
+  getFirstEncodableAudioCodec: vi.fn() }));
 
 vi.mock("@mediabunny/aac-encoder", () => ({
-  registerAacEncoder: vi.fn(),
-}));
+  registerAacEncoder: vi.fn() }));
 
 const { __test } = await import("./encode");
 
@@ -28,8 +26,7 @@ const proj = (width: number, height: number): Project =>
     media: [{ id: "m1", src: "", duration: 10, width, height }],
     audioSrc: null,
     segments: [seg({ srcEnd: 10 })],
-    clickLog: [],
-  }) as Project;
+    clickLog: [] }) as Project;
 
 function seg(overrides: Partial<Segment> = {}): Segment {
   return {
@@ -45,11 +42,7 @@ function seg(overrides: Partial<Segment> = {}): Segment {
     zoomPoints: [],
     stagedZoomPoints: [],
     textOverlays: [],
-    stagedTextOverlays: [],
-    captions: [],
-    stagedCaptions: [],
-    ...overrides,
-  };
+    stagedTextOverlays: [], ...overrides };
 }
 
 describe("export sizing", () => {
@@ -81,8 +74,7 @@ describe("export sizing", () => {
     const p = proj(1920, 1080);
     p.segments = [
       seg({ id: "wide", aspectPreset: "16:9" }),
-      seg({ id: "tall", srcStart: 10, srcEnd: 20, aspectPreset: "9:16" }),
-    ];
+      seg({ id: "tall", srcStart: 10, srcEnd: 20, aspectPreset: "9:16" }) ];
     // Preview sizes the canvas to the SELECTED segment — export must agree.
     expect(__test.exportSize(p, "1080p", "wide")).toEqual({ width: 1920, height: 1080 });
     expect(__test.exportSize(p, "1080p", "tall")).toEqual({ width: 608, height: 1080 });

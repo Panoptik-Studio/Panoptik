@@ -116,7 +116,7 @@ export default function Home() {
                 <span style={{ display: "block" }}><span style={{ fontFamily: "var(--font-lato)", fontStyle: "italic", fontWeight: 900 }}>Amplifying</span> Story.</span>
               </h1>
               <p style={{ maxWidth: 680, margin: "0 auto clamp(20px, 3vw, 36px)", fontFamily: "var(--font-poppins)", fontWeight: 300, fontSize: "clamp(15px, 2vw, 20px)", lineHeight: "140%", textAlign: "center", color: "#1F1F1F" }}>
-                Plan, record &amp; co-edit with your AI agent. Screen + camera, zoom-to-point, captions and export — all in your browser, no upload.
+                Plan, record &amp; co-edit with your AI agent. Screen + camera, zoom-to-point and export — all in your browser, no upload.
               </p>
               <Link href="/editor" style={{ width: "clamp(220px, 22vw, 277px)", height: "clamp(44px, 4vw, 52px)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#1F1F1F", color: "#fff", textDecoration: "none", borderRadius: 13, padding: "12px 40px", fontSize: "clamp(15px, 1.5vw, 18px)", fontWeight: 500, fontFamily: "var(--font-poppins)", transition: "background 0.15s" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#0070f3")} onMouseLeave={(e) => (e.currentTarget.style.background = "#1F1F1F")}>
                 <span style={{ width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.14)", borderRadius: 6, fontSize: 16, lineHeight: 1 }}>+</span>
@@ -136,8 +136,8 @@ export default function Home() {
                 style={{ position: "absolute", right: "clamp(-20px, -1.6vw, -10px)", bottom: "clamp(150px, 18vw, 240px)", display: "flex", alignItems: "center", gap: 12, background: "#fff", borderRadius: 13, padding: "16px 24px", boxShadow: "0 8px 30px rgba(0,0,0,0.1)", transform: `rotate(6deg) translate(${rightPos.x}px, ${rightPos.y}px)`, width: "clamp(260px, 28vw, 360px)", cursor: dragging === "right" ? "grabbing" : "grab", userSelect: "none", touchAction: "none" }} className="hidden lg:flex">
                 <span style={{ width: 44, height: 44, borderRadius: 100, background: "#10b981", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800 }}>✓</span>
                 <span style={{ display: "flex", flexDirection: "column", textAlign: "left" }}>
-                  <strong style={{ fontFamily: "var(--font-poppins)", fontSize: 14, fontWeight: 500, color: "#111" }}>Captions staged</strong>
-                  <span style={{ fontFamily: "var(--font-poppins)", fontSize: 12, color: "#888" }}>12 segments · commit to burn in</span>
+                  <strong style={{ fontFamily: "var(--font-poppins)", fontSize: 14, fontWeight: 500, color: "#111" }}>Edits staged</strong>
+                  <span style={{ fontFamily: "var(--font-poppins)", fontSize: 12, color: "#888" }}>12 segments · commit to apply</span>
                 </span>
               </div>
             </div>
@@ -159,7 +159,7 @@ export default function Home() {
                     </div>
                     <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-nunito)", fontSize: 12, lineHeight: "140%", color: "#424242" }}>
                       <li>Model Context Protocol for the web — structured <strong>tools</strong>, not screenshots.</li>
-                      <li>Agent sees canvas + calls <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "1px 6px", fontFamily: "monospace", fontSize: 11 }}>propose_zoom_points</code>, <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "1px 6px", fontFamily: "monospace", fontSize: 11 }}>generate_captions</code> etc.</li>
+                      <li>Agent sees canvas + calls <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "1px 6px", fontFamily: "monospace", fontSize: 11 }}>propose_zoom_points</code>, <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "1px 6px", fontFamily: "monospace", fontSize: 11 }}>set_background</code> etc.</li>
                       <li>Human stays in control — staged diff → commit.</li>
                       <li>100% local, no DOM scraping.</li>
                     </ul>
@@ -174,7 +174,7 @@ export default function Home() {
                     <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-nunito)", fontSize: 12, lineHeight: "140%", color: "#424242" }}>
                       <li>Browser-native demo studio — record screen + camera, no upload.</li>
                       <li>Timeline diamonds, staged ghosts, commit, export — preview equals export.</li>
-                      <li>Captions via Whisper in worker, backgrounds, facecam PiP.</li>
+                      <li>Backgrounds, facecam PiP, text overlays.</li>
                       <li>Open, local, fast — your video, your control.</li>
                     </ul>
                   </div>
@@ -222,7 +222,7 @@ export default function Home() {
                 {
                   n: "02", t: "Edit, or delegate it", c: "#0070f3",
                   d: "Do it by hand, or let an agent take the first pass. Through WebMCP it reads the real project and calls typed tools — no screenshot guesswork.",
-                  specs: ["propose_zoom_points, generate_captions", "set_background, add_text_overlay", "Proposals arrive as dashed ghosts on the timeline", "Nothing is committed without your approval"],
+                  specs: ["propose_zoom_points, set_background", "add_text_overlay", "Proposals arrive as dashed ghosts on the timeline", "Nothing is committed without your approval"],
                   tags: ["WebMCP", "Staged", "Ghosts", "ToolTrace"],
                 },
                 {
@@ -273,7 +273,7 @@ export default function Home() {
               {[
                 { k: "Capture", v: "MediaRecorder, with a hardware VP9 path through WebCodecs when the machine offers one. Encoding starts after the countdown, so takes do not open on dead footage." },
                 { k: "Decode", v: "mediabunny drives WebCodecs through a coalesced frame pump — one forward sweep rather than a seek per frame, which is what keeps scrubbing smooth on long recordings." },
-                { k: "Compose", v: "Background, zoom, camera bubble, text and captions are drawn in a single pass. Preview and export call the same function, so the two cannot drift apart." },
+                { k: "Compose", v: "Background, zoom, camera bubble and text are drawn in a single pass. Preview and export call the same function, so the two cannot drift apart." },
                 { k: "Persist", v: "Projects live in the browser's own file system. Media is written once, edits autosave as JSON, and your last project reopens when you come back." },
               ].map((d) => (
                 <div key={d.k} className="how-deep-card">
@@ -285,7 +285,7 @@ export default function Home() {
 
             {/* What is actually in the editor */}
             <div className="how-chips">
-              {["Zoom keyframes with easing", "Focal point drag", "Camera bubble, circle or square", "Speed 0.25×–3× without pitch shift", "Local Whisper captions", "Text overlays", "Solid, gradient or blurred backgrounds", "16:9 · 9:16 · 1:1 · 4:3 · source", "Undo and redo", "Export lock while rendering"].map((f) => (
+              {["Zoom keyframes with easing", "Focal point drag", "Camera bubble, circle or square", "Speed 0.25×–3× without pitch shift", "Text overlays", "Solid, gradient or blurred backgrounds", "16:9 · 9:16 · 1:1 · 4:3 · source", "Undo and redo", "Export lock while rendering"].map((f) => (
                 <span key={f} style={{ background: "#fff", border: "1px solid #ebebeb", borderRadius: 100, padding: "7px 14px", fontFamily: "var(--font-poppins)", fontSize: 11.5, color: "#555" }}>{f}</span>
               ))}
             </div>
@@ -331,11 +331,11 @@ export default function Home() {
             </div>
             <div className="faq-list">
               {[
-                { c: "Basics", q: "What is Panoptik?", a: "A demo studio that runs entirely in your browser. Record your screen and camera, edit on a real timeline — zoom keyframes, captions, backgrounds, text — and export a finished MP4 or WebM. Nothing installs, nothing uploads." },
+                { c: "Basics", q: "What is Panoptik?", a: "A demo studio that runs entirely in your browser. Record your screen and camera, edit on a real timeline — zoom keyframes, backgrounds, text — and export a finished MP4 or WebM. Nothing installs, nothing uploads." },
                 { c: "Basics", q: "Do I need an AI agent to use it?", a: "No. Every tool is there in the editor and works on its own; the agent is an optional first pass, not the way in. If you never connect one, nothing about the app changes." },
-                { c: "Agent", q: "What is WebMCP?", a: "Model Context Protocol, for the web. Rather than reading screenshots and guessing, a connected agent sees the actual project and calls typed tools — propose_zoom_points, generate_captions, set_background, add_text_overlay — with real arguments." },
+                { c: "Agent", q: "What is WebMCP?", a: "Model Context Protocol, for the web. Rather than reading screenshots and guessing, a connected agent sees the actual project and calls typed tools — propose_zoom_points, set_background, add_text_overlay — with real arguments." },
                 { c: "Agent", q: "Can the agent change my video without asking?", a: "No. Anything it proposes lands as a dashed ghost on the timeline and stays there until you approve it. You can retime a proposal by dragging it, discard it, or open ToolTrace to see exactly which call produced it." },
-                { c: "Privacy", q: "Is anything uploaded?", a: "No, and there is nowhere for it to go — there is no server and no API key. Video decodes through WebCodecs, captions run on a local Whisper model in a worker, and your recordings are written to the browser's own storage on your machine." },
+                { c: "Privacy", q: "Is anything uploaded?", a: "No, and there is nowhere for it to go — there is no server and no API key. Video decodes through WebCodecs and your recordings are written to the browser's own storage on your machine." },
                 { c: "Privacy", q: "What happens to my camera and mic when I stop?", a: "They are released as soon as the take ends, and the hardware indicator goes out. The camera is only opened while the record panel is showing you a preview or a recording is running." },
                 { c: "Editing", q: "How do zoom points work?", a: "Pause and click the preview to drop a zoom at the playhead, or let the agent propose a set. Drag the focal point to reframe, drag the diamonds on the timeline to retime, and the shot holds at that zoom until the next point takes over." },
                 { c: "Editing", q: "Can I change the speed without chipmunk audio?", a: "Yes. Speed runs from 0.25× to 3×, and the audio is time-stretched rather than resampled, so voices keep their pitch. Preview and export are remapped through the same clock, so they stay in agreement." },
@@ -362,7 +362,7 @@ export default function Home() {
 
         <section className="container" style={{ padding: "24px 40px 48px", textAlign: "center" }}>
           <Link href="/editor" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#1F1F1F", color: "#fff", borderRadius: 100, padding: "12px 28px", fontFamily: "var(--font-poppins)", fontWeight: 500, textDecoration: "none", transition: "background 0.15s" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#0070f3")} onMouseLeave={(e) => (e.currentTarget.style.background = "#1F1F1F")}>Open editor →</Link>
-          <p style={{ marginTop: 10, fontFamily: "var(--font-poppins)", fontSize: 12, color: "#888" }}>No API keys · WebCodecs + Whisper in a worker · 100% in browser</p>
+          <p style={{ marginTop: 10, fontFamily: "var(--font-poppins)", fontSize: 12, color: "#888" }}>No API keys · WebCodecs · 100% in browser</p>
         </section>
 
         <footer style={{ borderTop: "1px solid #ebebeb", padding: "24px 0", background: "#fff" }}>

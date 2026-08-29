@@ -9,8 +9,7 @@ import {
   IDENTITY,
   renderFrame,
   resolveInterpolatedFacecam,
-  setCurrentFrame,
-} from "./render";
+  setCurrentFrame } from "./render";
 import { migrateProject, type Facecam, type Segment, type ZoomPoint, type Project } from "@panoptik/schema";
 import { resolveSegment } from "./timeline";
 
@@ -21,8 +20,7 @@ const zp = (overrides: Partial<ZoomPoint>): ZoomPoint => ({
   dur: 1,
   ease: "linear",
   staged: false,
-  ...overrides,
-});
+  ...overrides });
 
 describe("getCameraTransform", () => {
   it("identity before first keyframe", () => {
@@ -122,14 +120,10 @@ describe("getProjectCameraTransform across multi-clip boundaries", () => {
           background: { kind: "solid", color: "#000" },
           stagePadding: 0,
           zoomPoints: [
-            zp({ id: "z1", t: 3.5, to: { scale: 2.2, x: 0.3, y: 0.3 }, dur: 0.5, hold: 2.0, ease: "linear" }),
-          ],
+            zp({ id: "z1", t: 3.5, to: { scale: 2.2, x: 0.3, y: 0.3 }, dur: 0.5, hold: 2.0, ease: "linear" }) ],
           stagedZoomPoints: [],
           textOverlays: [],
-          stagedTextOverlays: [],
-          captions: [],
-          stagedCaptions: [],
-        },
+          stagedTextOverlays: [] },
         {
           id: "seg2",
           mediaId: "m1",
@@ -143,12 +137,7 @@ describe("getProjectCameraTransform across multi-clip boundaries", () => {
           zoomPoints: [],
           stagedZoomPoints: [],
           textOverlays: [],
-          stagedTextOverlays: [],
-          captions: [],
-          stagedCaptions: [],
-        },
-      ],
-    };
+          stagedTextOverlays: [] } ] };
 
     // Before zoom in Clip 1
     expect(getProjectCameraTransform(proj, 3.0)).toEqual(IDENTITY);
@@ -202,8 +191,7 @@ describe("zoom camera framing (renderFrame transform)", () => {
     const { ctx, calls } = makeCtx();
     const p = makeProject({
       clip: { src: "", duration: 10, width: 1920, height: 1080 },
-      zoomPoints: [zp({ t: 0, to: { scale, x, y }, dur: 0.5, ease: "linear" })],
-    });
+      zoomPoints: [zp({ t: 0, to: { scale, x, y }, dur: 0.5, ease: "linear" })] });
     setCurrentFrame(fakeFrame);
     renderFrame(ctx, p, 1);
     setCurrentFrame(null);
@@ -231,8 +219,7 @@ describe("zoom camera framing (renderFrame transform)", () => {
       [2, 0, 0],
       [2, 1, 1],
       [3.5, 0.05, 0.95],
-      [8, 1, 0],
-    ] as const) {
+      [8, 1, 0] ] as const) {
       const e = render(scale, x, y);
       expect(e.left).toBeLessThanOrEqual(0.01);
       expect(e.top).toBeLessThanOrEqual(0.01);
@@ -246,8 +233,7 @@ describe("zoom camera framing (renderFrame transform)", () => {
     const p = makeProject({
       clip: { src: "", duration: 10, width: 1920, height: 1080 },
       aspectPreset: "9:16",
-      zoomPoints: [zp({ t: 0, to: { scale: 3, x: 0.5, y: 0.5 }, dur: 0.5, ease: "linear" })],
-    });
+      zoomPoints: [zp({ t: 0, to: { scale: 3, x: 0.5, y: 0.5 }, dur: 0.5, ease: "linear" })] });
     setCurrentFrame(fakeFrame);
     renderFrame(ctx, p, 1);
     setCurrentFrame(null);
@@ -319,8 +305,7 @@ describe("camera coordinate mapping", () => {
     expect(frameToCanvas(rect, view, 0, 0)).toEqual({ x: rect.x, y: rect.y });
     expect(frameToCanvas(rect, view, rect.w, rect.h)).toEqual({
       x: rect.x + rect.w,
-      y: rect.y + rect.h,
-    });
+      y: rect.y + rect.h });
   });
 });
 
@@ -330,8 +315,7 @@ describe("facecam PiP placement", () => {
     duration: 10,
     currentTime: 0,
     videoWidth: 1280,
-    videoHeight: 720,
-  };
+    videoHeight: 720 };
 
   function drawnPiP(facecam: Facecam) {
     const { ctx, calls } = makeCtx();
@@ -352,10 +336,8 @@ describe("facecam PiP placement", () => {
         remove: () => {},
         setAttribute: () => {},
         removeAttribute: () => {},
-        play: () => Promise.resolve(),
-      }),
-      body: { appendChild: () => {} },
-    });
+        play: () => Promise.resolve() }),
+      body: { appendChild: () => {} } });
   });
 
   it("keeps a bottom-right camera fully inside the canvas", () => {
@@ -455,10 +437,8 @@ function makeCtx() {
     fillText: (...args: unknown[]) => calls.push(["fillText", ...args]),
     drawImage: (...args: unknown[]) => calls.push(["drawImage", ...args]),
     createLinearGradient: () => ({
-      addColorStop: () => {},
-    }),
-    get calls() { return calls; },
-  } as unknown as CanvasRenderingContext2D;
+      addColorStop: () => {} }),
+    get calls() { return calls; } } as unknown as CanvasRenderingContext2D;
   return { ctx, calls };
 }
 
@@ -475,16 +455,13 @@ function makeProject(overrides: MakeProjectOverrides = {}): Project {
     stagedZoomPoints = [],
     textOverlays = [],
     stagedTextOverlays = [],
-    captions = [],
-    stagedCaptions = [],
     background = { kind: "solid", color: "#000000" },
     facecam = { src: null, x: 0.8, y: 0.8, size: 0.2 },
     aspectPreset = "16:9",
     clip,
     media: mediaOverride,
     id = "test",
-    clickLog = [],
-  } = overrides;
+    clickLog = [] } = overrides;
 
   const media: Media[] = Array.isArray(mediaOverride)
     ? mediaOverride
@@ -494,9 +471,7 @@ function makeProject(overrides: MakeProjectOverrides = {}): Project {
           src: clip?.src ?? "",
           duration: clip?.duration ?? 15,
           width: clip?.width ?? 1920,
-          height: clip?.height ?? 1080,
-        },
-      ];
+          height: clip?.height ?? 1080 } ];
 
   return {
     id,
@@ -513,15 +488,10 @@ function makeProject(overrides: MakeProjectOverrides = {}): Project {
         stagedZoomPoints,
         textOverlays,
         stagedTextOverlays,
-        captions,
-        stagedCaptions,
         background,
         facecam,
-        aspectPreset,
-      },
-    ],
-    clickLog,
-  };
+        aspectPreset } ],
+    clickLog };
 }
 
 describe("renderFrame", () => {
@@ -543,8 +513,7 @@ describe("renderFrame", () => {
   it("draws text overlays within time window", () => {
     const { ctx, calls } = makeCtx();
     const p = makeProject({
-      textOverlays: [{ id: "t1", text: "Hello", timestamp: 3, position: "top", staged: false }],
-    });
+      textOverlays: [{ id: "t1", text: "Hello", timestamp: 3, position: "top", staged: false }] });
     renderFrame(ctx, p, 4); // within 3..6 window
     const texts = calls.filter((c) => c[0] === "fillText");
     expect(texts.some((c) => String(c[1]).includes("Hello"))).toBe(true);
@@ -553,8 +522,7 @@ describe("renderFrame", () => {
   it("does not draw text overlays outside time window", () => {
     const { ctx, calls } = makeCtx();
     const p = makeProject({
-      textOverlays: [{ id: "t1", text: "Hello", timestamp: 3, position: "top", staged: false }],
-    });
+      textOverlays: [{ id: "t1", text: "Hello", timestamp: 3, position: "top", staged: false }] });
     renderFrame(ctx, p, 10); // outside 3..6 window
     const texts = calls.filter((c) => c[0] === "fillText");
     expect(texts.some((c) => String(c[1]).includes("Hello"))).toBe(false);
@@ -563,20 +531,9 @@ describe("renderFrame", () => {
   it("staged text drawn in amber", () => {
     const { ctx } = makeCtx();
     const p = makeProject({
-      stagedTextOverlays: [{ id: "s1", text: "Staged", timestamp: 1, position: "center", staged: true }],
-    });
+      stagedTextOverlays: [{ id: "s1", text: "Staged", timestamp: 1, position: "center", staged: true }] });
     // Just verify it doesn't throw
     renderFrame(ctx, p, 2);
-  });
-
-  it("draws captions within time window", () => {
-    const { ctx, calls } = makeCtx();
-    const p = makeProject({
-      captions: [{ text: "Welcome", start: 0, end: 2 }],
-    });
-    renderFrame(ctx, p, 1);
-    const texts = calls.filter((c) => c[0] === "fillText");
-    expect(texts.some((c) => String(c[1]).includes("Welcome"))).toBe(true);
   });
 });
 
@@ -586,16 +543,13 @@ describe("renderFrame segment resolution", () => {
       id: "p", clip: { src: "x", duration: 4, width: 800, height: 600 },
       playbackRate: 1, aspectPreset: "source",
       facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
-      zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
-      captions: [], stagedCaptions: [], background: { kind: "solid", color: "#000" }, clickLog: [],
-    } as never) as Project;
+      zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [], background: { kind: "solid", color: "#000" }, clickLog: [] } as never) as Project;
     renderFrame; // compile guard
     // After split at t=2: two segments; resolve at timeline 1 and 3
     // (splitAt is store-side; here just construct a 2-segment project):
     const p2 = { ...p, segments: [
       { ...p.segments[0]!, id: "a", srcStart: 0, srcEnd: 2 },
-      { ...p.segments[0]!, id: "b", srcStart: 2, srcEnd: 4, facecam: { src: null, x: 0.1, y: 0.1, size: 0.5 } },
-    ] };
+      { ...p.segments[0]!, id: "b", srcStart: 2, srcEnd: 4, facecam: { src: null, x: 0.1, y: 0.1, size: 0.5 } } ] };
     expect(resolveSegment(p2, 3)!.srcT).toBeCloseTo(3);
     expect(resolveSegment(p2, 3)!.segment.id).toBe("b");
     const { ctx } = makeCtx();
@@ -620,12 +574,8 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
         zoomPoints: [],
         stagedZoomPoints: [],
         textOverlays: [],
-        stagedTextOverlays: [],
-        captions: [],
-        stagedCaptions: [],
-        background: { kind: "solid", color: "#000000" },
-        facecam: { src: "cam.webm", x: 0.75, y: 0.75, size: 0.22, shape: "square" },
-      },
+        stagedTextOverlays: [], background: { kind: "solid", color: "#000000" },
+        facecam: { src: "cam.webm", x: 0.75, y: 0.75, size: 0.22, shape: "square" } },
       {
         id: "seg-2",
         mediaId: "m1",
@@ -637,10 +587,7 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
         zoomPoints: [],
         stagedZoomPoints: [],
         textOverlays: [],
-        stagedTextOverlays: [],
-        captions: [],
-        stagedCaptions: [],
-        background: { kind: "solid", color: "#000000" },
+        stagedTextOverlays: [], background: { kind: "solid", color: "#000000" },
         facecam: {
           src: "cam.webm",
           x: 0.60,
@@ -648,11 +595,7 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
           size: 0.38,
           shape: "square",
           transition: "smooth",
-          transitionDuration: 0.6,
-        },
-      },
-    ],
-  };
+          transitionDuration: 0.6 } } ] };
 
   it("smoothly interpolates size between 2 clips across transition duration", () => {
     const seg2 = baseProject.segments[1]!;
@@ -691,11 +634,7 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
           facecam: {
             ...baseProject.segments[1]!.facecam,
             transition: "cut" as const,
-            transitionDuration: 0.5,
-          },
-        },
-      ],
-    };
+            transitionDuration: 0.5 } } ] };
     const seg2 = pCut.segments[1]!;
     const atStart = resolveInterpolatedFacecam(pCut, 5.1, seg2);
     expect(atStart.size).toBeCloseTo(0.38, 2);
@@ -708,19 +647,14 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
       segments: [
         {
           ...baseProject.segments[0]!,
-          facecam: { ...baseProject.segments[0]!.facecam, shape: "square" },
-        },
+          facecam: { ...baseProject.segments[0]!.facecam, shape: "square" } },
         {
           ...baseProject.segments[1]!,
           facecam: {
             ...baseProject.segments[1]!.facecam,
             shape: "circle",
             transition: "smooth",
-            transitionDuration: 0.5,
-          },
-        },
-      ],
-    };
+            transitionDuration: 0.5 } } ] };
     const seg2 = pSquareToCircle.segments[1]!;
 
     // At t = 5.0s (start): shapeProgress = 0 (square)
@@ -744,19 +678,14 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
       segments: [
         {
           ...baseProject.segments[0]!,
-          facecam: { ...baseProject.segments[0]!.facecam, shape: "circle" },
-        },
+          facecam: { ...baseProject.segments[0]!.facecam, shape: "circle" } },
         {
           ...baseProject.segments[1]!,
           facecam: {
             ...baseProject.segments[1]!.facecam,
             shape: "square",
             transition: "smooth",
-            transitionDuration: 0.5,
-          },
-        },
-      ],
-    };
+            transitionDuration: 0.5 } } ] };
     const seg2 = pCircleToSquare.segments[1]!;
 
     // At t = 5.0s (start): shapeProgress = 1 (circle)

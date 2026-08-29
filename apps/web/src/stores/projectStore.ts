@@ -6,14 +6,13 @@
 "use client";
 
 import { create } from "zustand";
-import { projectDuration, resolveSegment, segmentDuration , groupCaptionsIntoChapters } from "@panoptik/engine";
+import { projectDuration, resolveSegment, segmentDuration } from "@panoptik/engine";
 import {
   migrateProject,
   type Project,
   type Segment,
   type ZoomPoint,
   type TextOverlay,
-  type Caption,
   type Background,
   type ClickEvent,
   type AspectPreset,
@@ -136,8 +135,8 @@ interface ProjectStore {
   /**
    * Background each segment had before the current staged theme, by segment id.
    *
-   * The background is the one staged edit with nowhere to live: zooms, text and
-   * captions each have their own staged* array, while a theme is written
+   * The background is the one staged edit with nowhere to live: zooms and text
+   * each have their own staged* array, while a theme is written
    * straight onto the committed field with only a badge to say it is pending.
    * Without a record of what it replaced, Discard had to guess from history —
    * and any unrelated commit in between would bake the unapproved theme in.
@@ -161,11 +160,6 @@ interface ProjectStore {
   splitAt: (timelineT: number) => void;
   /** Name a single clip, or clear its name with "". */
   setSegmentName: (segmentId: string, name: string) => void;
-  /**
-   * Name every clip that has captions, from where its speech starts (C2).
-   * Returns how many were named so the caller can report it.
-   */
-  autoChapters: () => number;
   /** Remove a segment from the timeline (when >1 segment exists). */
   deleteSegment: (id: string) => void;
   updateSegment: (id: string, updates: Partial<Segment>) => void;
@@ -213,13 +207,6 @@ interface ProjectStore {
   // Text — staging
   stageTextOverlay: (overlay: TextOverlay) => void;
   removeStagedTextOverlay: (id: string) => void;
-
-  // Captions — committed
-  setCaptions: (captions: Caption[]) => void;
-
-  // Captions — staging
-  stageCaptions: (captions: Caption[]) => void;
-  clearStagedCaptions: () => void;
 
   // Background
   setBackground: (bg: Background) => void;
@@ -396,28 +383,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     pushHistoryAndSet(project, state, set);
   },
 
-  autoChapters: () => {
-    const state = get();
-    if (!state.project) return 0;
-
-    let named = 0;
-    const segments = state.project.segments.map((seg) => {
-      // Each clip is named from its own speech. Chapter grouping runs per
-      // segment because a segment is already the unit a name attaches to —
-      // splitting on the gaps inside one would need a timeline edit, which
-      // naming must not do on its own.
-      const chapters = groupCaptionsIntoChapters(seg.captions);
-      const title = chapters[0]?.title;
-      if (!title) return seg;
-      named++;
-      return { ...seg, name: title };
-    });
-
-    if (named === 0) return 0;
-    pushHistoryAndSet({ ...state.project, segments }, state, set);
-    return named;
-  },
-
   splitAt: (timelineT) => {
     const s = get();
     if (!s.project || s.exportProgress !== null) return;
@@ -443,12 +408,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     a.stagedTextOverlays = orig.stagedTextOverlays
       .filter((o) => o.timestamp < t)
       .map((o) => ({ ...o }));
-    a.captions = orig.captions
-      .filter((c) => c.start < t)
-      .map((c) => ({ ...c }));
-    a.stagedCaptions = orig.stagedCaptions
-      .filter((c) => c.start < t)
-      .map((c) => ({ ...c }));
 
     const b = structuredClone(orig);
     b.id = crypto.randomUUID();
@@ -468,12 +427,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     b.stagedTextOverlays = orig.stagedTextOverlays
       .filter((o) => o.timestamp >= t)
       .map((o) => ({ ...o }));
-    b.captions = orig.captions
-      .filter((c) => c.start >= t)
-      .map((c) => ({ ...c }));
-    b.stagedCaptions = orig.stagedCaptions
-      .filter((c) => c.start >= t)
-      .map((c) => ({ ...c }));
 
     const idx = s.project.segments.indexOf(orig);
     const segments = [...s.project.segments];
@@ -866,35 +819,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     get().removeTextOverlay(id);
   },
 
-  // ── Captions — committed ──
-
-  setCaptions: (captions) => {
-    const state = get();
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      captions,
-    }));
-    if (!project) return;
-    pushHistoryAndSet(project, state, set);
-  },
-
-  // ── Captions — staging (applies automatically) ──
-
-  stageCaptions: (captions) => {
-    const state = get();
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      captions: [...seg.captions, ...captions],
-      stagedCaptions: [],
-    }));
-    if (!project) return;
-    pushHistoryAndSet(project, state, set);
-  },
-
-  clearStagedCaptions: () => {
-    get().setCaptions([]);
-  },
-
   // ── Background ──
 
   setBackground: (bg) => {
@@ -932,9 +856,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         ...seg.stagedTextOverlays.map(
           (t) => `"${t.text}" at ${t.timestamp.toFixed(1)}s`,
         ),
-        ...(seg.stagedCaptions.length
-          ? [`${seg.stagedCaptions.length} captions`]
-          : []),
         ...(state.pendingBackgroundBadge
           ? ["Background change"]
           : []),
@@ -943,7 +864,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       totalCount:
         seg.stagedZoomPoints.length +
         seg.stagedTextOverlays.length +
-        seg.stagedCaptions.length +
         (state.pendingBackgroundBadge ? 1 : 0),
     };
   },
@@ -968,8 +888,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         })),
       ],
       stagedTextOverlays: [],
-      captions: [...seg.captions, ...seg.stagedCaptions],
-      stagedCaptions: [],
     }));
     if (!project) return;
     // The staged theme is the committed one now, so it must reach history.
@@ -999,7 +917,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           background,
           stagedZoomPoints: [],
           stagedTextOverlays: [],
-          stagedCaptions: [],
         };
       }),
     };
@@ -1179,8 +1096,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       a.stagedZoomPoints = orig.stagedZoomPoints.filter((z) => z.t < t).map((z) => ({ ...z }));
       a.textOverlays = orig.textOverlays.filter((o) => o.timestamp < t).map((o) => ({ ...o }));
       a.stagedTextOverlays = orig.stagedTextOverlays.filter((o) => o.timestamp < t).map((o) => ({ ...o }));
-      a.captions = orig.captions.filter((c) => c.start < t).map((c) => ({ ...c }));
-      a.stagedCaptions = orig.stagedCaptions.filter((c) => c.start < t).map((c) => ({ ...c }));
 
       const b = structuredClone(orig);
       b.id = crypto.randomUUID();
@@ -1189,8 +1104,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       b.stagedZoomPoints = orig.stagedZoomPoints.filter((z) => z.t >= t).map((z) => ({ ...z }));
       b.textOverlays = orig.textOverlays.filter((o) => o.timestamp >= t).map((o) => ({ ...o }));
       b.stagedTextOverlays = orig.stagedTextOverlays.filter((o) => o.timestamp >= t).map((o) => ({ ...o }));
-      b.captions = orig.captions.filter((c) => c.start >= t).map((c) => ({ ...c }));
-      b.stagedCaptions = orig.stagedCaptions.filter((c) => c.start >= t).map((c) => ({ ...c }));
 
       const idx = p.segments.findIndex((seg) => seg.id === orig.id);
       const segments = [...p.segments];

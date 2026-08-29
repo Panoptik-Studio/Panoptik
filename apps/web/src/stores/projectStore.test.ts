@@ -6,8 +6,7 @@ import {
   migrateProject,
   type AudioTrack,
   type Project,
-  type Segment,
-} from "@panoptik/schema";
+  type Segment } from "@panoptik/schema";
 
 const fresh = () =>
   useProjectStore.getState().setProject(structuredClone(mockProject()));
@@ -24,8 +23,7 @@ const zp = (id: string, t: number) =>
     to: { scale: 2, x: 0.5, y: 0.5 },
     dur: 0.5,
     ease: "linear",
-    staged: true,
-  }) as const;
+    staged: true }) as const;
 
 describe("projectStore", () => {
   beforeEach(fresh);
@@ -77,8 +75,7 @@ describe("projectStore", () => {
       t: 9,
       to: { scale: 2, x: 0.5, y: 0.5 },
       dur: 0.7,
-      ease: "easeInOutCubic",
-    });
+      ease: "easeInOutCubic" });
     const s = useProjectStore.getState();
     expect(
       seg().zoomPoints.some((z) => z.t === 9),
@@ -142,15 +139,13 @@ describe("projectStore", () => {
       text: "hello",
       timestamp: 1,
       position: "top",
-      staged: true,
-    });
+      staged: true });
     s.stageTextOverlay({
       id: "txt-b",
       text: "world",
       timestamp: 2,
       position: "bottom",
-      staged: true,
-    });
+      staged: true });
     s.removeStagedTextOverlay("txt-a");
     expect(seg().textOverlays.some((t) => t.id === "txt-a")).toBe(false);
     expect(seg().textOverlays.some((t) => t.id === "txt-b")).toBe(true);
@@ -160,12 +155,10 @@ describe("projectStore", () => {
     const s = useProjectStore.getState();
     s.stageBackground({
       kind: "gradient",
-      stops: ["#ff0000", "#0000ff"],
-    });
+      stops: ["#ff0000", "#0000ff"] });
     expect(seg().background).toEqual({
       kind: "gradient",
-      stops: ["#ff0000", "#0000ff"],
-    });
+      stops: ["#ff0000", "#0000ff"] });
   });
 
   it("markMoment appends to clickLog", () => {
@@ -179,8 +172,7 @@ describe("projectStore", () => {
       t: 5.5,
       x: 0.5,
       y: 0.5,
-      type: "manual",
-    });
+      type: "manual" });
   });
 
   it("play/pause/togglePlay work", () => {
@@ -272,8 +264,7 @@ describe("projectStore", () => {
       text: "hi",
       timestamp: 3,
       position: "top",
-      staged: true,
-    });
+      staged: true });
 
     const fullIdx =
       useProjectStore.getState().historyIndex;
@@ -294,17 +285,6 @@ describe("projectStore", () => {
     expect(
       useProjectStore.getState().historyIndex,
     ).toBe(fullIdx);
-  });
-
-  it("clearStagedCaptions clears captions", () => {
-    const s = useProjectStore.getState();
-    s.stageCaptions([
-      { text: "a", start: 0, end: 1 },
-      { text: "b", start: 1, end: 2 },
-    ]);
-    expect(seg().captions.length).toBeGreaterThanOrEqual(2);
-    useProjectStore.getState().clearStagedCaptions();
-    expect(seg().captions).toHaveLength(0);
   });
 
   it("segment speed starts at 1 from migration and drives duration", () => {
@@ -346,13 +326,9 @@ function singleSegProject(overrides?: Partial<Segment>): Project {
     zoomPoints: [],
     stagedZoomPoints: [],
     textOverlays: [],
-    stagedTextOverlays: [],
-    captions: [],
-    stagedCaptions: [],
-    background: { kind: "solid", color: "#000" },
+    stagedTextOverlays: [], background: { kind: "solid", color: "#000" },
     clickLog: [],
-    ...overrides,
-  } as never) as Project;
+    ...overrides } as never) as Project;
 }
 
 describe("segment split + selection", () => {
@@ -371,8 +347,7 @@ describe("segment split + selection", () => {
     useProjectStore
       .getState()
       .updateSegment(useProjectStore.getState().project!.segments[0]!.id, {
-        speed: 2,
-      });
+        speed: 2 });
     const segs = useProjectStore.getState().project!.segments;
     expect(segs[0]!.speed).toBe(2);
     expect(segs[1]!.speed).toBe(1);
@@ -399,9 +374,7 @@ describe("segment split + selection", () => {
             to: { scale: 2, x: 0.5, y: 0.5 },
             dur: 0.5,
             ease: "linear",
-            staged: false,
-          },
-        ],
+            staged: false } ],
         stagedZoomPoints: [
           {
             id: "zg-b",
@@ -409,17 +382,11 @@ describe("segment split + selection", () => {
             to: { scale: 2, x: 0.5, y: 0.5 },
             dur: 0.5,
             ease: "linear",
-            staged: true,
-          },
-        ],
+            staged: true } ],
         textOverlays: [
-          { id: "t-b", text: "hi", timestamp: 8, position: "top", staged: false },
-        ],
+          { id: "t-b", text: "hi", timestamp: 8, position: "top", staged: false } ],
         stagedTextOverlays: [
-          { id: "tg-b", text: "hey", timestamp: 9, position: "bottom", staged: true },
-        ],
-        captions: [{ text: "cap", start: 5, end: 9 }],
-      } as unknown as Partial<Segment>),
+          { id: "tg-b", text: "hey", timestamp: 9, position: "bottom", staged: true } ] } as unknown as Partial<Segment>),
     );
     useProjectStore.getState().splitAt(4); // srcT 4 → b.srcStart = 4
     const { project } = useProjectStore.getState();
@@ -430,10 +397,8 @@ describe("segment split + selection", () => {
     expect(b.stagedZoomPoints[0]!.t).toBe(7);
     expect(b.textOverlays[0]!.timestamp).toBe(8);
     expect(b.stagedTextOverlays[0]!.timestamp).toBe(9);
-    expect(b.captions[0]!.start).toBe(5);
-    expect(b.captions[0]!.end).toBe(9);
     // ...and stay inside b's source window so render/sourceToTimeline match them.
-    for (const t of [6, 7, 8, 9, 5]) {
+    for (const t of [6, 7, 8, 9]) {
       expect(t).toBeGreaterThanOrEqual(b.srcStart);
       expect(t).toBeLessThanOrEqual(b.srcEnd);
     }
@@ -621,8 +586,7 @@ const audioTrack = (id: string, partial: Partial<AudioTrack> = {}): AudioTrack =
   duration: 30,
   volume: 1,
   startT: 0,
-  ...partial,
-});
+  ...partial });
 
 describe("audio track actions", () => {
   beforeEach(fresh);
@@ -665,8 +629,7 @@ const extraMedia = () => ({
   src: "blob:second",
   duration: 8,
   width: 1280,
-  height: 720,
-});
+  height: 720 });
 
 const extraSegment = (): Segment => ({
   id: "s2",
@@ -681,10 +644,7 @@ const extraSegment = (): Segment => ({
   zoomPoints: [],
   stagedZoomPoints: [],
   textOverlays: [],
-  stagedTextOverlays: [],
-  captions: [],
-  stagedCaptions: [],
-});
+  stagedTextOverlays: [] });
 
 describe("appendClip (multiclip)", () => {
   beforeEach(fresh);
@@ -756,8 +716,7 @@ describe("reorderSegments", () => {
     p.segments = [
       { ...p.segments[0]!, id: "s-a" },
       { ...p.segments[0]!, id: "s-b" },
-      { ...p.segments[0]!, id: "s-c" },
-    ];
+      { ...p.segments[0]!, id: "s-c" } ];
     s.setProject(p);
     useProjectStore.getState().reorderSegments(2, 0);
     expect(useProjectStore.getState().project!.segments[0]!.id).toBe("s-c");

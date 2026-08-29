@@ -26,14 +26,12 @@ function mockOpfs() {
             write: async (data: Blob | string) => {
               files.set(fileName, typeof data === "string" ? new Blob([data]) : data);
             },
-            close: async () => {},
-          }),
+            close: async () => {} }),
           getFile: async () => {
             const f = files.get(fileName);
             if (!f) throw new Error("not found");
             return f;
-          },
-        };
+          } };
       },
       removeEntry: async (fileName: string) => {
         if (!files.has(fileName)) throw new Error("not found");
@@ -45,11 +43,9 @@ function mockOpfs() {
         for (const [fileName, blob] of files) {
           yield [
             fileName,
-            { kind: "file" as const, getFile: async () => blob },
-          ] as const;
+            { kind: "file" as const, getFile: async () => blob } ] as const;
         }
-      },
-    };
+      } };
   };
 
   return {
@@ -60,9 +56,7 @@ function mockOpfs() {
         for (const name of dirs.keys()) {
           yield [name, { ...dirHandle(name), kind: "directory" as const }] as const;
         }
-      },
-    },
-  };
+      } } };
 }
 
 const segment = (over: Partial<Segment> = {}): Segment => ({
@@ -78,18 +72,13 @@ const segment = (over: Partial<Segment> = {}): Segment => ({
   zoomPoints: [],
   stagedZoomPoints: [],
   textOverlays: [],
-  stagedTextOverlays: [],
-  captions: [],
-  stagedCaptions: [],
-  ...over,
-});
+  stagedTextOverlays: [], ...over });
 
 const project = (segments: Segment[]): Project => ({
   id: "proj",
   media: [{ id: "m1", src: "blob:clip", duration: 10, width: 1920, height: 1080 }],
   segments,
-  clickLog: [],
-});
+  clickLog: [] });
 
 let fs: ReturnType<typeof mockOpfs>;
 
@@ -100,8 +89,7 @@ beforeEach(() => {
   // Every blob: URL resolves to a body whose size encodes the URL, so the
   // "skip rewriting an unchanged file" check has something to compare.
   vi.stubGlobal("fetch", async (url: string) => ({
-    blob: async () => new Blob(["x".repeat(url.length)]),
-  }));
+    blob: async () => new Blob(["x".repeat(url.length)]) }));
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -152,8 +140,7 @@ describe("background image storage", () => {
       project([
         segment({ id: "a", background: { kind: "image", src: "blob:pic", fit: "cover" } }),
         segment({ id: "b", background: { kind: "image", src: "blob:pic", fit: "cover" } }),
-        segment({ id: "c", background: { kind: "image", src: "blob:pic", fit: "contain" } }),
-      ]),
+        segment({ id: "c", background: { kind: "image", src: "blob:pic", fit: "contain" } }) ]),
       false,
     );
     expect(namesIn("proj")).toEqual(["bg-0.bin"]);
@@ -164,8 +151,7 @@ describe("background image storage", () => {
     await saveProject(
       project([
         segment({ id: "a", background: { kind: "image", src: "blob:one", fit: "cover" } }),
-        segment({ id: "b", background: { kind: "image", src: "blob:twoo", fit: "cover" } }),
-      ]),
+        segment({ id: "b", background: { kind: "image", src: "blob:twoo", fit: "cover" } }) ]),
       false,
     );
     expect(namesIn("proj")).toEqual(["bg-0.bin", "bg-1.bin"]);
@@ -174,8 +160,7 @@ describe("background image storage", () => {
   it("removes the file once a segment stops using an image", async () => {
     const { saveProject } = await import("./opfs");
     const withImage = project([
-      segment({ id: "a", background: { kind: "image", src: "blob:pic", fit: "cover" } }),
-    ]);
+      segment({ id: "a", background: { kind: "image", src: "blob:pic", fit: "cover" } }) ]);
     await saveProject(withImage, false);
     expect(namesIn("proj")).toEqual(["bg-0.bin"]);
 
@@ -204,8 +189,7 @@ describe("background image storage", () => {
     await saveProject(
       project([
         segment({ id: "a", background: { kind: "image", src: "blob:pic", fit: "cover" } }),
-        segment({ id: "b", background: { kind: "image", src: "blob:pic", fit: "cover" } }),
-      ]),
+        segment({ id: "b", background: { kind: "image", src: "blob:pic", fit: "cover" } }) ]),
       false,
     );
 
@@ -220,8 +204,7 @@ describe("background image storage", () => {
     const { saveProject, loadProjectRecord } = await import("./opfs");
     const two = project([
       segment(),
-      segment({ id: "s2", mediaId: "m2" }),
-    ]);
+      segment({ id: "s2", mediaId: "m2" }) ]);
     two.media.push({ id: "m2", src: "blob:other", duration: 5, width: 1280, height: 720 });
     await saveProject(two, true);
 

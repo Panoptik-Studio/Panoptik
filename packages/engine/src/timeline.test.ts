@@ -7,9 +7,7 @@ function seg(id: string, start: number, end: number, speed: number): Segment {
     id, mediaId: "m1", srcStart: start, srcEnd: end, speed, stagePadding: 0,
     aspectPreset: "source", background: { kind: "solid", color: "#000" },
     facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
-    zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
-    captions: [], stagedCaptions: [],
-  };
+    zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [] };
 }
 const proj = (segs: Segment[]): Project =>
   ({ id: "p", media: [{ id: "m1", src: "x", duration: 10, width: 800, height: 600 }], segments: segs, clickLog: [] }) as Project;

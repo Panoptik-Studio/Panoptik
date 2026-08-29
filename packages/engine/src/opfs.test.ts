@@ -20,21 +20,16 @@ function createMockFileSystem() {
               write: vi.fn(async (data: string | Blob) => {
                 dir.set(fileName, typeof data === "string" ? data : "blob-data");
               }),
-              close: vi.fn(),
-            })),
+              close: vi.fn() })),
             getFile: vi.fn(async () => ({
-              text: async () => dir.get(fileName) as string,
-            })),
-          };
-        }),
-      };
+              text: async () => dir.get(fileName) as string })) };
+        }) };
     }),
     entries: vi.fn(async function* () {
       for (const [name] of files) {
         yield [name, { kind: "directory" }];
       }
-    }),
-  };
+    }) };
 
   return { files, rootHandle };
 }
@@ -57,13 +52,8 @@ describe("opfs serialize/deserialize", () => {
         zoomPoints: [],
         stagedZoomPoints: [],
         textOverlays: [],
-        stagedTextOverlays: [],
-        captions: [],
-        stagedCaptions: [],
-      },
-    ],
-    clickLog: [],
-  };
+        stagedTextOverlays: [] } ],
+    clickLog: [] };
 
   it("JSON roundtrip preserves all fields", () => {
     const serialized = JSON.stringify(mockProject);
@@ -83,7 +73,6 @@ describe("opfs serialize/deserialize", () => {
     expect(parsed.segments[0].zoomPoints).toEqual([]);
     expect(parsed.segments[0].stagedZoomPoints).toEqual([]);
     expect(parsed.segments[0].textOverlays).toEqual([]);
-    expect(parsed.segments[0].captions).toEqual([]);
     expect(parsed.clickLog).toEqual([]);
   });
 
@@ -93,10 +82,7 @@ describe("opfs serialize/deserialize", () => {
       segments: [
         {
           ...mockProject.segments[0]!,
-          background: { kind: "gradient" as const, stops: ["#ff0000", "#0000ff"] },
-        },
-      ],
-    };
+          background: { kind: "gradient" as const, stops: ["#ff0000", "#0000ff"] } } ] };
     const deserialized = JSON.parse(
       JSON.stringify(gradientProject),
     ) as Project;
@@ -122,11 +108,7 @@ describe("opfs serialize/deserialize", () => {
         {
           ...mockProject.segments[0]!,
           zoomPoints: [
-            { id: "z1", t: 2.5, to: { scale: 2, x: 0.5, y: 0.5 }, dur: 0.7, ease: "easeInOutCubic", staged: false },
-          ],
-        },
-      ],
-    };
+            { id: "z1", t: 2.5, to: { scale: 2, x: 0.5, y: 0.5 }, dur: 0.7, ease: "easeInOutCubic", staged: false } ] } ] };
     const deserialized = JSON.parse(
       JSON.stringify(projectWithZm),
     ) as Project;
@@ -141,15 +123,11 @@ describe("opfs serialize/deserialize", () => {
         {
           ...mockProject.segments[0]!,
           id: "s1",
-          facecam: { src: "blob:http://localhost/take1", x: 0.8, y: 0.8, size: 0.2, shape: "square" },
-        },
+          facecam: { src: "blob:http://localhost/take1", x: 0.8, y: 0.8, size: 0.2, shape: "square" } },
         {
           ...mockProject.segments[0]!,
           id: "s2",
-          facecam: { src: "blob:http://localhost/take2-reshoot", x: 0.8, y: 0.8, size: 0.2, shape: "square", startT: 4 },
-        },
-      ],
-    };
+          facecam: { src: "blob:http://localhost/take2-reshoot", x: 0.8, y: 0.8, size: 0.2, shape: "square", startT: 4 } } ] };
 
     const serialized = JSON.stringify(multiTakeProject);
     const parsed = JSON.parse(serialized) as Project;

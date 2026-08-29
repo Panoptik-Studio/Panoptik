@@ -17,9 +17,8 @@ export function ExportPanel() {
   const project = useProjectStore((s) => s.project);
   const [resolution, setResolution] = useState<ExportOpts["resolution"]>("1080p");
   const [format, setFormat] = useState<ExportOpts["format"]>("mp4");
-  const [burnCaptions, setBurnCaptions] = useState(true);
   const { progress, error, result, run, isExporting } = useVideoExport();
-  const handleExport = () => run({ format, resolution, burnCaptions });
+  const handleExport = () => run({ format, resolution });
 
   if (!project) {
     return (
@@ -65,17 +64,6 @@ export function ExportPanel() {
           </button>
         ))}
       </div>
-
-      <label className="pk-label mb-3 flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={burnCaptions}
-          onChange={(e) => setBurnCaptions(e.target.checked)}
-          disabled={busy}
-          className="accent-[#171717]"
-        />
-        Burn in captions
-      </label>
 
       <button
         onClick={handleExport}

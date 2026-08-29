@@ -6,9 +6,6 @@
  */
 import { registerToolWithLifecycle } from "./lifecycle";
 
-/** Whisper can be slow on a long clip, but it should never hang forever. */
-const TRANSCRIBE_TIMEOUT_MS = 10 * 60 * 1000;
-
 // Tool arguments arrive from a model, so they are treated as untrusted input:
 // bounded, clamped and type-checked before they reach the store. The JSON
 // schema is a hint to the caller, not an enforced contract.
@@ -24,7 +21,6 @@ const safeColor = (v: unknown, fallback: string) =>
   typeof v === "string" && HEX_COLOR.test(v.trim()) ? v.trim() : fallback;
 import { useProjectStore } from "../stores/projectStore";
 import { showConfirmDialog } from "./confirm";
-import { postProcessCaptions } from "../lib/captionChunker";
 
 function generateId(): string {
   return (
@@ -241,145 +237,12 @@ export function registerEditingTools(): void {
     },
   });
 
-  registerToolWithLifecycle({
-    name: "generate_captions",
-    description:
-      "Runs local Whisper transcription on the audio track. Generates word-level captions with timestamps. Stages them — does not commit. May take 10-30 seconds depending on clip length. The transcription runs entirely in the browser via WebAssembly — no audio leaves the device.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        language: {
-          type: "string",
-          description:
-            "Language code (e.g. 'en', 'es'). Default auto-detect.",
-        },
-      },
-    },
-    execute: async (_input: {
-      language?: string;
-    }) => {
-      const store = useProjectStore.getState();
-      if (!store.project)
-        return {
-          error:
-            "No project loaded. Ask the user to import a clip first.",
-        };
-
-      // Spawn whisper worker
-      try {
-        const { extractMono16k } = await import(
-          "../lib/audio16k"
-        );
-
-        // Get audio buffer
-        let audioBuffer: AudioBuffer | null = null;
-        try {
-          const { engine } = await import(
-            "../lib/engineProvider"
-          );
-          audioBuffer = await engine.getAudioBuffer(
-            store.project!,
-          );
-        } catch {
-          // fallback
-        }
-
-        if (!audioBuffer) {
-          return {
-            error:
-              "No audio track found. Cannot generate captions.",
-          };
-        }
-
-        const pcm = await extractMono16k(audioBuffer);
-
-        const captions = await new Promise<
-          { text: string; start: number; end: number }[]
-        >((resolve, reject) => {
-          const workerCode = `
-            let transcriber = null;
-            self.onmessage = async (e) => {
-              if (e.data.type !== 'transcribe' || !e.data.audio) return;
-              try {
-                if (!transcriber) {
-                  const { pipeline } = await import(/* webpackIgnore: true */ 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm');
-                  transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
-                    progress_callback: (p) => { if (p.status === 'progress') self.postMessage({ type: 'progress', progress: p.progress }); },
-                  });
-                }
-                self.postMessage({ type: 'progress', progress: -1 });
-                const out = await transcriber(e.data.audio, { return_timestamps: 'word', chunk_length_s: 30, stride_length_s: 5 });
-                self.postMessage({ type: 'result', captions: out.chunks.map((c) => ({ text: String(c.text).trim(), start: c.timestamp[0], end: c.timestamp[1] ?? c.timestamp[0] + 0.5 })) });
-              } catch (err) {
-                self.postMessage({ type: 'error', error: String(err) });
-              }
-            };
-          `;
-          const blob = new Blob([workerCode], { type: "application/javascript" });
-          const workerUrl = URL.createObjectURL(blob);
-          const worker = new Worker(workerUrl);
-          // The Worker copies the script on construction, so the URL is free
-          // to go — otherwise each run leaks one.
-          URL.revokeObjectURL(workerUrl);
-          // A transcription that never reports back would otherwise hold the
-          // model in memory and leave this promise pending forever.
-          const failsafe = setTimeout(() => {
-            useProjectStore.getState().setWhisperProgress(null);
-            worker.terminate();
-            reject(new Error("Transcription timed out."));
-          }, TRANSCRIBE_TIMEOUT_MS);
-          worker.onerror = (err) => {
-            clearTimeout(failsafe);
-            useProjectStore.getState().setWhisperProgress(null);
-            worker.terminate();
-            reject(new Error(`Transcription worker failed: ${err.message}`));
-          };
-          worker.onmessage = (e) => {
-            if (e.data.type === "progress") {
-              useProjectStore.getState().setWhisperProgress(e.data.progress);
-            }
-            if (e.data.type === "result") {
-              clearTimeout(failsafe);
-              useProjectStore.getState().setWhisperProgress(null);
-              resolve(e.data.captions);
-              worker.terminate();
-            }
-            if (e.data.type === "error") {
-              clearTimeout(failsafe);
-              useProjectStore.getState().setWhisperProgress(null);
-              reject(new Error(e.data.error));
-              worker.terminate();
-            }
-          };
-          worker.postMessage({
-            type: "transcribe",
-            audio: pcm,
-          });
-        });
-
-        store.stageCaptions(postProcessCaptions(captions));
-        return {
-          stagedCount: captions.length,
-          preview: captions
-            .slice(0, 5)
-            .map(
-              (c) =>
-                `${c.start.toFixed(1)}s: "${c.text}"`,
-            ),
-          message: `${captions.length} captions staged. Call commit_staged_changes to burn them in.`,
-        };
-      } catch (err) {
-        return { error: String(err) };
-      }
-    },
-  });
-
   // ── WRITE TOOL (gated by confirmation) ──
 
   registerToolWithLifecycle({
     name: "commit_staged_changes",
     description:
-      "Commits ALL staged items (zoom points, text overlays, backgrounds, captions) to the project. REQUIRES human confirmation — shows the full staged diff and asks Yes/No before writing. This is the only way staged changes become permanent.",
+      "Commits ALL staged items (zoom points, text overlays, backgrounds) to the project. REQUIRES human confirmation — shows the full staged diff and asks Yes/No before writing. This is the only way staged changes become permanent.",
     inputSchema: {
       type: "object",
       properties: {},

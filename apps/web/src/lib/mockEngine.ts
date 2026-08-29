@@ -31,10 +31,7 @@ export const mockEngine = {
         aspectPreset: "source" as const,
         background: { kind: "solid" as const, color: "#000000" },
         facecam: { src: null, x: 0.8, y: 0.8, size: 0.2, shape: "circle" as const },
-        zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
-        captions: [], stagedCaptions: [],
-      },
-    };
+        zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [] } };
   },
   renderFrame: (ctx: Ctx, project: Project, t: number) => {
     const w = ctx.canvas.width;
@@ -59,8 +56,7 @@ export const mockEngine = {
     // Zoom focal markers: green committed, amber ghost
     [
       ...(seg?.zoomPoints ?? []),
-      ...(seg?.stagedZoomPoints ?? []),
-    ].forEach((zp) => {
+      ...(seg?.stagedZoomPoints ?? []) ].forEach((zp) => {
       if (t >= zp.t && t <= zp.t + zp.dur) {
         ctx.strokeStyle = zp.staged ? "#f59e0b" : "#10b981";
         ctx.lineWidth = 4;
@@ -79,8 +75,7 @@ export const mockEngine = {
     // Text overlays
     [
       ...(seg?.textOverlays ?? []),
-      ...(seg?.stagedTextOverlays ?? []),
-    ].forEach((to) => {
+      ...(seg?.stagedTextOverlays ?? []) ].forEach((to) => {
       if (t >= to.timestamp && t <= to.timestamp + 3) {
         ctx.fillStyle = to.staged ? "#f59e0b" : "#ffffff";
         ctx.font = "bold 32px sans-serif";
@@ -95,18 +90,7 @@ export const mockEngine = {
       }
     });
 
-    // Captions
-    [
-      ...(seg?.captions ?? []),
-      ...(seg?.stagedCaptions ?? []),
-    ].forEach((c) => {
-      if (t >= c.start && t <= c.end) {
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "28px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(c.text, w / 2, h - 40);
-      }
-    });
+
 
     // Timestamp HUD
     ctx.fillStyle = "#e5e7eb";
@@ -115,9 +99,7 @@ export const mockEngine = {
     ctx.fillText(`t=${t.toFixed(1)}s`, 20, 30);
   },
   loadRecording: async (): Promise<Project> => ({
-    ...mockProject(),
-  }),
+    ...mockProject() }),
   getAudioBuffer: async () => null,
   exportProject: async () =>
-    new Blob(["mock"], { type: "video/mp4" }),
-};
+    new Blob(["mock"], { type: "video/mp4" }) };

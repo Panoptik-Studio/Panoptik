@@ -24,8 +24,6 @@ export type TextOverlay = {
   staged: boolean;
 };
 
-export type Caption = { text: string; start: number; end: number };
-
 export type Background =
   | { kind: "solid"; color: string }
   | { kind: "gradient"; stops: [string, string] }
@@ -116,8 +114,6 @@ export type Segment = {
   stagedZoomPoints: ZoomPoint[];
   textOverlays: TextOverlay[];
   stagedTextOverlays: TextOverlay[];
-  captions: Caption[];
-  stagedCaptions: Caption[];
 };
 
 export type Project = {
@@ -223,8 +219,6 @@ export function migrateProject(raw: unknown): Project {
     stagedZoomPoints: ((r.stagedZoomPoints ?? []) as ZoomPoint[]).map((z) => ({ ...z })),
     textOverlays: ((r.textOverlays ?? []) as TextOverlay[]).map((o) => ({ ...o })),
     stagedTextOverlays: ((r.stagedTextOverlays ?? []) as TextOverlay[]).map((o) => ({ ...o })),
-    captions: ((r.captions ?? []) as Caption[]).map((c) => ({ ...c })),
-    stagedCaptions: ((r.stagedCaptions ?? []) as Caption[]).map((c) => ({ ...c })),
   };
   return {
     id: String(r.id ?? crypto.randomUUID()),
@@ -243,6 +237,5 @@ function num(v: unknown, fallback: number, min = -Infinity, max = Infinity): num
 export type ExportOpts = {
   format: "mp4" | "webm";
   resolution: "720p" | "1080p" | "4k";
-  burnCaptions: boolean;
   playbackRate?: number; // 0.25–3, affects cam+screen together, preview & export
 };

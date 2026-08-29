@@ -808,10 +808,6 @@ export function PreviewCanvas() {
 
       if (audio && curScreenSrc) {
         const drift = Math.abs(audio.currentTime - r.srcT);
-        const willSeek = drift > 1.0 && audio.src === curScreenSrc && !audio.paused && audio.readyState >= 2;
-        if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugAudio") === "1" && (willSeek || audio.src !== curScreenSrc)) {
-          console.log("[PreviewAudio] screen", { t: st.currentTime.toFixed(3), srcT: r.srcT.toFixed(3), audioTime: audio.currentTime.toFixed(3), drift: drift.toFixed(3), willSeek, srcChanged: audio.src !== curScreenSrc, paused: audio.paused, rate: audio.playbackRate, ready: audio.readyState });
-        }
         if (audio.src !== curScreenSrc) {
           audio.src = curScreenSrc;
           audio.currentTime = r.srcT;
@@ -836,10 +832,6 @@ export function PreviewCanvas() {
         const fcStartT = r.seg.facecam?.startT ?? 0;
         const targetFc = fcStartT > 0 ? Math.max(0, st.currentTime - fcStartT) : r.srcT;
         const fcDrift = Math.abs(fcAudio.currentTime - targetFc);
-        const fcWillSeek = fcDrift > 1.0 && fcAudio.src === curFcSrc && !fcAudio.paused && fcAudio.readyState >= 2;
-        if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugAudio") === "1" && (fcWillSeek || fcAudio.src !== curFcSrc)) {
-          console.log("[PreviewAudio] facecam", { t: st.currentTime.toFixed(3), targetFc: targetFc.toFixed(3), fcTime: fcAudio.currentTime.toFixed(3), drift: fcDrift.toFixed(3), willSeek: fcWillSeek, srcChanged: fcAudio.src !== curFcSrc, paused: fcAudio.paused, ready: fcAudio.readyState });
-        }
         if (fcAudio.src !== curFcSrc) {
           fcAudio.src = curFcSrc;
           fcAudio.currentTime = targetFc;

@@ -8,8 +8,7 @@ function mockAudioBuffer(sampleRate: number, channels: Float32Array[]) {
     numberOfChannels: channels.length,
     length: channels[0]!.length,
     duration: channels[0]!.length / sampleRate,
-    getChannelData: (ch: number) => channels[ch]!,
-  } as unknown as AudioBuffer;
+    getChannelData: (ch: number) => channels[ch]! } as unknown as AudioBuffer;
 }
 
 describe("timeStretch (pitch-preserving WSOLA)", () => {
@@ -84,9 +83,7 @@ describe("segment-windowed audio (sliceAndStretchAudio / concatAudio)", () => {
     id: "s", mediaId: "m1", srcStart, srcEnd, speed, stagePadding: 0,
     aspectPreset: "source", background: { kind: "solid", color: "#000" },
     facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
-    zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [],
-    captions: [], stagedCaptions: [],
-  });
+    zoomPoints: [], stagedZoomPoints: [], textOverlays: [], stagedTextOverlays: [] });
 
   it("slices exactly [srcStart, srcEnd) in seconds", () => {
     const src = makeMock(48000, 48000); // 1s

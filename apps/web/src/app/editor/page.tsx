@@ -8,7 +8,6 @@
 import * as React from "react";
 import { AudioPanel } from "@/components/AudioPanel";
 import { CameraControls } from "@/components/CameraControls";
-import { CaptionsPanel } from "@/components/CaptionsPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ExportLock } from "@/components/ExportLock";
 import { ExportPanel } from "@/components/ExportPanel";
@@ -24,7 +23,7 @@ import { Toolbar } from "@/components/Toolbar";
 import { ZoomPanel } from "@/components/ZoomPanel";
 import { useProjectPersistence } from "@/lib/useProjectPersistence";
 
-type LeftTab = "media" | "zoom" | "text" | "captions" | "audio" | "camera" | "stage";
+type LeftTab = "media" | "zoom" | "text" | "audio" | "camera" | "stage";
 export default function EditorPage() {
   const [activeTab, setActiveTab] = React.useState<LeftTab>("media");
   // Above the tabs: the clip must come back on reload regardless of which
@@ -35,12 +34,11 @@ export default function EditorPage() {
       <Toolbar />
 
       <div className="flex min-h-0 flex-1">
-        {/* Left — 6 tabs grouped by job: Media / Zoom / Text / Captions / Camera / Stage */}
+        {/* Left — 5 tabs grouped by job: Media / Zoom / Text / Audio / Camera / Stage */}
         <aside className="flex w-[64px] shrink-0 flex-col items-center gap-2 border-r bg-white py-5" style={{ borderColor: "#ebebeb" }}>
           <ToolBtn icon="media" label="Media" active={activeTab === "media"} onClick={() => setActiveTab("media")} />
           <ToolBtn icon="zoom" label="Zoom" kbd="Z" active={activeTab === "zoom"} onClick={() => setActiveTab("zoom")} />
           <ToolBtn icon="text" label="Text" kbd="T" active={activeTab === "text"} onClick={() => setActiveTab("text")} />
-          <ToolBtn icon="captions" label="Captions" active={activeTab === "captions"} onClick={() => setActiveTab("captions")} />
           <ToolBtn icon="audio" label="Audio" active={activeTab === "audio"} onClick={() => setActiveTab("audio")} />
           <ToolBtn icon="camera" label="Camera" active={activeTab === "camera"} onClick={() => setActiveTab("camera")} />
           <ToolBtn icon="stage" label="Stage" active={activeTab === "stage"} onClick={() => setActiveTab("stage")} />
@@ -68,7 +66,6 @@ export default function EditorPage() {
             </>
           )}
           {activeTab === "text" && <Inspector />}
-          {activeTab === "captions" && <CaptionsSlot />}
           {activeTab === "audio" && <AudioPanel />}
           {activeTab === "camera" && <CameraControls />}
           {activeTab === "stage" && <StageControls />}
@@ -93,11 +90,7 @@ export default function EditorPage() {
   );
 }
 
-function CaptionsSlot() {
-  return <CaptionsPanel />; // DEV B: CaptionsPanel implemented
-}
-
-/* Left — 6 tabs: Media · Zoom · Text · Captions · Camera · Stage */
+/* Left — 5 tabs: Media · Zoom · Text · Audio · Camera · Stage */
 function ToolBtn({ icon, label, kbd, active, onClick }: { icon: string; label: string; kbd?: string; active?: boolean; onClick?: () => void }) {
   const icons: Record<string, React.ReactNode> = {
     media: (
@@ -112,9 +105,6 @@ function ToolBtn({ icon, label, kbd, active, onClick }: { icon: string; label: s
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
         <polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" />
       </svg>
-    ),
-    captions: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M3 7h18"/><path d="M3 12h10"/><path d="M3 17h14"/><path d="M17 7v10"/><path d="M7 12v5"/></svg>
     ),
     audio: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
