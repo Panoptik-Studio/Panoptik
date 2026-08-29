@@ -36,27 +36,34 @@ Append to `packages/engine/src/decode.test.ts`:
 
 ```ts
 describe("activateMedia (multiclip swap)", () => {
+  // Node cannot fetch blob: URLs — stub fetch to resolve the registered blobs.
+  const blobUrls = new Map<string, Blob>();
+  vi.stubGlobal("fetch", async (u: string) => ({ blob: async () => blobUrls.get(u) }));
+
+  const blobUrl = (blob: Blob) => {
+    const u = URL.createObjectURL(blob);
+    blobUrls.set(u, blob);
+    return u;
+  };
+
   it("opens a clip and swaps when the id changes", async () => {
     const mod = await loadFresh();
     const fileA = new File([new Uint8Array(2048)], "a.mp4", { type: "video/mp4" });
     await mod.loadClip(fileA);
     expect(mod.getActiveMediaId()).toBe("m1");
 
-    // clip B: activate by blob URL (the URL decode.ts mints on loadClip)
+    // clip B: activate by blob URL
     const fileB = new File([new Uint8Array(2048)], "b.mp4", { type: "video/mp4" });
-    const urlB = URL.createObjectURL(fileB);
-    await mod.activateMedia("m2", urlB);
+    await mod.activateMedia("m2", blobUrl(fileB));
     expect(mod.getActiveMediaId()).toBe("m2");
     await mod.prepareFrame(1.5);
     expect(mod.currentFrame()).not.toBeNull();
-    URL.revokeObjectURL(urlB);
   });
 
   it("is idempotent for the same id — no teardown", async () => {
     const mod = await loadFresh();
     const file = new File([new Uint8Array(2048)], "a.mp4", { type: "video/mp4" });
     await mod.loadClip(file);
-    const before = mod.currentFrame();
     await mod.activateMedia("m1", null);
     expect(mod.getActiveMediaId()).toBe("m1");
   });
@@ -64,15 +71,12 @@ describe("activateMedia (multiclip swap)", () => {
   it("swaps back to the first clip after activating a second", async () => {
     const mod = await loadFresh();
     await mod.loadClip(new File([new Uint8Array(2048)], "a.mp4", { type: "video/mp4" }));
-    const urlB = URL.createObjectURL(new File([new Uint8Array(2048)], "b.mp4", { type: "video/mp4" }));
-    await mod.activateMedia("m2", urlB);
-    let src1 = "";
-    await mod.prepareFrame(1);
-    // switch back — should reopen clip A from its stored object url
-    const urlA = (await mod.activateMedia("m1", null)) as never as string;
-    // activateMedia with null src but same id is a no-op by design; assert id unchanged
+    await mod.activateMedia("m2", blobUrl(new File([new Uint8Array(2048)], "b.mp4", { type: "video/mp4" })));
+    expect(mod.getActiveMediaId()).toBe("m2");
+    await mod.activateMedia("m1", blobUrl(new File([new Uint8Array(2048)], "a.mp4", { type: "video/mp4" })));
     expect(mod.getActiveMediaId()).toBe("m1");
-    URL.revokeObjectURL(urlB);
+    await mod.prepareFrame(1);
+    expect(mod.currentFrame()).not.toBeNull();
   });
 });
 ```
@@ -97,46 +101,77 @@ export function getActiveMediaId(): string | null {
 Extract the open body of `loadClip` (lines 423-458: Input → track checks → sink → duration → surface → audio) into:
 
 ```ts
-async function openMedia(inputSource: BlobSource<any> | BlobSource | File): Promise<{
-  duration: number; width: number; height: number;
-}> {
-  input = new Input({ formats: ALL_FORMATS, source: inputSource });
-  ...same body, returning { duration, width, height }...
-}
-
-export async function loadClip(file: File): Promise<Project> {
-  await teardown();
-  activeMediaId = null;
-  if (file.size < 1024) throw /* existing message */;
-  const d = await openMedia(file);
-  objectUrl = URL.createObjectURL(file);
-  activeMediaId = FIRST_MEDIA_ID;
-  return { /* existing project literal: media [{ id: FIRST_MEDIA_ID, src: objectUrl, ...d }]*/ };
-}
-
-export async function activateMedia(mediaId: string, src: string | null): Promise<void> {
-  if (mediaId === activeMediaId) return;
-  await teardown();
-  activeMediaId = null;
-  if (!src) return;
-  const blob = await (await fetch(src)).blob();
-  const d = await openMedia(blob);
-  duration = d.duration; width/height already set inside openMedia's sink;
-  activeMediaId = mediaId;
+/** Open the decode pipeline from a Blob/File. Sets sink, duration, surface,
+ *  audio sink. Does NOT mint or revoke URLs — callers own those. */
+async function openMedia(blob: Blob): Promise<void> {
+  input = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
+  const track = await input.getPrimaryVideoTrack();
+  if (!track) throw new Error("No video track found in file — the recording may be corrupted or too short.");
+  if (!(await track.canDecode())) throw new Error("This browser cannot decode the video codec. Try Chrome/Edge or re-export as MP4 Baseline.");
+  const displayWidth = await track.getDisplayWidth();
+  const displayHeight = await track.getDisplayHeight();
+  const scale = Math.min(1, MAX_DECODE_WIDTH / displayWidth);
+  const decodeW = Math.max(2, Math.round(displayWidth * scale));
+  const decodeH = Math.max(2, Math.round(displayHeight * scale));
+  sink = new CanvasSink(track, { width: decodeW, height: decodeH, fit: "fill", poolSize: POOL_SIZE });
+  duration = await track.computeDuration();
+  createSurface(decodeW, decodeH);
+  try {
+    const audioTrack = await input.getPrimaryAudioTrack();
+    if (audioTrack && (await audioTrack.canDecode())) setAudioSink(audioTrack);
+    else setAudioSink(null);
+  } catch {
+    setAudioSink(null);
+  }
 }
 ```
 
+`loadClip` becomes: `await teardown(); activeMediaId = null; [size check]; await openMedia(file); objectUrl = URL.createObjectURL(file); activeMediaId = FIRST_MEDIA_ID; return {...project literal...};`
+
 Key details:
 - `openMedia` sets module `sink`, `duration` (via `d.duration`), `surface`, and audio sink exactly as `loadClip` does today. Keep `presented = null` reset and iterator close inside `teardown` (unchanged).
-- `activateMedia` does **not** mint/revoke the project's src — it fetches the blob and reopens from it. The src stays project-owned.
-- Export `getActiveMediaId` and `activateMedia` from the file.
+- `activateMedia` does **not** call the full `teardown()` — `teardown()` revokes `objectUrl` and all `liveObjectUrls`, and `objectUrl` IS the project's `media[0].src` (minted by `loadClip`). Revoking it would kill clip A's URL after swapping to clip B, breaking the swap back. Extract a soft `closePipeline()`:
+
+```ts
+async function teardown(): Promise<void> {
+  await closePipeline();
+  await setFacecamBlob(null);
+  await setAudioBlob(null);
+  if (audioInput) {
+    try { audioInput.dispose(); } catch { /* already disposed */ }
+    audioInput = null;
+  }
+  if (objectUrl) {
+    URL.revokeObjectURL(objectUrl);
+    objectUrl = null;
+  }
+  for (const url of liveObjectUrls) {
+    try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+  }
+  liveObjectUrls.clear();
+}
+```
+
+`activateMedia` calls `closePipeline()` only (project URLs stay alive), then fetches the blob and calls `openMedia(blob)`; `loadClip` still calls full `teardown()`. Then:
+
+```ts
+export async function activateMedia(mediaId: string, src: string | null): Promise<void> {
+  if (mediaId === activeMediaId) return;
+  await closePipeline();
+  activeMediaId = null;
+  if (!src) return;
+  const blob = await (await fetch(src)).blob();
+  await openMedia(blob);
+  activeMediaId = mediaId;
+}
+```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm --filter @panoptik/engine vitest run src/decode.test.ts -t "activateMedia"` then full: `pnpm test`
 Expected: PASS (all decode tests, including existing `loadClip` ones).
 
-Note: the mock decode.test.ts's `Input` mock reads `opts.source.file` — `activateMedia` fetches blob then passes a Blob; extend the mock in Step 1 region? No — the mock's `Input` uses `opts?.source?.file?.name`; a `Blob` has no `file` name, so `openMedia`'s `track` calls still resolve. Verify the mock tolerates it; if not, adjust Step 3 test to use `registerMediaUrl` flow already handled.
+Note: the decode.test.ts `Input` mock reads `opts?.source?.file?.name` — `activateMedia` passes a `Blob` to `openMedia` (`BlobSource(blob)`), so `file`.name is undefined and the mock's `getPrimaryAudioTrack` returns `null` for it (it only "has mic" when the name includes "mic"). That is fine — the swap tests only assert video frames.
 
 - [ ] **Step 5: Commit**
 
