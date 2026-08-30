@@ -9,6 +9,7 @@ import Link from "next/link";
 
 import { useRef } from "react";
 import { useProjectStore } from "@/stores/projectStore";
+import { formatDefaultProjectName } from "@panoptik/engine";
 import { useVideoExport } from "@/lib/useVideoExport";
 import { engine } from "@/lib/engineProvider";
 
@@ -63,7 +64,7 @@ export function Toolbar() {
           title={project?.name || project?.id}
         >
           <span className="max-w-[180px] truncate" style={{ fontWeight: 500 }}>
-            {project ? (project.name?.trim() || `${project.id.slice(0, 8)}…`) : "product-demo.ods"}
+            {project ? (project.name?.trim() || formatDefaultProjectName(project.segments[0]?.facecam?.src ? "recording" : "clip")) : "product-demo.ods"}
           </span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-50"><path d="m6 9 6 6 6-6" /></svg>
         </button>

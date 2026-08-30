@@ -97,10 +97,6 @@ export function ExportPanel() {
           {error}
         </p>
       )}
-
-      <p className="pk-help mt-2" style={{ fontSize: 11 }}>
-        Renders every frame through the same pipeline as the preview.
-      </p>
     </div>
   );
 }

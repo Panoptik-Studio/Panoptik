@@ -6,6 +6,7 @@
  */
 
 import { migrateProject, primaryMedia, type Media, type Project } from "@panoptik/schema";
+import { formatDefaultProjectName } from "./naming";
 
 function isSecureContext(): boolean {
   return (
@@ -517,9 +518,13 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
         }
       }
 
+      const defaultName = formatDefaultProjectName(
+        project.segments[0]?.facecam?.src ? "recording" : "clip",
+        jsonFile.lastModified || Date.now(),
+      );
       out.push({
         id: name,
-        name: project.name && project.name.trim() ? project.name : "Untitled clip",
+        name: project.name && project.name.trim() ? project.name : defaultName,
         duration: totalMediaDuration(project),
         width: primaryMedia(project).width,
         height: primaryMedia(project).height,
@@ -616,7 +621,10 @@ export async function listProjects(): Promise<
         const project = migrateProject(
           JSON.parse(await file.text()),
         );
-        const fallbackName = `${project.segments[0]?.facecam.src ? "Recording" : "Clip"} ${primaryMedia(project).duration.toFixed(0)}s`;
+        const fallbackName = formatDefaultProjectName(
+          project.segments[0]?.facecam?.src ? "recording" : "clip",
+          file.lastModified || Date.now(),
+        );
         projects.push({
           id: name,
           name: project.name && project.name.trim() ? project.name : fallbackName,

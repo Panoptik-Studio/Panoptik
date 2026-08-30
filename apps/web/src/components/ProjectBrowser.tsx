@@ -10,6 +10,7 @@
 import { primaryMedia } from "@panoptik/schema";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatDefaultProjectName } from "@panoptik/engine";
 import { useProjectStore } from "@/stores/projectStore";
 import { useProjectActions } from "@/lib/useProjectPersistence";
 
@@ -156,7 +157,7 @@ export function ProjectBrowser() {
               style={{ borderColor: "#ebebeb", background: "#f8f8f8" }}
             >
               <span className="block truncate text-[13px] font-semibold text-[#1a1a1a]">
-                {project.name?.trim() || "Untitled project"}
+                {project.name?.trim() || formatDefaultProjectName(project.segments[0]?.facecam?.src ? "recording" : "clip")}
               </span>
               <span className="block text-[11px] text-pk-faint mt-0.5">
                 {primaryMedia(project).width}×{primaryMedia(project).height} · {primaryMedia(project).duration.toFixed(1)}s
@@ -207,7 +208,7 @@ export function ProjectBrowser() {
         <p className="pk-help">
           {status === "restoring"
             ? "Reopening your last project…"
-            : "Import or record a clip to begin. It is kept here automatically."}
+            : "Import or record a clip to begin."}
         </p>
       )}
 

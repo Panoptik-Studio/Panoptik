@@ -14,6 +14,7 @@ import type { Media, Project } from "@panoptik/schema";
 import { FIRST_MEDIA_ID } from "@panoptik/schema";
 import { clearFacecamCache, getCurrentFrame, setCurrentFrame, setFacecamFrameSource } from "./render";
 import { setAudioBlobFallback, setAudioSink } from "./audio";
+import { formatDefaultProjectName } from "./naming";
 
 /** Keep 1920 everywhere on canvas per request — export and preview share res. */
 const MAX_DECODE_WIDTH = 1920;
@@ -438,8 +439,18 @@ export async function loadClip(file: File, opts?: { append?: boolean }): Promise
     await openMedia(file);
     objectUrl = URL.createObjectURL(file);
     activeMediaId = FIRST_MEDIA_ID;
+    const hasMeaningfulFilename =
+      file.name &&
+      !/^screen\.(webm|mp4)$/i.test(file.name) &&
+      !/^video\.(webm|mp4)$/i.test(file.name) &&
+      file.name !== "blob";
+    const initialName = hasMeaningfulFilename
+      ? file.name.replace(/\.[^/.]+$/, "")
+      : formatDefaultProjectName("clip");
+
     result = {
       id: crypto.randomUUID(),
+      name: initialName,
       media: [{ id: FIRST_MEDIA_ID, src: objectUrl, duration, width: inputWidth, height: inputHeight }],
       audioSrc: null,
       segments: [{

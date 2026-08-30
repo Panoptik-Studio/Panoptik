@@ -93,4 +93,6 @@ export {
   computeDuckingEnvelope,
   mixTracksIntoBase,
 } from "./audioTracks";
+export { formatDefaultProjectName } from "./naming";
+
 // ── #endregion ──

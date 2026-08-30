@@ -19,6 +19,7 @@ import { getAudioBuffer as audioGetBuffer } from "./audio";
 import { exportProject as encodeProject } from "./encode";
 import { loadProjectRecord, mintUrl } from "./opfs";
 import { mergeSavedProject } from "./sanitize";
+import { formatDefaultProjectName } from "./naming";
 
 export function createRealEngine(): MediaEngine {
   return {
@@ -61,6 +62,9 @@ export function createRealEngine(): MediaEngine {
       // Append mode keeps the previous project's blob URLs alive — a full
       // teardown would revoke the other clips' media srcs.
       const proj = await decodeLoadClip(screenFile, opts?.append ? { append: true } : undefined);
+      if (!opts?.append) {
+        proj.name = formatDefaultProjectName("recording");
+      }
       // After loadClip: it tears down first, which revokes the previous take's
       // facecam URL and drops its cached <video>.
       const facecamSrc = await setFacecamBlob(facecam);

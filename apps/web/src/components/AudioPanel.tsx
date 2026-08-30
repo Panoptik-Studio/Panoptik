@@ -18,6 +18,15 @@ export function AudioPanel() {
   const removeAudioTrack = useProjectStore((s) => s.removeAudioTrack);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  if (!project) {
+    return (
+      <div className="flex flex-col gap-2 p-4">
+        <h3 className="pk-ui text-[15px] font-semibold text-pk-ink">Audio</h3>
+        <p className="pk-help">Import or record a video to add music or voiceover.</p>
+      </div>
+    );
+  }
+
   const onPickFile = async (file: File | undefined) => {
     if (!file || !project) return;
     const { decodeViaAudioContext, registerTrackBuffer, saveAudioTrackFile } = await import("@panoptik/engine");
@@ -59,7 +68,7 @@ export function AudioPanel() {
     <div className="flex flex-col gap-4 p-4">
       <div>
         <h3 className="pk-ui text-[15px] font-semibold text-pk-ink">Audio</h3>
-        <p className="pk-help mt-1">Music and voiceover play on timeline time — they are not affected by segment speed.</p>
+        <p className="pk-help mt-1">Add background music or record voiceover</p>
       </div>
 
       <VoiceoverRecorder />
