@@ -1369,8 +1369,6 @@ export function PreviewCanvas() {
     return { background: "linear-gradient(135deg, #007cf0 0%, #7928ca 45%, #ff4d4d 100%)" };
   })();
 
-  const targetAspect = canvasSize.w / canvasSize.h;
-
   return (
     <div
       ref={containerRef}
@@ -1383,12 +1381,20 @@ export function PreviewCanvas() {
       <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ background: "radial-gradient(700px 420px at 50% 38%, rgba(0,124,240,0.18) 0%, transparent 60%), radial-gradient(560px 360px at 82% 78%, rgba(255,0,128,0.12) 0%, transparent 62%)" }} />
       {/* Stage canvas wrapper — WYSIWYG preview matching exported video */}
       <div
-        className="relative flex max-h-[58vh] max-w-[66vw] items-center justify-center overflow-hidden rounded-2xl border shadow-vercel-4 transition-all lg:max-h-[64vh]"
+        /*
+         * Sized against this container, not the viewport.
+         *
+         * It used to be measured in vh/vw, but the preview only owns what is
+         * left after the toolbar and the timeline — and the timeline is
+         * draggable. Pulled to its full height the stage still claimed ~64vh
+         * and slid underneath the chrome. aspect-ratio plus max-h/max-w full
+         * lets the browser fit it to whatever space there actually is, so it
+         * tracks timeline drags and window resizes with no measuring code.
+         */
+        className="relative flex max-h-full max-w-full items-center justify-center overflow-hidden rounded-2xl border shadow-vercel-4 transition-all"
         style={{
           borderColor: "rgba(0,0,0,0.08)",
           aspectRatio: `${canvasSize.w} / ${canvasSize.h}`,
-          width: targetAspect >= 1 ? `min(66vw, calc(64vh * ${targetAspect}))` : `calc(64vh * ${targetAspect})`,
-          maxHeight: targetAspect < 1 ? "64vh" : undefined,
           boxShadow: "0 20px 48px rgba(0,0,0,0.14)",
         }}
       >

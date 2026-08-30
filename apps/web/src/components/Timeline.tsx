@@ -36,6 +36,19 @@ const DIAMOND_SIZE = 10;
 const SHELL_MIN_H = 180;
 const SHELL_MAX_H = 460;
 const SHELL_DEFAULT_H = 280;
+/**
+ * Never let the timeline take more than this share of the window.
+ *
+ * A flat 460px cap is fine on a tall display and ruinous on a short one: with
+ * the toolbar above it there is almost nothing left for the preview. Clamping
+ * against the viewport keeps the canvas usable at any window size.
+ */
+const SHELL_MAX_VIEWPORT_FRACTION = 0.55;
+
+function maxShellHeight(): number {
+  if (typeof window === "undefined") return SHELL_MAX_H;
+  return Math.max(SHELL_MIN_H, Math.min(SHELL_MAX_H, window.innerHeight * SHELL_MAX_VIEWPORT_FRACTION));
+}
 
 function drawRoundRect(
   ctx: CanvasRenderingContext2D,
@@ -118,6 +131,16 @@ export function Timeline() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [shellH, setShellH] = useState(SHELL_DEFAULT_H);
+
+  // Shrinking the window does not shrink the timeline on its own, so a height
+  // that was reasonable on a large display can end up starving the preview.
+  useEffect(() => {
+    const clamp = () =>
+      setShellH((h) => Math.max(SHELL_MIN_H, Math.min(maxShellHeight(), h)));
+    clamp();
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, []);
   const [zoom, setZoom] = useState(0.52);
   const [draggingDiamond, setDraggingDiamond] = useState<{ id: string; committed: boolean; segmentId: string } | null>(null);
   const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
@@ -1043,7 +1066,7 @@ export function Timeline() {
     const startH = shellH;
     const onMove = (ev: PointerEvent) => {
       const dy = startY - ev.clientY;
-      setShellH(Math.max(SHELL_MIN_H, Math.min(SHELL_MAX_H, startH + dy)));
+      setShellH(Math.max(SHELL_MIN_H, Math.min(maxShellHeight(), startH + dy)));
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
