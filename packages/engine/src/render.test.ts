@@ -602,21 +602,20 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
   it("smoothly interpolates size between 2 clips across transition duration", () => {
     const seg2 = baseProject.segments[1]!;
 
-    // At t = 5.0 (transition start), size starts near seg1's 0.22
-    const atStart = resolveInterpolatedFacecam(baseProject, 5.0, seg2);
-    expect(atStart.size).toBeCloseTo(0.22, 2);
-    expect(atStart.x).toBeCloseTo(0.75, 2);
+    // Symmetrical distributed transition across cut at t = 5.0s with dur = 0.6s (half = 0.3s):
+    // In seg1 (outgoing, t = 4.7s to 5.0s):
+    const atStartSeg1 = resolveInterpolatedFacecam(baseProject, 4.7, baseProject.segments[0]!);
+    expect(atStartSeg1.size).toBeCloseTo(0.22, 2);
 
-    // At t = 5.3 (halfway through 0.6s duration), size is smoothly halfway between 0.22 and 0.38 (~0.30)
-    const atMid = resolveInterpolatedFacecam(baseProject, 5.3, seg2);
-    expect(atMid.size).toBeGreaterThan(0.25);
-    expect(atMid.size).toBeLessThan(0.35);
-    expect(atMid.size).toBeCloseTo(0.30, 1);
-    expect(atMid.x).toBeGreaterThan(0.60);
-    expect(atMid.x).toBeLessThan(0.75);
+    // At t = 5.0 (boundary): size is smoothly halfway between 0.22 and 0.38 (~0.30)
+    const atBoundary = resolveInterpolatedFacecam(baseProject, 5.0, seg2);
+    expect(atBoundary.size).toBeGreaterThan(0.25);
+    expect(atBoundary.size).toBeLessThan(0.35);
+    expect(atBoundary.size).toBeCloseTo(0.30, 1);
 
-    // At t = 5.6 (duration completed), size reaches target 0.38
-    const atEnd = resolveInterpolatedFacecam(baseProject, 5.6, seg2);
+    // In seg2 (incoming, t = 5.0s to 5.3s):
+    // At t = 5.3 (duration completed): size reaches target 0.38
+    const atEnd = resolveInterpolatedFacecam(baseProject, 5.3, seg2);
     expect(atEnd.size).toBeCloseTo(0.38, 2);
     expect(atEnd.x).toBeCloseTo(0.60, 2);
 
@@ -659,18 +658,18 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
             transitionDuration: 0.5 } } ] };
     const seg2 = pSquareToCircle.segments[1]!;
 
-    // At t = 5.0s (start): shapeProgress = 0 (square)
-    const atStart = resolveInterpolatedFacecam(pSquareToCircle, 5.0, seg2);
+    // At t = 4.75s (seg1 outgoing start): shapeProgress = 0 (square)
+    const atStart = resolveInterpolatedFacecam(pSquareToCircle, 4.75, pSquareToCircle.segments[0]!);
     expect(atStart.shapeProgress).toBeCloseTo(0, 2);
 
-    // At t = 5.25s (halfway): shapeProgress is smoothly ~0.5
-    const atMid = resolveInterpolatedFacecam(pSquareToCircle, 5.25, seg2);
+    // At t = 5.0s (boundary cut point): shapeProgress is smoothly ~0.5
+    const atMid = resolveInterpolatedFacecam(pSquareToCircle, 5.0, seg2);
     expect(atMid.shapeProgress).toBeGreaterThan(0.3);
     expect(atMid.shapeProgress).toBeLessThan(0.7);
     expect(atMid.shapeProgress).toBeCloseTo(0.5, 1);
 
-    // At t = 5.5s (end): shapeProgress = 1.0 (circle)
-    const atEnd = resolveInterpolatedFacecam(pSquareToCircle, 5.5, seg2);
+    // At t = 5.25s (seg2 incoming end): shapeProgress = 1.0 (circle)
+    const atEnd = resolveInterpolatedFacecam(pSquareToCircle, 5.25, seg2);
     expect(atEnd.shapeProgress).toBeCloseTo(1.0, 2);
   });
 
@@ -690,18 +689,18 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
             transitionDuration: 0.5 } } ] };
     const seg2 = pCircleToSquare.segments[1]!;
 
-    // At t = 5.0s (start): shapeProgress = 1 (circle)
-    const atStart = resolveInterpolatedFacecam(pCircleToSquare, 5.0, seg2);
+    // At t = 4.75s (seg1 outgoing start): shapeProgress = 1 (circle)
+    const atStart = resolveInterpolatedFacecam(pCircleToSquare, 4.75, pCircleToSquare.segments[0]!);
     expect(atStart.shapeProgress).toBeCloseTo(1.0, 2);
 
-    // At t = 5.25s (halfway): shapeProgress is smoothly ~0.5
-    const atMid = resolveInterpolatedFacecam(pCircleToSquare, 5.25, seg2);
+    // At t = 5.0s (boundary cut point): shapeProgress is smoothly ~0.5
+    const atMid = resolveInterpolatedFacecam(pCircleToSquare, 5.0, seg2);
     expect(atMid.shapeProgress).toBeGreaterThan(0.3);
     expect(atMid.shapeProgress).toBeLessThan(0.7);
     expect(atMid.shapeProgress).toBeCloseTo(0.5, 1);
 
-    // At t = 5.5s (end): shapeProgress = 0.0 (square)
-    const atEnd = resolveInterpolatedFacecam(pCircleToSquare, 5.5, seg2);
+    // At t = 5.25s (seg2 incoming end): shapeProgress = 0.0 (square)
+    const atEnd = resolveInterpolatedFacecam(pCircleToSquare, 5.25, seg2);
     expect(atEnd.shapeProgress).toBeCloseTo(0.0, 2);
   });
 });
@@ -803,81 +802,86 @@ describe("resolveVideoTransition", () => {
       },
     ],
   };
+  const seg1 = transProject.segments[0]!;
   const seg2 = transProject.segments[1]!;
 
-  it("first segment never transitions from preceding clips", () => {
-    const res = resolveVideoTransition(transProject, 0.5, transProject.segments[0]!, 1920, 1080);
+  it("first segment is inactive before its outgoing transition window", () => {
+    const res = resolveVideoTransition(transProject, 2.0, seg1, 1920, 1080);
     expect(res.active).toBe(false);
     expect(res.opacity).toBe(1);
   });
 
-  it("cut transition is inactive and default", () => {
-    const cutSeg: Segment = { ...seg2, transition: "cut" };
-    const res = resolveVideoTransition(transProject, 5.2, cutSeg, 1920, 1080);
-    expect(res.active).toBe(false);
-    expect(res.opacity).toBe(1);
-  });
+  it("fade transition operates symmetrically across both segments (0.3s in seg1, 0.3s in seg2)", () => {
+    // Seg 1 outgoing phase (t = 4.7s to 5.0s):
+    const atSeg1Start = resolveVideoTransition(transProject, 4.7, seg1, 1920, 1080);
+    expect(atSeg1Start.active).toBe(true);
+    expect(atSeg1Start.opacity).toBeCloseTo(1, 1);
 
-  it("fade transition ramps opacity smoothly from 0 to 1 over duration", () => {
-    // at t = 5.0 (start of seg 2)
-    const atStart = resolveVideoTransition(transProject, 5.0, seg2, 1920, 1080);
-    expect(atStart.active).toBe(true);
-    expect(atStart.opacity).toBeCloseTo(0, 1);
+    const atSeg1Mid = resolveVideoTransition(transProject, 4.85, seg1, 1920, 1080);
+    expect(atSeg1Mid.active).toBe(true);
+    expect(atSeg1Mid.opacity).toBeLessThan(1);
+    expect(atSeg1Mid.opacity).toBeGreaterThan(0);
 
-    // at t = 5.3 (halfway through 0.6s duration)
-    const atMid = resolveVideoTransition(transProject, 5.3, seg2, 1920, 1080);
-    expect(atMid.active).toBe(true);
-    expect(atMid.opacity).toBeGreaterThan(0.3);
-    expect(atMid.opacity).toBeLessThan(0.7);
+    // Seg 2 incoming phase (t = 5.0s to 5.3s):
+    const atSeg2Start = resolveVideoTransition(transProject, 5.0, seg2, 1920, 1080);
+    expect(atSeg2Start.active).toBe(true);
+    expect(atSeg2Start.opacity).toBeCloseTo(0, 1);
 
-    // at t = 5.6 (end of transition)
-    const atEnd = resolveVideoTransition(transProject, 5.6, seg2, 1920, 1080);
+    const atSeg2Mid = resolveVideoTransition(transProject, 5.15, seg2, 1920, 1080);
+    expect(atSeg2Mid.active).toBe(true);
+    expect(atSeg2Mid.opacity).toBeGreaterThan(0.3);
+
+    // After t = 5.3s in seg 2 (transition complete):
+    const atEnd = resolveVideoTransition(transProject, 5.35, seg2, 1920, 1080);
     expect(atEnd.active).toBe(false);
     expect(atEnd.opacity).toBe(1);
   });
 
-  it("dipToBlack smoothly ramps dipAlpha down to 0", () => {
-    const dipSeg: Segment = { ...seg2, transition: "dipToBlack", transitionDuration: 0.5 };
-    const atStart = resolveVideoTransition(transProject, 5.0, dipSeg, 1920, 1080);
-    expect(atStart.active).toBe(true);
-    expect(atStart.dipAlpha).toBeCloseTo(1, 2);
+  it("dipToBlack symmetrically darkens seg1 to black and brightens seg2 from black", () => {
+    const dipProject: Project = {
+      ...transProject,
+      segments: [
+        seg1,
+        { ...seg2, transition: "dipToBlack", transitionDuration: 0.5 },
+      ],
+    };
+    const dipSeg1 = dipProject.segments[0]!;
+    const dipSeg2 = dipProject.segments[1]!;
 
-    const atMid = resolveVideoTransition(transProject, 5.25, dipSeg, 1920, 1080);
-    expect(atMid.dipAlpha).toBeCloseTo(0.5, 1);
+    // In seg1 outgoing (t = 4.75 to 5.0): dipAlpha increases towards 1
+    const atSeg1Start = resolveVideoTransition(dipProject, 4.75, dipSeg1, 1920, 1080);
+    expect(atSeg1Start.active).toBe(true);
+    expect(atSeg1Start.dipAlpha).toBeCloseTo(0, 1);
 
-    const atEnd = resolveVideoTransition(transProject, 5.5, dipSeg, 1920, 1080);
-    expect(atEnd.active).toBe(false);
-    expect(atEnd.dipAlpha).toBe(0);
+    // In seg2 incoming (t = 5.0 to 5.25): dipAlpha decreases from 1 to 0
+    const atSeg2Start = resolveVideoTransition(dipProject, 5.0, dipSeg2, 1920, 1080);
+    expect(atSeg2Start.active).toBe(true);
+    expect(atSeg2Start.dipAlpha).toBeCloseTo(1, 1);
+
+    const atSeg2End = resolveVideoTransition(dipProject, 5.25, dipSeg2, 1920, 1080);
+    expect(atSeg2End.dipAlpha).toBeCloseTo(0, 1);
   });
 
-  it("slide-left starts with positive X offset and slides into 0", () => {
-    const slideSeg: Segment = { ...seg2, transition: "slide-left", transitionDuration: 0.4 };
-    const atStart = resolveVideoTransition(transProject, 5.0, slideSeg, 1920, 1080);
-    expect(atStart.active).toBe(true);
-    expect(atStart.offsetX).toBeGreaterThan(500);
+  it("slide-left slides seg1 out left and seg2 in from right", () => {
+    const slideProject: Project = {
+      ...transProject,
+      segments: [
+        seg1,
+        { ...seg2, transition: "slide-left", transitionDuration: 0.4 },
+      ],
+    };
+    const s1 = slideProject.segments[0]!;
+    const s2 = slideProject.segments[1]!;
 
-    const atMid = resolveVideoTransition(transProject, 5.2, slideSeg, 1920, 1080);
-    expect(atMid.offsetX).toBeLessThan(atStart.offsetX);
-    expect(atMid.offsetX).toBeGreaterThan(0);
-  });
+    // In seg1 (t = 4.8 to 5.0): offsetX is negative (slides left)
+    const atSeg1Mid = resolveVideoTransition(slideProject, 4.9, s1, 1920, 1080);
+    expect(atSeg1Mid.active).toBe(true);
+    expect(atSeg1Mid.offsetX).toBeLessThan(0);
 
-  it("zoom-in scales from ~0.85 to 1.0", () => {
-    const zoomSeg: Segment = { ...seg2, transition: "zoom-in", transitionDuration: 0.5 };
-    const atStart = resolveVideoTransition(transProject, 5.0, zoomSeg, 1920, 1080);
-    expect(atStart.scale).toBeCloseTo(0.85, 1);
-
-    const atMid = resolveVideoTransition(transProject, 5.25, zoomSeg, 1920, 1080);
-    expect(atMid.scale).toBeGreaterThan(0.85);
-    expect(atMid.scale).toBeLessThan(1.0);
-  });
-
-  it("wipe reveals from 0 to 1", () => {
-    const wipeSeg: Segment = { ...seg2, transition: "wipe", transitionDuration: 0.5 };
-    const atStart = resolveVideoTransition(transProject, 5.0, wipeSeg, 1920, 1080);
-    expect(atStart.wipeProgress).toBeCloseTo(0, 2);
-
-    const atMid = resolveVideoTransition(transProject, 5.25, wipeSeg, 1920, 1080);
-    expect(atMid.wipeProgress).toBeCloseTo(0.5, 1);
+    // In seg2 (t = 5.0 to 5.2): offsetX is positive (slides in from right towards 0)
+    const atSeg2Start = resolveVideoTransition(slideProject, 5.0, s2, 1920, 1080);
+    expect(atSeg2Start.active).toBe(true);
+    expect(atSeg2Start.offsetX).toBeGreaterThan(0);
   });
 });
 

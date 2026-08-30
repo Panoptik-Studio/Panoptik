@@ -5,7 +5,7 @@
  * text overlays; staged text drawn amber #f59e0b).
  * Keyframe semantics: at k.t ease FROM current state TO k.to over k.dur, then hold.
  */
-import { EASINGS, easeInOutCubic, easeOutCubic, lerp } from "@panoptik/utils";
+import { EASINGS, easeInCubic, easeInOutCubic, easeOutCubic, lerp } from "@panoptik/utils";
 import type {
   Background,
   Facecam,
@@ -366,10 +366,9 @@ export function resolveVideoTransition(
   canvasW: number,
   canvasH: number,
 ): ResolvedVideoTransition {
-  const transitionType = seg.transition ?? "cut";
   const defaultRes: ResolvedVideoTransition = {
     active: false,
-    type: transitionType,
+    type: "cut",
     progress: 1,
     eased: 1,
     opacity: 1,
@@ -380,71 +379,141 @@ export function resolveVideoTransition(
     wipeProgress: 1,
   };
 
-  if (transitionType === "cut") return defaultRes;
-
   const segIdx = project.segments.findIndex((s) => s.id === seg.id);
-  if (segIdx <= 0) return defaultRes;
+  if (segIdx < 0) return defaultRes;
 
   let segStartT = 0;
   for (let i = 0; i < segIdx; i++) {
     segStartT += segmentDuration(project.segments[i]!);
   }
+  const segEndT = segStartT + segmentDuration(seg);
 
-  const dur = Math.max(0.05, seg.transitionDuration ?? 0.45);
-  const timeInSeg = timelineT - segStartT;
+  // 1. Incoming Transition (at start of seg, from previous segment)
+  if (segIdx > 0) {
+    const transitionType = seg.transition ?? "cut";
+    if (transitionType !== "cut") {
+      const dur = Math.max(0.05, seg.transitionDuration ?? 0.45);
+      const half = dur / 2;
+      const timeInPhase = timelineT - segStartT;
+      if (timeInPhase >= 0 && timeInPhase <= half) {
+        // Second half of the transition (0.5 -> 1.0)
+        const tPhase = Math.max(0, Math.min(1, timeInPhase / half));
+        const progress = 0.5 + 0.5 * tPhase;
+        const easedOut = easeOutCubic(tPhase);
+        const easedInOut = easeInOutCubic(progress);
 
-  if (timeInSeg < 0 || timeInSeg >= dur) {
-    return defaultRes;
+        let opacity = 1;
+        let dipAlpha = 0;
+        let offsetX = 0;
+        let offsetY = 0;
+        let scale = 1;
+        let wipeProgress = 1;
+
+        switch (transitionType) {
+          case "fade":
+            opacity = easedOut;
+            break;
+          case "dipToBlack":
+            dipAlpha = 1 - easedOut;
+            opacity = 0.5 + 0.5 * easedOut;
+            break;
+          case "slide-left":
+            offsetX = (1 - easedOut) * canvasW * 0.5;
+            opacity = 0.6 + 0.4 * easedOut;
+            break;
+          case "slide-right":
+            offsetX = -(1 - easedOut) * canvasW * 0.5;
+            opacity = 0.6 + 0.4 * easedOut;
+            break;
+          case "zoom-in":
+            scale = 0.92 + 0.08 * easedOut;
+            opacity = 0.5 + 0.5 * easedOut;
+            break;
+          case "wipe":
+            wipeProgress = 0.5 + 0.5 * easedInOut;
+            break;
+        }
+
+        return {
+          active: true,
+          type: transitionType,
+          progress,
+          eased: easedInOut,
+          opacity: Math.max(0, Math.min(1, opacity)),
+          dipAlpha: Math.max(0, Math.min(1, dipAlpha)),
+          offsetX,
+          offsetY,
+          scale,
+          wipeProgress: Math.max(0, Math.min(1, wipeProgress)),
+        };
+      }
+    }
   }
 
-  const tFrac = Math.max(0, Math.min(1, timeInSeg / dur));
-  const eased = easeInOutCubic(tFrac);
-  const easedOut = easeOutCubic(tFrac);
+  // 2. Outgoing Transition (at end of seg, transitioning toward next segment)
+  if (segIdx < project.segments.length - 1) {
+    const nextSeg = project.segments[segIdx + 1]!;
+    const transitionType = nextSeg.transition ?? "cut";
+    if (transitionType !== "cut") {
+      const dur = Math.max(0.05, nextSeg.transitionDuration ?? 0.45);
+      const half = dur / 2;
+      const timeToBoundary = segEndT - timelineT;
+      if (timeToBoundary >= 0 && timeToBoundary <= half) {
+        // First half of the transition (0.0 -> 0.5)
+        const tPhase = Math.max(0, Math.min(1, (half - timeToBoundary) / half));
+        const progress = 0.5 * tPhase;
+        const easedIn = easeInCubic(tPhase);
+        const easedInOut = easeInOutCubic(progress);
 
-  let opacity = 1;
-  let dipAlpha = 0;
-  let offsetX = 0;
-  let offsetY = 0;
-  let scale = 1;
-  let wipeProgress = 1;
+        let opacity = 1;
+        let dipAlpha = 0;
+        let offsetX = 0;
+        let offsetY = 0;
+        let scale = 1;
+        let wipeProgress = 1;
 
-  switch (transitionType) {
-    case "fade":
-      opacity = eased;
-      break;
-    case "dipToBlack":
-      dipAlpha = 1 - eased;
-      opacity = eased;
-      break;
-    case "slide-left":
-      offsetX = (1 - easedOut) * canvasW * 0.75;
-      opacity = 0.4 + 0.6 * easedOut;
-      break;
-    case "slide-right":
-      offsetX = -(1 - easedOut) * canvasW * 0.75;
-      opacity = 0.4 + 0.6 * easedOut;
-      break;
-    case "zoom-in":
-      scale = 0.85 + 0.15 * easedOut;
-      opacity = 0.3 + 0.7 * easedOut;
-      break;
-    case "wipe":
-      wipeProgress = eased;
-      break;
+        switch (transitionType) {
+          case "fade":
+            opacity = 1 - easedIn;
+            break;
+          case "dipToBlack":
+            dipAlpha = easedIn;
+            opacity = 1 - 0.5 * easedIn;
+            break;
+          case "slide-left":
+            offsetX = -easedIn * canvasW * 0.5;
+            opacity = 1 - 0.4 * easedIn;
+            break;
+          case "slide-right":
+            offsetX = easedIn * canvasW * 0.5;
+            opacity = 1 - 0.4 * easedIn;
+            break;
+          case "zoom-in":
+            scale = 1 + 0.08 * easedIn;
+            opacity = 1 - 0.5 * easedIn;
+            break;
+          case "wipe":
+            wipeProgress = 1 - 0.5 * easedInOut;
+            break;
+        }
+
+        return {
+          active: true,
+          type: transitionType,
+          progress,
+          eased: easedInOut,
+          opacity: Math.max(0, Math.min(1, opacity)),
+          dipAlpha: Math.max(0, Math.min(1, dipAlpha)),
+          offsetX,
+          offsetY,
+          scale,
+          wipeProgress: Math.max(0, Math.min(1, wipeProgress)),
+        };
+      }
+    }
   }
 
-  return {
-    active: true,
-    type: transitionType,
-    progress: tFrac,
-    eased,
-    opacity: Math.max(0, Math.min(1, opacity)),
-    dipAlpha: Math.max(0, Math.min(1, dipAlpha)),
-    offsetX,
-    offsetY,
-    scale,
-    wipeProgress: Math.max(0, Math.min(1, wipeProgress)),
-  };
+  return defaultRes;
 }
 
 export function resolveInterpolatedFacecam(
@@ -467,64 +536,121 @@ export function resolveInterpolatedFacecam(
   }
 
   const segIdx = project.segments.findIndex((s) => s.id === seg.id);
-  if (segIdx <= 0) {
+  if (segIdx < 0) {
     return { x: current.x, y: current.y, size: current.size, shape, shapeProgress: defaultProgress, opacity: 1 };
   }
 
-  const prevSeg = project.segments[segIdx - 1]!;
   let segStartT = 0;
   for (let i = 0; i < segIdx; i++) {
     segStartT += segmentDuration(project.segments[i]!);
   }
+  const segEndT = segStartT + segmentDuration(seg);
 
-  const transitionType = current.transition ?? "smooth";
-  const dur = Math.max(0.05, current.transitionDuration ?? 0.45);
-  const timeInSeg = timelineT - segStartT;
+  // 1. Incoming Facecam Transition (at start of seg, from prevSeg)
+  if (segIdx > 0) {
+    const prevSeg = project.segments[segIdx - 1]!;
+    const transitionType = current.transition ?? "smooth";
+    if (transitionType !== "cut") {
+      const dur = Math.max(0.05, current.transitionDuration ?? 0.45);
+      const half = dur / 2;
+      const timeInPhase = timelineT - segStartT;
+      if (timeInPhase >= 0 && timeInPhase <= half) {
+        // Second half of transition (0.5 -> 1.0)
+        const tPhase = Math.max(0, Math.min(1, timeInPhase / half));
+        const progress = 0.5 + 0.5 * tPhase;
 
-  if (transitionType === "cut" || timeInSeg >= dur || timeInSeg < 0) {
-    return { x: current.x, y: current.y, size: current.size, shape, shapeProgress: defaultProgress, opacity: 1 };
+        if (!prevSeg.facecam.src) {
+          const eased = easeOutCubic(progress);
+          return {
+            x: current.x,
+            y: current.y,
+            size: current.size * eased,
+            shape,
+            shapeProgress: defaultProgress,
+            opacity: eased,
+          };
+        }
+
+        let eased = easeInOutCubic(progress);
+        if (transitionType === "spring") {
+          eased = 1 + Math.sin(progress * Math.PI * 1.5) * Math.pow(1 - progress, 2) * 0.35;
+        } else if (transitionType === "slide") {
+          eased = easeOutCubic(progress);
+        }
+
+        const prev = prevSeg.facecam;
+        const prevProgress = (prev.shape ?? "square") === "circle" ? 1 : 0;
+        const currProgress = (current.shape ?? "square") === "circle" ? 1 : 0;
+        const shapeProgress = Math.max(0, Math.min(1, prevProgress + (currProgress - prevProgress) * eased));
+
+        return {
+          x: prev.x + (current.x - prev.x) * eased,
+          y: prev.y + (current.y - prev.y) * eased,
+          size: Math.max(0.01, prev.size + (current.size - prev.size) * eased),
+          shape,
+          shapeProgress,
+          opacity: transitionType === "fade" ? 0.3 + 0.7 * eased : 1,
+        };
+      }
+    }
   }
 
-  const tFrac = Math.max(0, Math.min(1, timeInSeg / dur));
+  // 2. Outgoing Facecam Transition (at end of seg, transitioning into nextSeg)
+  if (segIdx < project.segments.length - 1) {
+    const nextSeg = project.segments[segIdx + 1]!;
+    const transitionType = nextSeg.facecam.transition ?? "smooth";
+    if (transitionType !== "cut") {
+      const dur = Math.max(0.05, nextSeg.facecam.transitionDuration ?? 0.45);
+      const half = dur / 2;
+      const timeToBoundary = segEndT - timelineT;
+      if (timeToBoundary >= 0 && timeToBoundary <= half) {
+        // First half of transition (0.0 -> 0.5)
+        const tPhase = Math.max(0, Math.min(1, (half - timeToBoundary) / half));
+        const progress = 0.5 * tPhase;
 
-  if (!prevSeg.facecam.src) {
-    // Facecam entering: scale up from 0 and fade in
-    const eased = easeOutCubic(tFrac);
-    return {
-      x: current.x,
-      y: current.y,
-      size: current.size * eased,
-      shape,
-      shapeProgress: defaultProgress,
-      opacity: eased,
-    };
+        if (!nextSeg.facecam.src) {
+          const eased = 1 - easeInCubic(tPhase);
+          return {
+            x: current.x,
+            y: current.y,
+            size: current.size * eased,
+            shape,
+            shapeProgress: defaultProgress,
+            opacity: eased,
+          };
+        }
+
+        let eased = easeInOutCubic(progress);
+        if (transitionType === "spring") {
+          eased = 1 + Math.sin(progress * Math.PI * 1.5) * Math.pow(1 - progress, 2) * 0.35;
+        } else if (transitionType === "slide") {
+          eased = easeOutCubic(progress);
+        }
+
+        const next = nextSeg.facecam;
+        const currProgress = (current.shape ?? "square") === "circle" ? 1 : 0;
+        const nextProgress = (next.shape ?? "square") === "circle" ? 1 : 0;
+        const shapeProgress = Math.max(0, Math.min(1, currProgress + (nextProgress - currProgress) * eased));
+
+        return {
+          x: current.x + (next.x - current.x) * eased,
+          y: current.y + (next.y - current.y) * eased,
+          size: Math.max(0.01, current.size + (next.size - current.size) * eased),
+          shape,
+          shapeProgress,
+          opacity: transitionType === "fade" ? 1 - 0.7 * (1 - eased) : 1,
+        };
+      }
+    }
   }
-
-  // Smooth ease between previous segment facecam and current segment facecam
-  let eased = easeInOutCubic(tFrac);
-  if (transitionType === "spring") {
-    // Punchy spring overshoot
-    eased = 1 + Math.sin(tFrac * Math.PI * 1.5) * Math.pow(1 - tFrac, 2) * 0.35;
-  } else if (transitionType === "slide") {
-    eased = easeOutCubic(tFrac);
-  }
-
-  const prev = prevSeg.facecam;
-  const prevProgress = (prev.shape ?? "square") === "circle" ? 1 : 0;
-  const currProgress = (current.shape ?? "square") === "circle" ? 1 : 0;
-  const shapeProgress = Math.max(0, Math.min(1, prevProgress + (currProgress - prevProgress) * eased));
-
-  const x = prev.x + (current.x - prev.x) * eased;
-  const y = prev.y + (current.y - prev.y) * eased;
-  const size = prev.size + (current.size - prev.size) * eased;
 
   return {
-    x,
-    y,
-    size: Math.max(0.01, size),
+    x: current.x,
+    y: current.y,
+    size: current.size,
     shape,
-    shapeProgress,
-    opacity: transitionType === "fade" ? 0.3 + 0.7 * eased : 1,
+    shapeProgress: defaultProgress,
+    opacity: 1,
   };
 }
 
