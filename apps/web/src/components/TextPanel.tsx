@@ -53,6 +53,70 @@ const BG_PILL_COLORS = [
   "rgba(139,92,246,0.85)",
 ];
 
+function parseColorToRgba(colorStr?: string): { r: number; g: number; b: number; a: number } {
+  if (!colorStr || colorStr === "transparent") {
+    return { r: 0, g: 0, b: 0, a: 0 };
+  }
+  const str = colorStr.trim();
+  if (str.startsWith("rgba")) {
+    const match = str.match(/rgba\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)/i);
+    if (match) {
+      return {
+        r: parseInt(match[1]!, 10),
+        g: parseInt(match[2]!, 10),
+        b: parseInt(match[3]!, 10),
+        a: parseFloat(match[4]!),
+      };
+    }
+  } else if (str.startsWith("rgb")) {
+    const match = str.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+    if (match) {
+      return {
+        r: parseInt(match[1]!, 10),
+        g: parseInt(match[2]!, 10),
+        b: parseInt(match[3]!, 10),
+        a: 1,
+      };
+    }
+  } else if (str.startsWith("#")) {
+    const hex = str.slice(1);
+    if (hex.length === 3) {
+      return {
+        r: parseInt(hex[0]! + hex[0]!, 16),
+        g: parseInt(hex[1]! + hex[1]!, 16),
+        b: parseInt(hex[2]! + hex[2]!, 16),
+        a: 1,
+      };
+    } else if (hex.length === 6) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16),
+        a: 1,
+      };
+    } else if (hex.length === 8) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16),
+        a: parseInt(hex.slice(6, 8), 16) / 255,
+      };
+    }
+  }
+  return { r: 0, g: 0, b: 0, a: 0.75 };
+}
+
+function setRgbaAlpha(colorStr: string | undefined, alpha: number): string {
+  const { r, g, b } = parseColorToRgba(colorStr);
+  const clampedA = Math.max(0, Math.min(1, Number(alpha.toFixed(2))));
+  return `rgba(${r}, ${g}, ${b}, ${clampedA})`;
+}
+
+function hexFromRgba(colorStr?: string): string {
+  const { r, g, b } = parseColorToRgba(colorStr);
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
 export function TextPanel() {
   const project = useProjectStore((s) => s.project);
   const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
@@ -93,7 +157,7 @@ export function TextPanel() {
   const handleAddNew = () => {
     const startT = Math.max(0, currentTime);
     addTextOverlay({
-      text: "New Text Callout",
+      text: "New Text",
       timestamp: Number(startT.toFixed(2)),
       duration: 3,
       position: "bottom",
@@ -126,7 +190,7 @@ export function TextPanel() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="pk-panel-title">Text Overlays</h3>
-          <p className="pk-help">Captions, titles & callout graphics</p>
+          <p className="pk-help">Captions & titles</p>
         </div>
         <button
           onClick={handleAddNew}
@@ -304,28 +368,50 @@ export function TextPanel() {
 
           {/* Color & Pill Box */}
           <div className="space-y-2">
-            <div className="flex justify-between items-center">
+            <div className="flex items-center justify-between">
               <label className="pk-label">Text Color</label>
-              <div className="flex items-center gap-1">
+              <span className="font-mono text-[11px] text-pk-faint">
+                {activeOverlay.color ?? "#ffffff"}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Custom Color Input with Dynamic Eyedropper Icon Color */}
+              <label
+                className="group relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-[6px] border border-pk-hairline bg-white shadow-xs transition-all hover:border-[#0070f3]"
+                title="Pick custom text color"
+                style={{ borderColor: activeOverlay.color ? `${activeOverlay.color}88` : undefined }}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.1"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ color: activeOverlay.color ?? "#555555" }}
+                >
+                  <path d="m14 7 3 3" />
+                  <path d="M17 4a2.12 2.12 0 0 1 3 3L9 18l-5 1 1-5L17 4z" />
+                </svg>
                 <input
                   type="color"
                   value={activeOverlay.color ?? "#ffffff"}
                   onChange={(e) => patch({ color: e.target.value })}
-                  className="h-5 w-6 cursor-pointer rounded border border-pk-hairline p-0"
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                 />
-                <span className="font-mono text-[10px] text-pk-faint">
-                  {activeOverlay.color ?? "#ffffff"}
-                </span>
-              </div>
-            </div>
+              </label>
 
-            <div className="flex gap-1.5 flex-wrap">
+              <div className="h-4 w-px bg-pk-hairline mx-0.5" />
+
               {QUICK_COLORS.map((c) => (
                 <button
                   key={c}
                   onClick={() => patch({ color: c })}
                   style={{ background: c }}
-                  className={`h-5 w-5 rounded-full border border-pk-hairline shadow-xs ${
+                  className={`h-5 w-5 rounded-full border border-pk-hairline shadow-xs transition-transform hover:scale-110 active:scale-95 ${
                     activeOverlay.color === c ? "ring-2 ring-[#0070f3]" : ""
                   }`}
                 />
@@ -336,7 +422,7 @@ export function TextPanel() {
           {/* Background Pill */}
           <div className="rounded-lg border border-pk-hairline bg-pk-surface-soft p-2.5 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-[#333]">Background Box / Pill</span>
+              <span className="text-xs font-semibold text-[#333]">Text Backdrop</span>
               <button
                 onClick={() => {
                   const hasBg = !!activeOverlay.backgroundColor && activeOverlay.backgroundColor !== "transparent";
@@ -357,18 +443,84 @@ export function TextPanel() {
             </div>
 
             {activeOverlay.backgroundColor && activeOverlay.backgroundColor !== "transparent" && (
-              <div className="space-y-2 pt-1 border-t border-pk-hairline/60">
-                <div className="flex gap-1.5 flex-wrap">
+              <div className="space-y-2.5 pt-1 border-t border-pk-hairline/60">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* Custom Background Color Input with Dynamic Eyedropper Icon Color */}
+                  <label
+                    className="group relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-[6px] border border-pk-hairline bg-white shadow-xs transition-all hover:border-[#0070f3]"
+                    title="Pick custom background color"
+                    style={{
+                      borderColor:
+                        activeOverlay.backgroundColor && activeOverlay.backgroundColor !== "transparent"
+                          ? `${hexFromRgba(activeOverlay.backgroundColor)}88`
+                          : undefined,
+                    }}
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.1"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{
+                        color: hexFromRgba(activeOverlay.backgroundColor),
+                      }}
+                    >
+                      <path d="m14 7 3 3" />
+                      <path d="M17 4a2.12 2.12 0 0 1 3 3L9 18l-5 1 1-5L17 4z" />
+                    </svg>
+                    <input
+                      type="color"
+                      value={hexFromRgba(activeOverlay.backgroundColor)}
+                      onChange={(e) => {
+                        const currentAlpha = parseColorToRgba(activeOverlay.backgroundColor).a;
+                        patch({ backgroundColor: setRgbaAlpha(e.target.value, currentAlpha) });
+                      }}
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    />
+                  </label>
+
+                  <div className="h-4 w-px bg-pk-hairline mx-0.5" />
+
                   {BG_PILL_COLORS.map((c) => (
                     <button
                       key={c}
-                      onClick={() => patch({ backgroundColor: c })}
+                      onClick={() => {
+                        const currentAlpha = parseColorToRgba(activeOverlay.backgroundColor).a;
+                        patch({ backgroundColor: setRgbaAlpha(c, currentAlpha) });
+                      }}
                       style={{ background: c }}
-                      className={`h-5 w-5 rounded-md border border-pk-hairline ${
-                        activeOverlay.backgroundColor === c ? "ring-2 ring-[#0070f3]" : ""
+                      className={`h-5 w-5 rounded-md border border-pk-hairline transition-transform hover:scale-110 active:scale-95 ${
+                        hexFromRgba(activeOverlay.backgroundColor) === hexFromRgba(c) ? "ring-2 ring-[#0070f3]" : ""
                       }`}
                     />
                   ))}
+                </div>
+
+                {/* Transparency Slider */}
+                <div>
+                  <div className="flex justify-between text-[10px] text-pk-faint">
+                    <span>Transparency</span>
+                    <span>{Math.round((1 - parseColorToRgba(activeOverlay.backgroundColor).a) * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round((1 - parseColorToRgba(activeOverlay.backgroundColor).a) * 100)}
+                    onChange={(e) => {
+                      const trans = Number(e.target.value);
+                      const newAlpha = Math.max(0, Math.min(1, (100 - trans) / 100));
+                      patch({
+                        backgroundColor: setRgbaAlpha(activeOverlay.backgroundColor, newAlpha),
+                      });
+                    }}
+                    className="pk-range"
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -420,7 +572,7 @@ export function TextPanel() {
             >
               {ANIMATION_OPTIONS.map((a) => (
                 <option key={a.value} value={a.value}>
-                  {a.label} — {a.desc}
+                  {a.label} ({a.desc})
                 </option>
               ))}
             </select>

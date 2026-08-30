@@ -28,7 +28,7 @@ import {
   TEXT_ROW_GAP,
   type PackedTextOverlay,
 } from "@/lib/timelineTextTracks";
-import type { TextOverlay } from "@panoptik/schema";
+import type { TextOverlay, ZoomPoint } from "@panoptik/schema";
 
 const RULER_HEIGHT = 26;
 const VIDEO_TRACK_Y = 30;
@@ -152,7 +152,16 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
     return () => window.removeEventListener("resize", clamp);
   }, []);
   const [zoom, setZoom] = useState(0.52);
-  const [draggingDiamond, setDraggingDiamond] = useState<{ id: string; committed: boolean; segmentId: string } | null>(null);
+  const [draggingZoom, setDraggingZoom] = useState<{
+    id: string;
+    segId: string;
+    type: "move" | "resize-left" | "resize-right";
+    initialT: number;
+    initialDur: number;
+    initialHold: number;
+    initialStartTl: number;
+    grabOffset: number;
+  } | null>(null);
   const [hoveredDiamond, setHoveredDiamond] = useState<string | null>(null);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [draggingAudio, setDraggingAudio] = useState<{ id: string; grabOffset: number } | null>(null);
@@ -833,7 +842,7 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
   }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, selectedTextOverlayId, packedText, dynamicAudioTrackY, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying, exportProgress, draggingSegment, dragOverIndex]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
-    if (isDraggingPlayhead || draggingDiamond || draggingSegment) return;
+    if (isDraggingPlayhead || draggingZoom || draggingSegment) return;
     const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
     // Multi-select is handled on pointerdown; avoid double-toggling
     if (isMulti) return;
@@ -847,7 +856,13 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
       for (const zp of [...seg.zoomPoints, ...seg.stagedZoomPoints]) {
         const st = sourceToTimeline(project!, seg.id, zp.t);
         if (st == null) continue;
-        if (Math.abs(x - timeToX(st)) < 14) {
+        const dur = Math.max(zp.dur ?? 0.45, 0.05);
+        const hold = zp.hold ?? 2.0;
+        const totalDur = (dur * 2 + hold) / Math.max(0.1, seg.speed);
+        const endHoldT = Math.min(duration, st + totalDur);
+        const startX = timeToX(st);
+        const endX = timeToX(endHoldT);
+        if (x >= startX - 4 && x <= Math.max(startX + 14, endX + 4)) {
           selectSegment(seg.id, false);
           setSelectedZoom(zp.id);
           return;
@@ -858,40 +873,97 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
 
     // Segment selection: which filmstrip block does the x fall in?
     let acc = 0;
-    for (const seg of project?.segments ?? []) {
+    for (let i = 0; i < (project?.segments.length ?? 0); i++) {
+      const seg = project!.segments[i]!;
       const d = segmentDuration(seg);
-      if (x >= timeToX(acc) && x < timeToX(acc + d)) {
+      if (x >= timeToX(acc) && x <= timeToX(acc + d)) {
         selectSegment(seg.id, false);
         break;
       }
       acc += d;
     }
     seek(xToTime(x));
-  }, [isDraggingPlayhead, draggingDiamond, project, selectSegment, seek, setSelectedZoom, timeToX, xToTime]);
+  }, [isDraggingPlayhead, draggingZoom, draggingSegment, project, selectSegment, seek, setSelectedZoom, timeToX, xToTime, duration]);
 
-  const handleDiamondDrag = useCallback((e: React.PointerEvent) => {
-    if (!draggingDiamond || !scrollRef.current) return;
-    const rect = scrollRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
-    const timelineT = xToTime(x);
-    const proj = project;
-    if (!proj) return;
-    const home = proj.segments.find((seg) => seg.id === draggingDiamond.segmentId);
-    if (!home) return;
-    let segStart = 0;
-    for (const seg of proj.segments) {
-      if (seg.id === home.id) break;
-      segStart += segmentDuration(seg);
-    }
-    const segEnd = segStart + segmentDuration(home);
-    const clampedT = Math.max(segStart, Math.min(segEnd, timelineT));
-    const srcT = home.srcStart + (clampedT - segStart) * home.speed;
-    selectSegment(home.id);
-    updateZoomPoint(draggingDiamond.id, { t: srcT });
-  }, [draggingDiamond, project, selectSegment, updateZoomPoint, xToTime]);
+  const handleZoomTrackDown = useCallback(
+    (
+      e: React.PointerEvent,
+      zp: ZoomPoint,
+      segId: string,
+      type: "move" | "resize-left" | "resize-right" = "move",
+    ) => {
+      e.stopPropagation();
+      if (!scrollRef.current || !project) return;
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      const rect = scrollRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+      const t = xToTime(x);
+
+      setSelectedZoom(zp.id);
+      selectSegment(segId);
+
+      const st = sourceToTimeline(project, segId, zp.t) ?? zp.t;
+
+      setDraggingZoom({
+        id: zp.id,
+        segId,
+        type,
+        initialT: zp.t,
+        initialDur: zp.dur ?? 0.45,
+        initialHold: zp.hold ?? 2.0,
+        initialStartTl: st,
+        grabOffset: t - st,
+      });
+    },
+    [project, selectSegment, setSelectedZoom, xToTime],
+  );
+
+  const handleZoomTrackDrag = useCallback(
+    (e: React.PointerEvent) => {
+      if (!draggingZoom || !scrollRef.current || !project) return;
+      const rect = scrollRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+      const t = xToTime(x);
+
+      const seg = project.segments.find((s) => s.id === draggingZoom.segId);
+      if (!seg) return;
+
+      const dur = Math.max(0.05, draggingZoom.initialDur);
+
+      if (draggingZoom.type === "move") {
+        const newTlT = Math.max(0, t - draggingZoom.grabOffset);
+        let segTlStart = 0;
+        for (const s of project.segments) {
+          if (s.id === seg.id) break;
+          segTlStart += segmentDuration(s);
+        }
+        const segTlEnd = segTlStart + segmentDuration(seg);
+        const clampedTlT = Math.max(segTlStart, Math.min(segTlEnd, newTlT));
+        const newSrcT = Math.max(0, (clampedTlT - segTlStart) * seg.speed + seg.srcStart);
+        updateZoomPoint(draggingZoom.id, { t: Number(newSrcT.toFixed(2)) });
+      } else if (draggingZoom.type === "resize-right") {
+        // Dragging right handle adjusts hold duration (extends on timeline)
+        const newTotalTlDur = Math.max((dur * 2) / seg.speed + 0.1, t - draggingZoom.initialStartTl);
+        const newTotalSrcDur = newTotalTlDur * seg.speed;
+        const newHold = Math.max(0.1, newTotalSrcDur - dur * 2);
+        updateZoomPoint(draggingZoom.id, { hold: Number(newHold.toFixed(2)) });
+      } else if (draggingZoom.type === "resize-left") {
+        // Dragging left handle trims/moves the start while adjusting hold to keep end anchor
+        const deltaTl = t - draggingZoom.initialStartTl;
+        const deltaSrc = deltaTl * seg.speed;
+        const newHold = Math.max(0.1, draggingZoom.initialHold - deltaSrc);
+        const newSrcT = Math.max(0, draggingZoom.initialT + deltaSrc);
+        updateZoomPoint(draggingZoom.id, {
+          t: Number(newSrcT.toFixed(2)),
+          hold: Number(newHold.toFixed(2)),
+        });
+      }
+    },
+    [draggingZoom, project, updateZoomPoint, xToTime],
+  );
 
   const handleSegmentDragStart = useCallback((e: React.PointerEvent) => {
-    if (!scrollRef.current || !project || draggingDiamond || isDraggingPlayhead || draggingAudio) return false;
+    if (!scrollRef.current || !project || draggingZoom || isDraggingPlayhead || draggingAudio) return false;
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     const y = e.clientY - rect.top;
@@ -937,11 +1009,11 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
     e.preventDefault();
     e.stopPropagation();
     return true;
-  }, [project, draggingDiamond, isDraggingPlayhead, draggingAudio, timeToX, selectSegment]);
+  }, [project, draggingZoom, isDraggingPlayhead, draggingAudio, timeToX, selectSegment]);
 
   const handleTimelinePointerDown = useCallback((e: React.PointerEvent) => {
     if (contextMenu) setContextMenu(null);
-    if (!scrollRef.current || draggingDiamond) return;
+    if (!scrollRef.current || draggingZoom) return;
     const target = e.target as HTMLElement;
     if (target.closest('#facecam-transition-popover, #timeline-context-menu, #timeline-volume-popover, input, button')) {
       return;
@@ -975,7 +1047,7 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
       seek(xToTime(x));
       e.preventDefault();
     }
-  }, [contextMenu, currentTime, draggingDiamond, project, selectSegment, seek, timeToX, xToTime]);
+  }, [contextMenu, currentTime, draggingZoom, project, selectSegment, seek, timeToX, xToTime, handleSegmentDragStart]);
 
   const handleTimelinePointerMove = useCallback((e: React.PointerEvent) => {
     if (draggingSegment && scrollRef.current && project) {
@@ -1437,14 +1509,14 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
         onContextMenu={handleContextMenu}
         onPointerDown={handleTimelinePointerDown}
         onPointerMove={(e) => {
-          handleDiamondDrag(e);
+          handleZoomTrackDrag(e);
           handleTimelinePointerMove(e);
           handleAudioTrackDrag(e);
           handleTextTrackDrag(e);
         }}
         onPointerUp={(e) => {
           handleSegmentDragEnd(e as unknown as React.PointerEvent);
-          setDraggingDiamond(null);
+          setDraggingZoom(null);
           setIsDraggingPlayhead(false);
           setDraggingAudio(null);
           setDraggingText(null);
@@ -1555,31 +1627,59 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
               )}
             </>
           )}
-          {/* Diamond hit areas on Dedicated Zoom Track (transparent, for dragging) */}
+          {/* Zoom Block interactive elements on Zoom Track */}
           {project.segments.flatMap((seg) =>
             [...seg.zoomPoints, ...seg.stagedZoomPoints].map((zp) => {
               const st = sourceToTimeline(project, seg.id, zp.t);
               if (st == null) return null;
               const isStaged = !!seg.stagedZoomPoints.find((s) => s.id === zp.id);
+              const isSelected = zp.id === selectedZoomId;
+              const dur = Math.max(zp.dur ?? 0.45, 0.05);
+              const hold = zp.hold ?? 2.0;
+              const totalDur = (dur * 2 + hold) / Math.max(0.1, seg.speed);
+              const endHoldT = Math.min(duration, st + totalDur);
+              const left = timeToX(st);
+              const right = timeToX(endHoldT);
+              const width = Math.max(16, right - left);
+              const top = ZOOM_TRACK_Y + 3;
+              const height = ZOOM_TRACK_HEIGHT - 6;
+
               return (
                 <div
-                  key={zp.id}
-                  className="absolute z-10 flex h-[26px] w-6 -translate-x-1/2 cursor-grab items-center justify-center"
-                  style={{ top: ZOOM_TRACK_Y, left: timeToX(st) }}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-                    setDraggingDiamond({ id: zp.id, committed: !isStaged, segmentId: seg.id });
-                    setSelectedZoom(zp.id);
-                    selectSegment(seg.id);
-                  }}
+                  key={`zoom-hit-${zp.id}`}
+                  className={`absolute z-10 select-none group ${
+                    isSelected ? "ring-2 ring-[#9333ea] rounded-[4px]" : ""
+                  }`}
+                  style={{ top, left, width, height }}
                   onMouseEnter={() => setHoveredDiamond(zp.id)}
                   onMouseLeave={() => setHoveredDiamond(null)}
                 >
-                  {hoveredDiamond === zp.id && (
+                  {/* Left Resize Handle */}
+                  <div
+                    className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-[#9333ea]/40 rounded-l-[4px] z-20"
+                    onPointerDown={(e) => handleZoomTrackDown(e, zp, seg.id, "resize-left")}
+                    title="Drag to trim zoom start"
+                  />
+
+                  {/* Center Drag Body */}
+                  <div
+                    className="absolute left-2 right-2 top-0 bottom-0 cursor-grab active:cursor-grabbing z-10 flex items-center"
+                    onPointerDown={(e) => handleZoomTrackDown(e, zp, seg.id, "move")}
+                    title={`Zoom ${zp.to?.scale ?? 2}× — click to inspect, drag to move`}
+                  />
+
+                  {/* Right Resize Handle */}
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-2.5 cursor-ew-resize hover:bg-[#9333ea]/40 rounded-r-[4px] z-20"
+                    onPointerDown={(e) => handleZoomTrackDown(e, zp, seg.id, "resize-right")}
+                    title="Drag to extend zoom duration"
+                  />
+
+                  {/* Delete Button on Hover / Selected */}
+                  {(hoveredDiamond === zp.id || isSelected) && (
                     <button
-                      className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#ee0000] text-[8px] font-bold text-white shadow-sm hover:scale-110 active:scale-95 transition-all"
-                      title="Delete zoom keyframe"
+                      className="absolute -right-1 -top-1.5 z-30 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white shadow-sm hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                      title="Delete zoom"
                       onClick={(e) => {
                         e.stopPropagation();
                         isStaged ? removeStagedZoom(zp.id) : removeZoomPoint(zp.id);

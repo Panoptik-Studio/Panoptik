@@ -147,20 +147,6 @@ export function Inspector() {
         />
       </Row>
 
-      <Row label="Hold" value={`${(zoom.hold ?? 2).toFixed(2)}s`}>
-        <input
-          type="range"
-          min={0.2}
-          max={5}
-          step={0.1}
-          value={zoom.hold ?? 2}
-          onChange={(e) => patch({ hold: Number(e.target.value) })}
-          onPointerUp={commitDrag}
-          onKeyUp={commitDrag}
-          className="pk-range"
-        />
-      </Row>
-
 
 
       <Row label="Easing" value="">
