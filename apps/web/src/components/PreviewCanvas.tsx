@@ -32,7 +32,7 @@ import {
   resolveInterpolatedFacecam,
   resolveSegment,
 } from "@panoptik/engine";
-import type { Facecam, Project, Segment, ZoomPoint } from "@panoptik/schema";
+import type { Facecam, Project, Segment, ZoomPoint, TextOverlay } from "@panoptik/schema";
 import { mediaForSegment, primaryMedia } from "@panoptik/schema";
 import { segmentDuration } from "@panoptik/engine";
 import { FIRST_MEDIA_ID } from "@panoptik/schema";
@@ -177,6 +177,128 @@ function hitTestHandle(
     }
   }
   return null;
+}
+
+/** Hit test for text overlays visible at current timeline time */
+function hitTestTextOverlay(
+  canvas: HTMLCanvasElement,
+  project: Project,
+  timelineT: number,
+  px: number,
+  py: number,
+): TextOverlay | null {
+  const active = resolveActive(project, timelineT);
+  const seg = active.seg;
+  const srcT = active.srcT;
+  const cw = canvas.width;
+  const ch = canvas.height;
+  const scale = Math.max(0.5, Math.min(cw / 1920, ch / 1080));
+
+  const all = [...seg.textOverlays, ...seg.stagedTextOverlays];
+  // Iterate in reverse (topmost first)
+  for (let i = all.length - 1; i >= 0; i--) {
+    const to = all[i]!;
+    const duration = to.duration != null && to.duration > 0 ? to.duration : 3;
+    if (srcT < to.timestamp || srcT > to.timestamp + duration) continue;
+
+    let anchorX = (to.x ?? 0.5) * cw;
+    let anchorY = (to.y ?? 0.5) * ch;
+    if (to.position === "top" && to.y == null) anchorY = Math.max(60 * scale, 0.1 * ch);
+    else if (to.position === "bottom" && to.y == null) anchorY = Math.min(ch - 60 * scale, 0.88 * ch);
+    else if (to.position === "center" && to.y == null) anchorY = 0.5 * ch;
+
+    const fontSizePx = Math.max(12, Math.round((to.fontSize ?? 36) * scale));
+    const lines = (to.text || "Text").split("\n");
+    const lineHeight = fontSizePx * 1.28;
+    const totalHeight = Math.max(32 * scale, lines.length * lineHeight);
+    const maxLineLen = Math.max(1, ...lines.map((l) => l.length));
+    const padX = (to.backgroundPadding ?? 14) * scale;
+    const totalWidth = Math.max(70 * scale, maxLineLen * (fontSizePx * 0.6) + padX * 2);
+
+    const left = anchorX - totalWidth / 2 - 14;
+    const right = anchorX + totalWidth / 2 + 14;
+    const top = anchorY - totalHeight / 2 - 14;
+    const bottom = anchorY + totalHeight / 2 + 14;
+
+    if (px >= left && px <= right && py >= top && py <= bottom) {
+      return to;
+    }
+  }
+  return null;
+}
+
+/** Draws selection outline and handles around the active text overlay */
+function drawTextOverlayHandles(
+  ctx: CanvasRenderingContext2D,
+  project: Project,
+  t: number,
+  selectedTextId: string | null,
+  draggingTextId: string | null,
+): void {
+  if (!selectedTextId && !draggingTextId) return;
+  const active = resolveActive(project, t);
+  const seg = active.seg;
+  const targetId = draggingTextId || selectedTextId;
+  const to = [...seg.textOverlays, ...seg.stagedTextOverlays].find((x) => x.id === targetId);
+  if (!to) return;
+  const duration = to.duration != null && to.duration > 0 ? to.duration : 3;
+  if (active.srcT < to.timestamp || active.srcT > to.timestamp + duration) return;
+
+  const cw = ctx.canvas.width;
+  const ch = ctx.canvas.height;
+  const scale = Math.max(0.5, Math.min(cw / 1920, ch / 1080));
+
+  let anchorX = (to.x ?? 0.5) * cw;
+  let anchorY = (to.y ?? 0.5) * ch;
+  if (to.position === "top" && to.y == null) anchorY = Math.max(60 * scale, 0.1 * ch);
+  else if (to.position === "bottom" && to.y == null) anchorY = Math.min(ch - 60 * scale, 0.88 * ch);
+  else if (to.position === "center" && to.y == null) anchorY = 0.5 * ch;
+
+  const fontSizePx = Math.max(12, Math.round((to.fontSize ?? 36) * scale));
+  const lines = (to.text || "Text").split("\n");
+  const lineHeight = fontSizePx * 1.28;
+  const totalHeight = Math.max(30 * scale, lines.length * lineHeight);
+  const maxLineLen = Math.max(1, ...lines.map((l) => l.length));
+  const padX = (to.backgroundPadding ?? 14) * scale;
+  const totalWidth = Math.max(60 * scale, maxLineLen * (fontSizePx * 0.6) + padX * 2);
+
+  const boxW = totalWidth + 14 * scale;
+  const boxH = totalHeight + 14 * scale;
+  const boxX = anchorX - boxW / 2;
+  const boxY = anchorY - boxH / 2;
+
+  ctx.save();
+  ctx.strokeStyle = to.staged ? "#f59e0b" : "#0070f3";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  if (typeof ctx.roundRect === "function") {
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxW, boxH, 6 * scale);
+    ctx.stroke();
+  } else {
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+  }
+
+  // Corner handles
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = to.staged ? "#f59e0b" : "#0070f3";
+  ctx.lineWidth = 1.5;
+  const handleR = 3.5 * scale;
+  const corners: [number, number][] = [
+    [boxX, boxY],
+    [boxX + boxW, boxY],
+    [boxX, boxY + boxH],
+    [boxX + boxW, boxY + boxH],
+  ];
+  for (const [cx, cy] of corners) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, handleR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 /**
@@ -467,12 +589,22 @@ export function PreviewCanvas() {
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);
   const setFacecam = useProjectStore((s) => s.setFacecam);
+  const selectedTextOverlayId = useProjectStore((s) => s.selectedTextOverlayId);
+  const setSelectedTextOverlay = useProjectStore((s) => s.setSelectedTextOverlay);
+  const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay);
 
   // Dragging state — `moved` separates a click-to-select from a real drag.
   const [dragging, setDragging] = useState<{
     id: string;
     moved: boolean;
   } | null>(null);
+  const [draggingText, setDraggingText] = useState<{
+    id: string;
+    moved: boolean;
+    grabDx: number;
+    grabDy: number;
+  } | null>(null);
+  const draggingTextRef = useRef<string | null>(null);
   const [draggingFacecam, setDraggingFacecam] = useState(false);
   const facecamDragOffset = useRef<{ dx: number; dy: number } | null>(null);
   const pointerDownRef = useRef<{
@@ -670,6 +802,13 @@ export function PreviewCanvas() {
           draggingIdRef.current,
           state.selectedSegmentId,
           state.isPlaying,
+        );
+        drawTextOverlayHandles(
+          ctx,
+          state.project,
+          tEff,
+          state.selectedTextOverlayId,
+          draggingTextRef.current,
         );
       }
     };
@@ -949,7 +1088,34 @@ export function PreviewCanvas() {
         return;
       }
 
-      // 2. Facecam hit test second — if not clicking a zoom handle over the camera
+      // 2. Text overlay hit test SECOND — drag text anywhere on canvas
+      const hitText = hitTestTextOverlay(canvas, state.project, state.currentTime, px, py);
+      if (hitText) {
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+        if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
+        setSelectedTextOverlay(hitText.id);
+        const cw = canvas.width;
+        const ch = canvas.height;
+        const scale = Math.max(0.5, Math.min(cw / 1920, ch / 1080));
+        let curAnchorX = (hitText.x ?? 0.5) * cw;
+        let curAnchorY = (hitText.y ?? 0.5) * ch;
+        if (hitText.position === "top" && hitText.y == null) curAnchorY = Math.max(60 * scale, 0.1 * ch);
+        else if (hitText.position === "bottom" && hitText.y == null) curAnchorY = Math.min(ch - 60 * scale, 0.88 * ch);
+        else if (hitText.position === "center" && hitText.y == null) curAnchorY = 0.5 * ch;
+
+        setDraggingText({
+          id: hitText.id,
+          moved: false,
+          grabDx: px - curAnchorX,
+          grabDy: py - curAnchorY,
+        });
+        draggingTextRef.current = hitText.id;
+        pointerDownRef.current = { clientX: e.clientX, clientY: e.clientY, px, py, time: performance.now(), isHit: true };
+        return;
+      }
+
+      // 3. Facecam hit test third — if not clicking a zoom handle or text overlay over the camera
       const fc = active.seg.facecam;
       if (fc.src) {
         const resolved = resolveInterpolatedFacecam(state.project, state.currentTime, active.seg);
@@ -1045,6 +1211,23 @@ export function PreviewCanvas() {
         return;
       }
 
+      // Text overlay drag on canvas
+      if (draggingText) {
+        wasDraggingRef.current = true;
+        const { x: px, y: py } = pointerToCanvas(canvas, e.clientX, e.clientY);
+        const cw = canvas.width;
+        const ch = canvas.height;
+        const newX = Math.max(0.04, Math.min(0.96, (px - draggingText.grabDx) / cw));
+        const newY = Math.max(0.04, Math.min(0.96, (py - draggingText.grabDy) / ch));
+        updateTextOverlay(draggingText.id, {
+          position: "custom",
+          x: Number(newX.toFixed(3)),
+          y: Number(newY.toFixed(3)),
+        });
+        if (!draggingText.moved) setDraggingText({ ...draggingText, moved: true });
+        return;
+      }
+
       // Hover affordance: zoom grab beats facecam grab beats crosshair
       if (!state.isPlaying) {
         const { x: hx, y: hy } = pointerToCanvas(canvas, e.clientX, e.clientY);
@@ -1059,6 +1242,12 @@ export function PreviewCanvas() {
           state.isPlaying,
         );
         if (over) {
+          canvas.style.cursor = "grab";
+          return;
+        }
+
+        const overText = hitTestTextOverlay(canvas, state.project, state.currentTime, hx, hy);
+        if (overText) {
           canvas.style.cursor = "grab";
           return;
         }
@@ -1089,6 +1278,16 @@ export function PreviewCanvas() {
         setDraggingFacecam(false);
         facecamDragOffset.current = null;
         commitDrag();
+        lastDragTimeRef.current = performance.now();
+        pointerDownRef.current = null;
+        return;
+      }
+      if (draggingText) {
+        if (draggingText.moved) {
+          commitDrag();
+        }
+        setDraggingText(null);
+        draggingTextRef.current = null;
         lastDragTimeRef.current = performance.now();
         pointerDownRef.current = null;
         return;
@@ -1154,6 +1353,14 @@ export function PreviewCanvas() {
       if (hit) {
         if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
         setSelectedZoom(hit.id);
+        return;
+      }
+
+      // Check if click landed on a text overlay
+      const hitText = hitTestTextOverlay(canvas, state.project, t, px, py);
+      if (hitText) {
+        if (active.seg.id !== state.selectedSegmentId) selectSegment(active.seg.id);
+        setSelectedTextOverlay(hitText.id);
         return;
       }
 

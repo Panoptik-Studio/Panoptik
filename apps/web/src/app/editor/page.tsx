@@ -17,6 +17,7 @@ import { ProjectBrowser } from "@/components/ProjectBrowser";
 import { RecordModal } from "@/components/RecordModal";
 import { ReshootModal } from "@/components/ReshootModal";
 import { StageControls } from "@/components/StageControls";
+import { TextPanel } from "@/components/TextPanel";
 import { Timeline } from "@/components/Timeline";
 import { ToolTrace } from "@/components/ToolTrace";
 import { Toolbar } from "@/components/Toolbar";
@@ -53,7 +54,7 @@ export default function EditorPage() {
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
             <PreviewCanvas />
           </div>
-          <Timeline />
+          <Timeline onSelectText={() => setActiveTab("text")} />
         </main>
 
         {/* Right — tabbed inspector */}
@@ -65,7 +66,7 @@ export default function EditorPage() {
               <Inspector />
             </>
           )}
-          {activeTab === "text" && <Inspector />}
+          {activeTab === "text" && <TextPanel />}
           {activeTab === "audio" && <AudioPanel />}
           {activeTab === "camera" && <CameraControls />}
           {activeTab === "stage" && <StageControls />}

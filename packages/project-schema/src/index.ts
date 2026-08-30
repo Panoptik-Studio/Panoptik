@@ -16,11 +16,40 @@ export type ZoomPoint = {
   staged: boolean; // true = ghost proposal (agent-staged), never affects rendering
 };
 
+export type TextAnimation =
+  | "none"
+  | "fade"
+  | "pop"
+  | "slide-up"
+  | "slide-down"
+  | "zoom-in"
+  | "typewriter"
+  | "bounce";
+
 export type TextOverlay = {
   id: string;
   text: string;
-  timestamp: number; // seconds; displays for a fixed 3s from timestamp
-  position: "top" | "bottom" | "center";
+  timestamp: number; // seconds; start time
+  duration?: number; // seconds (defaults to 3s if not specified)
+  position?: "top" | "bottom" | "center" | "custom";
+  x?: number; // normalized 0..1 (default 0.5)
+  y?: number; // normalized 0..1
+  fontFamily?: string; // e.g. "Inter", "Outfit", "Poppins", "Montserrat", "Playfair Display", "Bebas Neue", "Fira Code", "Caveat"
+  fontSize?: number; // font size in px (default 36)
+  fontWeight?: "normal" | "bold" | "600" | "800" | "900";
+  fontStyle?: "normal" | "italic";
+  textAlign?: "left" | "center" | "right";
+  color?: string; // hex color or rgba, default "#ffffff"
+  backgroundColor?: string; // background pill / box color, e.g. "rgba(0,0,0,0.6)" or "#000000" or "transparent"
+  backgroundPadding?: number; // padding in px (default 12)
+  borderRadius?: number; // rounded corners for pill in px (default 8)
+  shadowColor?: string; // shadow color (e.g. "rgba(0,0,0,0.75)")
+  shadowBlur?: number; // shadow blur in px (default 4)
+  borderWidth?: number; // outline stroke width in px (default 0)
+  borderColor?: string; // outline stroke color
+  opacity?: number; // 0..1, default 1
+  animation?: TextAnimation; // default "fade"
+  animationDuration?: number; // transition duration in seconds (default 0.35s)
   staged: boolean;
 };
 

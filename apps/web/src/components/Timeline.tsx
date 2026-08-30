@@ -7,7 +7,7 @@
  */
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useTimelineThumbnails } from "@/lib/useTimelineThumbnails";
 import { engine } from "@/lib/engineProvider";
@@ -19,6 +19,16 @@ import {
 } from "@panoptik/engine";
 import { TRANSITION_ICONS, getClosestGridPreset } from "./CameraControls";
 import { AUDIO_TRACK_Y, AUDIO_LANE_HEIGHT, audioBlockGeometry, drawAudioTracks } from "@/lib/timelineAudioTracks";
+import {
+  packTextLanes,
+  drawTextTracks,
+  textBlockGeometry,
+  TEXT_TRACK_BASE_Y,
+  TEXT_ROW_HEIGHT,
+  TEXT_ROW_GAP,
+  type PackedTextOverlay,
+} from "@/lib/timelineTextTracks";
+import type { TextOverlay } from "@panoptik/schema";
 
 const RULER_HEIGHT = 26;
 const VIDEO_TRACK_Y = 30;
@@ -126,7 +136,7 @@ function fmtTime(t: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms}`;
 }
 
-export function Timeline() {
+export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -179,9 +189,23 @@ export function Timeline() {
   const updateAudioTrack = useProjectStore((s) => s.updateAudioTrack);
   const removeZoomPoint = useProjectStore((s) => s.removeZoomPoint);
   const removeStagedZoom = useProjectStore((s) => s.removeStagedZoom);
+  const selectedTextOverlayId = useProjectStore((s) => s.selectedTextOverlayId);
+  const setSelectedTextOverlay = useProjectStore((s) => s.setSelectedTextOverlay);
+  const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay);
+  const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay);
   const exportProgress = useProjectStore((s) => s.exportProgress);
   const [showSpeed, setShowSpeed] = useState(false);
   const speedHideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const [draggingText, setDraggingText] = useState<{
+    id: string;
+    segId: string;
+    type: "move" | "resize-left" | "resize-right";
+    initialTimestamp: number;
+    initialDuration: number;
+    grabOffset: number;
+  } | null>(null);
+  const [hoveredTextOverlayId, setHoveredTextOverlayId] = useState<string | null>(null);
 
   const [hoveredVolume, setHoveredVolume] = useState<{
     type: "screen" | "facecam" | "voiceover";
@@ -225,13 +249,34 @@ export function Timeline() {
 
   const { getThumbnail, version: thumbVersion } = useTimelineThumbnails(project);
 
+  // Packed multi-row text overlays across all segments
+  const packedText = useMemo(() => {
+    if (!project) return { packed: [] as PackedTextOverlay[], totalLanes: 1 };
+    const allItems: TextOverlay[] = [];
+    for (const s of project.segments) {
+      for (const to of [...s.textOverlays, ...s.stagedTextOverlays]) {
+        const tlStart = sourceToTimeline(project, s.id, to.timestamp) ?? to.timestamp;
+        allItems.push({
+          ...to,
+          timestamp: tlStart,
+        });
+      }
+    }
+    return packTextLanes(allItems);
+  }, [project]);
+
+  const TEXT_TRACK_Y = 180;
+  const textLanesCount = Math.max(1, packedText.totalLanes);
+  const textTracksHeight = textLanesCount * (TEXT_ROW_HEIGHT + TEXT_ROW_GAP);
+  const dynamicAudioTrackY = TEXT_TRACK_Y + textTracksHeight + 6;
+
   // On-timeline duration across all segments.
   const duration = project ? Math.max(projectDuration(project), 0.001) : 0.001;
 
   // Canvas width scales with zoom: 0→0.5×, 1→2× base — ruler uses on-timeline duration
   const baseW = 1387;
   const canvasW = Math.round(baseW * (0.5 + zoom * 1.5));
-  const canvasH = 216; // extended to fit the audio lane below the zoom track
+  const canvasH = Math.max(220, dynamicAudioTrackY + AUDIO_LANE_HEIGHT + 16);
   const timeToX = useCallback((t: number) => (t / duration) * canvasW, [duration, canvasW]);
   const xToTime = useCallback((x: number) => Math.max(0, Math.min(duration, (x / canvasW) * duration)), [duration, canvasW]);
 
@@ -772,9 +817,20 @@ export function Timeline() {
       }
     }
 
-    // ── 7. Audio Track Lane (music/voiceover, wall-clock) ──
-    drawAudioTracks(ctx, project?.audioTracks ?? [], timeToX, AUDIO_TRACK_Y, AUDIO_LANE_HEIGHT);
-  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying, exportProgress, draggingSegment, dragOverIndex]);
+    // ── 7. Multi-Row Text Tracks ──
+    drawTextTracks(
+      ctx,
+      packedText.packed,
+      timeToX,
+      selectedTextOverlayId,
+      TEXT_TRACK_Y,
+      TEXT_ROW_HEIGHT,
+      TEXT_ROW_GAP,
+    );
+
+    // ── 8. Audio Track Lane (music/voiceover, wall-clock) ──
+    drawAudioTracks(ctx, project?.audioTracks ?? [], timeToX, dynamicAudioTrackY, AUDIO_LANE_HEIGHT);
+  }, [canvasW, canvasH, duration, project, selectedSegmentId, selectedSegmentIds, selectedZoomId, selectedTextOverlayId, packedText, dynamicAudioTrackY, thumbVersion, getThumbnail, timeToX, currentTime, isPlaying, exportProgress, draggingSegment, dragOverIndex]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (isDraggingPlayhead || draggingDiamond || draggingSegment) return;
@@ -984,6 +1040,83 @@ export function Timeline() {
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     setDraggingAudio({ id: track.id, grabOffset: xToTime(x) - track.startT });
   }, [xToTime]);
+
+  const handleTextTrackDown = useCallback(
+    (
+      e: React.PointerEvent,
+      item: PackedTextOverlay,
+      segId: string,
+      type: "move" | "resize-left" | "resize-right" = "move",
+    ) => {
+      e.stopPropagation();
+      if (!scrollRef.current) return;
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      const rect = scrollRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+      const t = xToTime(x);
+
+      setSelectedTextOverlay(item.overlay.id);
+      selectSegment(segId);
+      onSelectText?.();
+
+      setDraggingText({
+        id: item.overlay.id,
+        segId,
+        type,
+        initialTimestamp: item.overlay.timestamp,
+        initialDuration: item.duration,
+        grabOffset: t - item.startT,
+      });
+    },
+    [onSelectText, selectSegment, setSelectedTextOverlay, xToTime],
+  );
+
+  const handleTextTrackDrag = useCallback(
+    (e: React.PointerEvent) => {
+      if (!draggingText || !scrollRef.current || !project) return;
+      const rect = scrollRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
+      const t = xToTime(x);
+
+      const seg = project.segments.find((s) => s.id === draggingText.segId);
+      if (!seg) return;
+
+      if (draggingText.type === "move") {
+        const newTlT = Math.max(0, t - draggingText.grabOffset);
+        let segTlStart = 0;
+        for (const s of project.segments) {
+          if (s.id === seg.id) break;
+          segTlStart += segmentDuration(s);
+        }
+        const newSrcT = Math.max(0, (newTlT - segTlStart) * seg.speed + seg.srcStart);
+        updateTextOverlay(draggingText.id, { timestamp: Number(newSrcT.toFixed(2)) });
+      } else if (draggingText.type === "resize-right") {
+        let segTlStart = 0;
+        for (const s of project.segments) {
+          if (s.id === seg.id) break;
+          segTlStart += segmentDuration(s);
+        }
+        const overlayTlStart = segTlStart + (draggingText.initialTimestamp - seg.srcStart) / seg.speed;
+        const newDur = Math.max(0.3, t - overlayTlStart);
+        updateTextOverlay(draggingText.id, { duration: Number(newDur.toFixed(2)) });
+      } else if (draggingText.type === "resize-left") {
+        let segTlStart = 0;
+        for (const s of project.segments) {
+          if (s.id === seg.id) break;
+          segTlStart += segmentDuration(s);
+        }
+        const overlayTlStart = segTlStart + (draggingText.initialTimestamp - seg.srcStart) / seg.speed;
+        const delta = t - overlayTlStart;
+        const newDur = Math.max(0.3, draggingText.initialDuration - delta);
+        const newSrcT = Math.max(0, draggingText.initialTimestamp + delta * seg.speed);
+        updateTextOverlay(draggingText.id, {
+          timestamp: Number(newSrcT.toFixed(2)),
+          duration: Number(newDur.toFixed(2)),
+        });
+      }
+    },
+    [draggingText, project, updateTextOverlay, xToTime],
+  );
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1303,8 +1436,19 @@ export function Timeline() {
         onClick={handleCanvasClick}
         onContextMenu={handleContextMenu}
         onPointerDown={handleTimelinePointerDown}
-        onPointerMove={(e) => { handleDiamondDrag(e); handleTimelinePointerMove(e); handleAudioTrackDrag(e); }}
-        onPointerUp={(e) => { handleSegmentDragEnd(e as unknown as React.PointerEvent); setDraggingDiamond(null); setIsDraggingPlayhead(false); setDraggingAudio(null); }}
+        onPointerMove={(e) => {
+          handleDiamondDrag(e);
+          handleTimelinePointerMove(e);
+          handleAudioTrackDrag(e);
+          handleTextTrackDrag(e);
+        }}
+        onPointerUp={(e) => {
+          handleSegmentDragEnd(e as unknown as React.PointerEvent);
+          setDraggingDiamond(null);
+          setIsDraggingPlayhead(false);
+          setDraggingAudio(null);
+          setDraggingText(null);
+        }}
         onPointerLeave={() => { setIsDraggingPlayhead(false); }}
       >
         <div className="relative" style={{ width: canvasW, height: canvasH }}>
@@ -1449,6 +1593,75 @@ export function Timeline() {
             }),
           )}
 
+          {/* Multi-Row Text Tracks — Interactive hit divs and resize handles */}
+          {packedText.packed.map((item: PackedTextOverlay) => {
+            const { overlay } = item;
+            // Find which segment this overlay belongs to
+            const seg = project.segments.find(
+              (s) =>
+                s.textOverlays.some((t) => t.id === overlay.id) ||
+                s.stagedTextOverlays.some((t) => t.id === overlay.id),
+            ) || project.segments[0];
+            if (!seg) return null;
+
+            const { left, top, width, height } = textBlockGeometry(
+              item,
+              timeToX,
+              TEXT_TRACK_Y,
+              TEXT_ROW_HEIGHT,
+              TEXT_ROW_GAP,
+            );
+            const isSelected = overlay.id === selectedTextOverlayId;
+            const isHovered = hoveredTextOverlayId === overlay.id;
+
+            return (
+              <div
+                key={`text-hit-${overlay.id}`}
+                className={`absolute z-10 select-none group ${
+                  isSelected ? "ring-2 ring-[#0070f3] rounded-[5px]" : ""
+                }`}
+                style={{ top, left, width, height }}
+                onMouseEnter={() => setHoveredTextOverlayId(overlay.id)}
+                onMouseLeave={() => setHoveredTextOverlayId(null)}
+              >
+                {/* Left Resize Handle */}
+                <div
+                  className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-[#0070f3]/40 rounded-l-[5px] z-20"
+                  onPointerDown={(e) => handleTextTrackDown(e, item, seg.id, "resize-left")}
+                  title="Drag to trim start time"
+                />
+
+                {/* Center Drag Body */}
+                <div
+                  className="absolute left-2 right-2 top-0 bottom-0 cursor-grab active:cursor-grabbing z-10"
+                  onPointerDown={(e) => handleTextTrackDown(e, item, seg.id, "move")}
+                  title={`"${overlay.text || "Text"}" — click to edit style, drag to move`}
+                />
+
+                {/* Right Resize Handle */}
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-[#0070f3]/40 rounded-r-[5px] z-20"
+                  onPointerDown={(e) => handleTextTrackDown(e, item, seg.id, "resize-right")}
+                  title="Drag to adjust duration"
+                />
+
+                {/* Delete Button on Hover / Selected */}
+                {(isHovered || isSelected) && (
+                  <button
+                    className="absolute -right-1 -top-1.5 z-30 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white shadow-sm hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                    title="Delete text overlay"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeTextOverlay(overlay.id);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            );
+          })}
+
           {/* Audio Track lane — invisible draggable hit-divs over the canvas-drawn blocks */}
           {(project.audioTracks ?? []).map((track) => {
             const { left, width } = audioBlockGeometry(track, timeToX);
@@ -1456,7 +1669,7 @@ export function Timeline() {
               <div
                 key={`audio-hit-${track.id}`}
                 className="absolute z-10 cursor-grab active:cursor-grabbing"
-                style={{ top: AUDIO_TRACK_Y, left, width, height: AUDIO_LANE_HEIGHT }}
+                style={{ top: dynamicAudioTrackY, left, width, height: AUDIO_LANE_HEIGHT }}
                 onPointerDown={(e) => handleAudioTrackDown(e, track)}
                 title={`${track.name ?? track.kind} — drag to move`}
               />

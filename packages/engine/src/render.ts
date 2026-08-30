@@ -557,14 +557,168 @@ function drawTextOverlays(
   h: number,
 ): void {
   const all = [...seg.textOverlays, ...seg.stagedTextOverlays];
+  const scaleRef = Math.min(w / 1920, h / 1080);
+  const scale = Math.max(0.5, scaleRef);
+
   for (const to of all) {
-    if (t >= to.timestamp && t <= to.timestamp + 3) {
-      ctx.fillStyle = to.staged ? "#f59e0b" : "#ffffff";
-      ctx.font = "bold 32px sans-serif";
-      ctx.textAlign = "center";
-      const y = to.position === "top" ? 60 : to.position === "bottom" ? h - 60 : h / 2;
-      ctx.fillText(to.text, w / 2, y);
+    const duration = to.duration != null && to.duration > 0 ? to.duration : 3;
+    if (t < to.timestamp || t > to.timestamp + duration) continue;
+
+    const relT = t - to.timestamp;
+    const remainT = to.timestamp + duration - t;
+    const anim = to.animation ?? "fade";
+    const animDur = Math.min(to.animationDuration ?? 0.35, duration / 2);
+
+    let alpha = 1;
+    let scaleAnim = 1;
+    let animDx = 0;
+    let animDy = 0;
+    let displayText = to.text;
+
+    // Enter & exit progress (0..1)
+    const enterP = animDur > 0 ? Math.min(1, Math.max(0, relT / animDur)) : 1;
+    const exitP = animDur > 0 ? Math.min(1, Math.max(0, remainT / animDur)) : 1;
+
+    // Easing helpers
+    const easeOutCubic = (p: number) => 1 - Math.pow(1 - p, 3);
+    const easeOutBack = (p: number) => 1 + 2.70158 * Math.pow(p - 1, 3) + 1.70158 * Math.pow(p - 1, 2);
+    const easeOutBounce = (p: number) => {
+      const n1 = 7.5625;
+      const d1 = 2.75;
+      if (p < 1 / d1) return n1 * p * p;
+      if (p < 2 / d1) return n1 * (p -= 1.5 / d1) * p + 0.75;
+      if (p < 2.5 / d1) return n1 * (p -= 2.25 / d1) * p + 0.9375;
+      return n1 * (p -= 2.625 / d1) * p + 0.984375;
+    };
+
+    if (anim === "fade") {
+      alpha = Math.min(easeOutCubic(enterP), easeOutCubic(exitP));
+    } else if (anim === "pop") {
+      scaleAnim = enterP < 1 ? Math.max(0.2, 0.4 + 0.6 * easeOutBack(enterP)) : Math.max(0.2, 0.4 + 0.6 * easeOutCubic(exitP));
+      alpha = Math.min(easeOutCubic(enterP), easeOutCubic(exitP));
+    } else if (anim === "slide-up") {
+      animDy = (1 - easeOutCubic(enterP)) * (40 * scale) - (1 - easeOutCubic(exitP)) * (40 * scale);
+      alpha = Math.min(easeOutCubic(enterP), easeOutCubic(exitP));
+    } else if (anim === "slide-down") {
+      animDy = -(1 - easeOutCubic(enterP)) * (40 * scale) + (1 - easeOutCubic(exitP)) * (40 * scale);
+      alpha = Math.min(easeOutCubic(enterP), easeOutCubic(exitP));
+    } else if (anim === "zoom-in") {
+      scaleAnim = 0.8 + 0.2 * easeOutCubic(enterP);
+      alpha = Math.min(easeOutCubic(enterP), easeOutCubic(exitP));
+    } else if (anim === "typewriter") {
+      const typeProgress = animDur > 0 ? Math.min(1, relT / (animDur * 1.8)) : 1;
+      const charCount = Math.max(1, Math.floor(to.text.length * typeProgress));
+      displayText = to.text.slice(0, charCount);
+      alpha = easeOutCubic(exitP);
+    } else if (anim === "bounce") {
+      scaleAnim = enterP < 1 ? Math.max(0.1, easeOutBounce(enterP)) : Math.max(0.1, easeOutCubic(exitP));
+      alpha = Math.min(easeOutCubic(enterP), easeOutCubic(exitP));
     }
+
+    // Base position coordinates
+    let anchorX = (to.x ?? 0.5) * w;
+    let anchorY = (to.y ?? 0.5) * h;
+
+    if (to.position === "top" && to.y == null) {
+      anchorY = Math.max(60 * scale, 0.1 * h);
+    } else if (to.position === "bottom" && to.y == null) {
+      anchorY = Math.min(h - 60 * scale, 0.88 * h);
+    } else if (to.position === "center" && to.y == null) {
+      anchorY = 0.5 * h;
+    }
+
+    ctx.save();
+    const finalAlpha = Math.max(0, Math.min(1, (to.opacity ?? 1) * alpha));
+    ctx.globalAlpha = finalAlpha;
+
+    // Apply animation transforms around the text anchor
+    ctx.translate(anchorX + animDx, anchorY + animDy);
+    if (scaleAnim !== 1) {
+      ctx.scale(scaleAnim, scaleAnim);
+    }
+
+    const fontSizePx = Math.max(12, Math.round((to.fontSize ?? 36) * scale));
+    const fontWeight = to.fontWeight ?? "bold";
+    const fontStyle = to.fontStyle ?? "normal";
+    const fontFamily = to.fontFamily ?? "Inter, system-ui, sans-serif";
+    ctx.font = `${fontStyle} ${fontWeight} ${fontSizePx}px ${fontFamily}`;
+    ctx.textAlign = (to.textAlign as CanvasTextAlign) ?? "center";
+    ctx.textBaseline = "middle";
+
+    const lines = displayText.split("\n");
+    const lineHeight = fontSizePx * 1.28;
+    const totalHeight = lines.length * lineHeight;
+
+    // Measure maximum line width
+    let maxLineWidth = 0;
+    for (const line of lines) {
+      const width =
+        typeof ctx.measureText === "function"
+          ? (ctx.measureText(line)?.width ?? line.length * (fontSizePx * 0.6))
+          : line.length * (fontSizePx * 0.6);
+      if (width > maxLineWidth) maxLineWidth = width;
+    }
+
+    // Draw background pill / container if requested
+    const bg = to.backgroundColor;
+    if (bg && bg !== "transparent") {
+      const padX = (to.backgroundPadding ?? 14) * scale;
+      const padY = (to.backgroundPadding ? to.backgroundPadding * 0.7 : 10) * scale;
+      const pillW = maxLineWidth + padX * 2;
+      const pillH = totalHeight + padY * 2;
+      const pillR = Math.min((to.borderRadius ?? 10) * scale, pillH / 2);
+
+      let pillX = -pillW / 2;
+      if (to.textAlign === "left") pillX = -padX;
+      else if (to.textAlign === "right") pillX = -pillW + padX;
+
+      const pillY = -pillH / 2;
+
+      ctx.save();
+      ctx.beginPath();
+      if (typeof ctx.roundRect === "function") {
+        ctx.roundRect(pillX, pillY, pillW, pillH, pillR);
+      } else {
+        ctx.rect(pillX, pillY, pillW, pillH);
+      }
+      ctx.fillStyle = bg;
+      ctx.fill();
+
+      if (to.borderWidth && to.borderWidth > 0 && to.borderColor) {
+        ctx.strokeStyle = to.borderColor;
+        ctx.lineWidth = to.borderWidth * scale;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Draw text with shadow / outline
+    if (to.shadowColor && (to.shadowBlur ?? 0) > 0) {
+      ctx.shadowColor = to.shadowColor;
+      ctx.shadowBlur = (to.shadowBlur ?? 4) * scale;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 2 * scale;
+    }
+
+    if (to.borderWidth && to.borderWidth > 0 && to.borderColor && (!bg || bg === "transparent")) {
+      ctx.strokeStyle = to.borderColor;
+      ctx.lineWidth = (to.borderWidth * 2) * scale;
+      ctx.lineJoin = "round";
+      let curY = -((lines.length - 1) * lineHeight) / 2;
+      for (const line of lines) {
+        ctx.strokeText(line, 0, curY);
+        curY += lineHeight;
+      }
+    }
+
+    ctx.fillStyle = to.staged ? "#f59e0b" : (to.color ?? "#ffffff");
+    let curY = -((lines.length - 1) * lineHeight) / 2;
+    for (const line of lines) {
+      ctx.fillText(line, 0, curY);
+      curY += lineHeight;
+    }
+
+    ctx.restore();
   }
 }
 

@@ -131,6 +131,7 @@ interface ProjectStore {
   selectedSegmentId: string | null;
   selectedSegmentIds: string[];
   selectedZoomId: string | null;
+  selectedTextOverlayId: string | null;
   pendingBackgroundBadge: boolean;
   /**
    * Background each segment had before the current staged theme, by segment id.
@@ -203,6 +204,7 @@ interface ProjectStore {
     id: string,
     updates: Partial<TextOverlay>,
   ) => void;
+  setSelectedTextOverlay: (id: string | null) => void;
 
   // Text — staging
   stageTextOverlay: (overlay: TextOverlay) => void;
@@ -264,6 +266,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   selectedSegmentId: null,
   selectedSegmentIds: [],
   selectedZoomId: null,
+  selectedTextOverlayId: null,
   pendingBackgroundBadge: false,
   preStageBackgrounds: {},
   whisperProgress: null,
@@ -317,6 +320,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       currentTime: 0,
       isPlaying: false,
       selectedZoomId: null,
+      selectedTextOverlayId: null,
       pendingBackgroundBadge: false,
   preStageBackgrounds: {},
       selectedSegmentId: firstSegId,
@@ -334,6 +338,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       currentTime: 0,
       isPlaying: false,
       selectedZoomId: null,
+      selectedTextOverlayId: null,
       selectedSegmentId: null,
       selectedSegmentIds: [],
       pendingBackgroundBadge: false,
@@ -772,6 +777,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       textOverlays: [...seg.textOverlays, newOverlay],
     }));
     if (!project) return;
+    set({ selectedTextOverlayId: newOverlay.id });
     pushHistoryAndSet(project, state, set);
   },
 
@@ -783,6 +789,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       textOverlays: seg.textOverlays.filter((t) => t.id !== id),
     }));
     if (!project) return;
+    if (state.selectedTextOverlayId === id) {
+      set({ selectedTextOverlayId: null });
+    }
     pushHistoryAndSet(project, state, set);
   },
 
@@ -797,6 +806,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     }));
     if (!project) return;
     set({ project });
+  },
+
+  setSelectedTextOverlay: (id) => {
+    set({ selectedTextOverlayId: id });
   },
 
   // ── Text — staging (applies automatically) ──
