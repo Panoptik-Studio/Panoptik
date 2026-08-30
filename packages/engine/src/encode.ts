@@ -18,7 +18,8 @@ import {
   type AudioCodec,
 } from "mediabunny";
 import { registerAacEncoder } from "@mediabunny/aac-encoder";
-import type { ExportOpts, Project } from "@panoptik/schema";
+import type { ExportFps, ExportOpts, Project } from "@panoptik/schema";
+import { EXPORT_FPS_OPTIONS } from "@panoptik/schema";
 import { mediaForSegment, primaryMedia } from "@panoptik/schema";
 import { presetAspect } from "./layout";
 import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator, activateMedia } from "./decode";
@@ -41,7 +42,20 @@ const RESOLUTION_HEIGHTS: Record<ExportOpts["resolution"], number> = {
   "4k": 2160,
 };
 
-const EXPORT_FPS = 30;
+/**
+ * Frame rate to write when the caller does not ask for one.
+ *
+ * Kept as the historic 30 so an export with no explicit choice produces the
+ * same file it always has.
+ */
+const FALLBACK_EXPORT_FPS = 30;
+
+/** Only the offered rates are honoured; anything else falls back. */
+function resolveExportFps(requested: number | undefined): number {
+  return requested && EXPORT_FPS_OPTIONS.includes(requested as ExportFps)
+    ? requested
+    : FALLBACK_EXPORT_FPS;
+}
 
 /** Codec preference, best first. The browser picks the first it can encode.
  * For maximal native-player compatibility:
@@ -95,6 +109,8 @@ function exportSize(
 }
 
 export async function exportProject(project: Project, opts: ExportFrameOpts): Promise<Blob> {
+  const exportFps = resolveExportFps(opts.fps);
+  console.log("[Export] frame rate", exportFps, "fps");
   // Signal preview to pause its own prepareFrame — they share the global CanvasSink pump.
   // Also drives decode.ts's sequential exportIterator path that avoids the avc1
   // seek-storm at tail (130ms per seek) seen on Linux mp4. The flag was added in
@@ -224,7 +240,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         }
       },
     });
-    output.addVideoTrack(videoSource, { frameRate: EXPORT_FPS });
+    output.addVideoTrack(videoSource, { frameRate: exportFps });
 
     // Audio is optional: a screen recording may carry no track at all.
     let audioSource: AudioBufferSource | null = null;
@@ -376,7 +392,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
     await output.start();
 
     const totalTimeline = projectDuration(project);
-    const frameDuration = 1 / EXPORT_FPS;
+    const frameDuration = 1 / exportFps;
 
     try {
       // Temporal mapping: renderFrame resolves the active segment from timeline
@@ -412,9 +428,9 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           }
         }
         const dur = segmentDuration(seg);
-        const totalFrames = Math.max(1, Math.ceil(dur * EXPORT_FPS));
+        const totalFrames = Math.max(1, Math.ceil(dur * exportFps));
         for (let i = 0; i < totalFrames; i++) {
-          const tEff = i / EXPORT_FPS;
+          const tEff = i / exportFps;
           const srcT = seg.srcStart + tEff * seg.speed;
           if (i % 60 === 0) console.log("[Export] frame", i, "/", totalFrames, "seg", seg.id, "tEff", tEff.toFixed(2), "srcT", srcT.toFixed(2));
           const fcStartT = seg.facecam?.startT ?? 0;
@@ -424,7 +440,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
           // Awaited so encoder backpressure actually throttles us rather than
           // queueing the whole clip into memory.
           await videoSource.add(timelineCursor + tEff, frameDuration);
-          if (i % EXPORT_FPS === 0) emitProgress(totalTimeline > 0 ? (timelineCursor + tEff) / totalTimeline : i / totalFrames);
+          if (i % Math.round(exportFps) === 0) emitProgress(totalTimeline > 0 ? (timelineCursor + tEff) / totalTimeline : i / totalFrames);
         }
         timelineCursor += dur;
       }
@@ -459,7 +475,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
 }
 
 /** Exposed for unit tests; not part of the engine's public surface. */
-export const __test = { exportSize };
+export const __test = { exportSize, resolveExportFps };
 
 /** The clip's audio, or null when it has none we can decode. */
 async function getExportAudio(project: Project): Promise<AudioBuffer | null> {

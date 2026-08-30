@@ -8,7 +8,8 @@
 import { useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useVideoExport } from "@/lib/useVideoExport";
-import type { ExportOpts } from "@panoptik/schema";
+import type { ExportOpts , ExportFps } from "@panoptik/schema";
+import { DEFAULT_EXPORT_FPS, EXPORT_FPS_OPTIONS } from "@panoptik/schema";
 
 const RESOLUTIONS: ExportOpts["resolution"][] = ["720p", "1080p", "4k"];
 const FORMATS: ExportOpts["format"][] = ["mp4", "webm"];
@@ -17,8 +18,9 @@ export function ExportPanel() {
   const project = useProjectStore((s) => s.project);
   const [resolution, setResolution] = useState<ExportOpts["resolution"]>("1080p");
   const [format, setFormat] = useState<ExportOpts["format"]>("mp4");
+  const [fps, setFps] = useState<ExportFps>(DEFAULT_EXPORT_FPS);
   const { progress, error, result, run, isExporting } = useVideoExport();
-  const handleExport = () => run({ format, resolution });
+  const handleExport = () => run({ format, resolution, fps });
 
   if (!project) {
     return (
@@ -64,6 +66,35 @@ export function ExportPanel() {
           </button>
         ))}
       </div>
+
+      <p className="pk-label mb-1.5">Frame rate</p>
+      <div className="mb-1.5 grid grid-cols-3 gap-1.5">
+        {EXPORT_FPS_OPTIONS.map((f) => (
+          <button
+            key={f}
+            onClick={() => setFps(f)}
+            disabled={busy}
+            className="pk-seg"
+            data-active={fps === f}
+            title={
+              f === DEFAULT_EXPORT_FPS
+                ? "Standard"
+                : f < DEFAULT_EXPORT_FPS
+                  ? "Fewer frames — smaller file"
+                  : "Smoother, larger file"
+            }
+          >
+            {f} fps
+          </button>
+        ))}
+      </div>
+      <p className="pk-help mb-3" style={{ fontSize: 11 }}>
+        {fps < DEFAULT_EXPORT_FPS
+          ? "Fewer frames per second, so a smaller file. Fine for screen demos."
+          : fps > DEFAULT_EXPORT_FPS
+            ? "Smoother motion, larger file. Only helps if the recording itself is that fast."
+            : "Standard for screen recordings."}
+      </p>
 
       <button
         onClick={handleExport}

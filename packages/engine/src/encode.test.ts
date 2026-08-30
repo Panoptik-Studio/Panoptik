@@ -102,3 +102,36 @@ describe("per-segment export", () => {
     expect(out.sampleRate).toBe(48000);
   });
 });
+
+describe("export frame rate", () => {
+  const { resolveExportFps } = __test;
+
+  it("defaults to 30 when nothing is asked for", () => {
+    // An export with no explicit choice must produce the file it always has.
+    expect(resolveExportFps(undefined)).toBe(30);
+  });
+
+  it("honours each offered rate", () => {
+    expect(resolveExportFps(24)).toBe(24);
+    expect(resolveExportFps(30)).toBe(30);
+    expect(resolveExportFps(60)).toBe(60);
+  });
+
+  it("falls back rather than trusting an arbitrary number", () => {
+    // fps drives the frame loop and the encoder config; a nonsense value would
+    // either stall the export or write an unplayable file.
+    for (const bad of [0, -30, 1000, 12.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(resolveExportFps(bad)).toBe(30);
+    }
+  });
+
+  it("a lower rate means proportionally fewer frames for the same clip", () => {
+    // This is where the smaller file comes from: the loop steps by 1/fps, so
+    // 24fps encodes four fifths of the frames 30fps does.
+    const seconds = 10;
+    const framesAt = (fps: number) => Math.max(1, Math.ceil(seconds * resolveExportFps(fps)));
+    expect(framesAt(24)).toBe(240);
+    expect(framesAt(30)).toBe(300);
+    expect(framesAt(60)).toBe(600);
+  });
+});
