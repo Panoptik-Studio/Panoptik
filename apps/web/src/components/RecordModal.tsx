@@ -67,8 +67,10 @@ async function startRecording(opts: {
   shape: RecordingShape;
   cameraDeviceId?: string;
   microphoneDeviceId?: string;
+  systemAudioDeviceId?: string;
   cameraEnabled: boolean;
   microphoneEnabled: boolean;
+  systemAudioEnabled?: boolean;
   cameraStream?: MediaStream | null;
 }): Promise<RecordingHandles> {
   return engineStartRecording(opts);
@@ -139,10 +141,32 @@ export function RecordModal() {
   // Device prefs
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [micEnabled, setMicEnabled] = useState(true);
+  const [systemAudioEnabled, setSystemAudioEnabled] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const v = localStorage.getItem("panoptik:systemAudio");
+      if (v !== null) return v === "true";
+    }
+    return true;
+  });
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
+  const [systemAudios, setSystemAudios] = useState<MediaDeviceInfo[]>([]);
   const [selectedCam, setSelectedCam] = useState<string>("");
   const [selectedMic, setSelectedMic] = useState<string>("");
+  const [selectedSystemAudio, setSelectedSystemAudio] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("panoptik:systemAudioDevice") || "";
+    }
+    return "";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("panoptik:systemAudio", String(systemAudioEnabled));
+  }, [systemAudioEnabled]);
+
+  useEffect(() => {
+    if (selectedSystemAudio) localStorage.setItem("panoptik:systemAudioDevice", selectedSystemAudio);
+  }, [selectedSystemAudio]);
 
   // Whether the camera is needed at all, and whether it also gets a corner slot
   // in the composed frame. Declared before the effects that depend on them.
@@ -238,19 +262,37 @@ export function RecordModal() {
     let cancelled = false;
     async function enumerate() {
       try {
-        // Need permission to get labels — request a short-lived stream
+        // Need permission to get labels — request audio permission if not yet granted
         try {
-          const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
           tmp.getTracks().forEach((t) => t.stop());
         } catch { /* ignore */ }
         const devices = await navigator.mediaDevices.enumerateDevices();
         if (cancelled) return;
         const cams = devices.filter((d) => d.kind === "videoinput");
-        const ms = devices.filter((d) => d.kind === "audioinput");
+        const allAudio = devices.filter((d) => d.kind === "audioinput");
+
+        // Separate physical voice microphones from system monitor / loopback sources
+        const voiceInputs = allAudio.filter((d) => !/monitor|loopback/i.test(d.label));
+        const monitorInputs = allAudio.filter((d) => /monitor|loopback|stereo mix/i.test(d.label));
+
         setCameras(cams);
-        setMics(ms);
+        setMics(voiceInputs.length ? voiceInputs : allAudio);
+        setSystemAudios(monitorInputs);
+
         if (cams.length && !selectedCam) setSelectedCam(cams[0]!.deviceId);
-        if (ms.length && !selectedMic) setSelectedMic(ms[0]!.deviceId);
+        if (voiceInputs.length && (!selectedMic || !voiceInputs.some(v => v.deviceId === selectedMic))) {
+          setSelectedMic(voiceInputs[0]!.deviceId);
+        } else if (allAudio.length && !selectedMic) {
+          setSelectedMic(allAudio[0]!.deviceId);
+        }
+        if (monitorInputs.length) {
+          if (!selectedSystemAudio || selectedSystemAudio === "none" || !monitorInputs.some(m => m.deviceId === selectedSystemAudio)) {
+            setSelectedSystemAudio(monitorInputs[0]!.deviceId);
+          }
+        } else {
+          setSelectedSystemAudio("none");
+        }
       } catch { /* ignore */ }
     }
     enumerate();
@@ -260,7 +302,7 @@ export function RecordModal() {
       cancelled = true;
       navigator.mediaDevices.removeEventListener?.("devicechange", onChange);
     };
-  }, [isOpen, selectedCam, selectedMic]);
+  }, [isOpen, selectedCam, selectedMic, selectedSystemAudio]);
 
   // ── Explicit mic permission prompt (so the browser shows the Allow dialog) ──
   useEffect(() => {
@@ -427,8 +469,10 @@ export function RecordModal() {
         shape,
         cameraDeviceId: selectedCam || undefined,
         microphoneDeviceId: selectedMic || undefined,
+        systemAudioDeviceId: selectedSystemAudio || undefined,
         cameraEnabled: wantsCameraSlot,
         microphoneEnabled: micEnabled,
+        systemAudioEnabled: systemAudioEnabled,
         cameraStream,
       });
       recordingOwnsCameraRef.current = wantsCameraSlot;
@@ -918,6 +962,45 @@ export function RecordModal() {
                   ))}
                 </select>
               </div>
+
+              {/* System Audio (Desktop / Apps) */}
+              {layout !== "cameraOnly" && (
+                <div className="flex items-center gap-1.5 rounded-[var(--radius-pk-btn)] border border-pk-hairline bg-pk-canvas p-1">
+                  <button
+                    onClick={() => setSystemAudioEnabled((v) => !v)}
+                    className="pk-icon-btn h-7 w-7"
+                    data-active={systemAudioEnabled}
+                    title={systemAudioEnabled ? "System Audio (Desktop & Apps) on" : "System Audio muted"}
+                    aria-pressed={systemAudioEnabled}
+                  >
+                    {systemAudioEnabled ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
+                    )}
+                  </button>
+                  <select
+                    value={selectedSystemAudio}
+                    onChange={(e) => setSelectedSystemAudio(e.target.value)}
+                    disabled={!systemAudioEnabled || systemAudios.length === 0}
+                    className="pk-select max-w-[170px] border-0 bg-transparent text-xs"
+                    aria-label="System Audio device"
+                  >
+                    {systemAudios.length === 0 ? (
+                      <option value="none">No monitor source</option>
+                    ) : (
+                      <>
+                        {systemAudios.map((m) => (
+                          <option key={m.deviceId} value={m.deviceId}>
+                            {m.label.replace(/^Monitor of\s+/i, "Desktop: ") || `Monitor ${m.deviceId.slice(0, 4)}`}
+                          </option>
+                        ))}
+                        <option value="none">Mute Desktop Sound</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+              )}
 
               {/* Shape */}
               <div className="hidden items-center gap-1.5 rounded-[var(--radius-pk-btn)] border border-pk-hairline bg-pk-canvas p-1 sm:flex">

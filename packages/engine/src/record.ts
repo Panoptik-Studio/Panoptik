@@ -33,8 +33,10 @@ export type StartRecordingOpts = {
   shape?: RecordingShape;
   cameraDeviceId?: string;
   microphoneDeviceId?: string;
+  systemAudioDeviceId?: string;
   cameraEnabled?: boolean;
   microphoneEnabled?: boolean;
+  systemAudioEnabled?: boolean;
   /**
    * An already-open camera stream to record from. Opening a second stream to
    * the same physical camera makes the device renegotiate, which drops frames
@@ -237,6 +239,32 @@ export async function openMicrophoneTrack(deviceId?: string): Promise<MediaStrea
   return null;
 }
 
+/**
+ * Opens a system desktop audio monitor / loopback track with zero DSP filtering.
+ * CRITICAL: Must ONLY open a verified monitor / loopback input device.
+ * Never opens the default microphone if no monitor device is found.
+ */
+export async function openSystemAudioTrack(deviceId?: string): Promise<MediaStreamTrack | null> {
+  if (!deviceId || deviceId === "none") return null;
+
+  const audio: MediaTrackConstraints = {
+    deviceId: { exact: deviceId },
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    channelCount: 2,
+  };
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+    const track = s.getAudioTracks()[0];
+    if (track) return track;
+    s.getTracks().forEach((t) => t.stop());
+  } catch (err) {
+    console.warn("[Record] Failed to open system audio monitor device", err);
+  }
+  return null;
+}
+
 /** Stop a recorder and resolve once its last chunk has been delivered. */
 function flushRecorder(rec: MediaRecorder | null): Promise<void> {
   if (!rec || rec.state === "inactive") return Promise.resolve();
@@ -261,8 +289,10 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     shape = "circle",
     cameraDeviceId,
     microphoneDeviceId,
+    systemAudioDeviceId,
     cameraEnabled = true,
     microphoneEnabled = true,
+    systemAudioEnabled = true,
   } = opts;
 
   let screenStream: MediaStream | null = null;
@@ -292,6 +322,28 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
       selfBrowserSurface: "exclude",
     } as DisplayMediaStreamOptions);
     screenStream.getTracks().forEach((t) => ownedTracks.add(t));
+
+    // Check if getDisplayMedia returned an audio track natively (e.g. Chrome tab share)
+    const existingAudio = screenStream.getAudioTracks()[0];
+
+    // If system audio monitor is requested or needed when getDisplayMedia has no audio (e.g. Linux full screen/window)
+    if (systemAudioEnabled) {
+      if (systemAudioDeviceId || !existingAudio) {
+        const sysTrack = await openSystemAudioTrack(systemAudioDeviceId);
+        if (sysTrack) {
+          // If a custom monitor device was explicitly selected, prefer it over default tab audio
+          if (existingAudio && systemAudioDeviceId) {
+            screenStream.removeTrack(existingAudio);
+            existingAudio.stop();
+            ownedTracks.delete(existingAudio);
+          }
+          screenStream.addTrack(sysTrack);
+          ownedTracks.add(sysTrack);
+          console.log("[Record] Attached system audio monitor track to screen stream");
+        }
+      }
+    }
+
     // If user cancelled screen share, getDisplayMedia will have thrown already.
     // Auto-stop if track ends (user clicks browser "Stop sharing").
     screenStream.getVideoTracks()[0]?.addEventListener("ended", () => {
