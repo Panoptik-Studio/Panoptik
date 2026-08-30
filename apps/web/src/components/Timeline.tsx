@@ -28,7 +28,68 @@ import {
   TEXT_ROW_GAP,
   type PackedTextOverlay,
 } from "@/lib/timelineTextTracks";
-import type { TextOverlay, ZoomPoint } from "@panoptik/schema";
+import type { TextOverlay, VideoTransition, ZoomPoint } from "@panoptik/schema";
+
+export const VIDEO_TRANSITION_ICONS: Record<string, React.ReactNode> = {
+  cut: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <line x1="20" y1="4" x2="8.12" y2="15.88" />
+      <line x1="14.47" y1="14.48" x2="20" y2="20" />
+      <line x1="8.12" y1="8.12" x2="12" y2="12" />
+    </svg>
+  ),
+  fade: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
+      <circle cx="12" cy="12" r="4" fill="currentColor" fillOpacity="0.4" />
+    </svg>
+  ),
+  dipToBlack: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <circle cx="12" cy="12" r="4" fill="currentColor" />
+    </svg>
+  ),
+  "slide-left": (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="11 17 6 12 11 7" />
+      <polyline points="18 17 13 12 18 7" />
+    </svg>
+  ),
+  "slide-right": (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="13 17 18 12 13 7" />
+      <polyline points="6 17 11 12 6 7" />
+    </svg>
+  ),
+  "zoom-in": (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      <line x1="11" y1="8" x2="11" y2="14" />
+      <line x1="8" y1="11" x2="14" y2="11" />
+    </svg>
+  ),
+  wipe: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2" />
+      <polyline points="8 10 12 12 8 14" fill="currentColor" />
+    </svg>
+  ),
+};
+
+export const VIDEO_TRANSITION_OPTIONS = [
+  { id: "cut", name: "Instant Cut", desc: "Standard straight cut" },
+  { id: "fade", name: "Smooth Fade", desc: "Crossfade into incoming clip" },
+  { id: "dipToBlack", name: "Dip to Black", desc: "Fades down through black" },
+  { id: "slide-left", name: "Slide Left", desc: "Slides in from right side" },
+  { id: "slide-right", name: "Slide Right", desc: "Slides in from left side" },
+  { id: "zoom-in", name: "Zoom In Pop", desc: "Dynamic scale-in punch" },
+  { id: "wipe", name: "Horizontal Wipe", desc: "Clean left-to-right wipe" },
+] as const;
 
 const RULER_HEIGHT = 26;
 const VIDEO_TRACK_Y = 30;
@@ -136,7 +197,13 @@ function fmtTime(t: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${ms}`;
 }
 
-export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
+export function Timeline({
+  onSelectText,
+  onSelectAudio,
+}: {
+  onSelectText?: () => void;
+  onSelectAudio?: () => void;
+} = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -168,6 +235,7 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
   const [draggingSegment, setDraggingSegment] = useState<{ id: string; fromIndex: number; startX: number; groupStart: number; groupEnd: number; groupSize: number } | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [transitionPopover, setTransitionPopover] = useState<{
+    kind: "video" | "facecam";
     x: number;
     y: number;
     targetSegId: string;
@@ -1106,12 +1174,13 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
 
   const handleAudioTrackDown = useCallback((e: React.PointerEvent, track: { id: string; startT: number }) => {
     e.stopPropagation();
+    onSelectAudio?.();
     if (!scrollRef.current) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     const rect = scrollRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left + scrollRef.current.scrollLeft;
     setDraggingAudio({ id: track.id, grabOffset: xToTime(x) - track.startT });
-  }, [xToTime]);
+  }, [onSelectAudio, xToTime]);
 
   const handleTextTrackDown = useCallback(
     (
@@ -1245,6 +1314,18 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
         (e.target as HTMLElement)?.tagName !== "TEXTAREA"
       ) {
         const state = useProjectStore.getState();
+        if (state.selectedZoomId) {
+          e.preventDefault();
+          state.removeZoomPoint(state.selectedZoomId);
+          state.setSelectedZoom(null);
+          return;
+        }
+        if (state.selectedTextOverlayId) {
+          e.preventDefault();
+          state.removeTextOverlay(state.selectedTextOverlayId);
+          state.setSelectedTextOverlay(null);
+          return;
+        }
         if (
           state.selectedSegmentId &&
           (state.project?.segments.length ?? 0) > 1 &&
@@ -1768,15 +1849,59 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
             return (
               <div
                 key={`audio-hit-${track.id}`}
-                className="absolute z-10 cursor-grab active:cursor-grabbing"
+                className="absolute z-10 cursor-pointer active:cursor-grabbing"
                 style={{ top: dynamicAudioTrackY, left, width, height: AUDIO_LANE_HEIGHT }}
                 onPointerDown={(e) => handleAudioTrackDown(e, track)}
-                title={`${track.name ?? track.kind} — drag to move`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectAudio?.();
+                }}
+                title={`${track.name ?? track.kind} — click to open Audio settings, drag to move`}
               />
             );
           })}
 
-          {/* Facecam Transition Interactive Nodes in between clips */}
+          {/* Screen Video Transition Interactive Nodes on Video Track */}
+          {(() => {
+            let trAcc = 0;
+            return project.segments.slice(0, -1).map((seg, i) => {
+              const nextSeg = project.segments[i + 1]!;
+              trAcc += segmentDuration(seg);
+              const splitX = timeToX(trAcc);
+              const transType = nextSeg.transition ?? "cut";
+
+              return (
+                <button
+                  key={`video-trans-pill-${seg.id}-${nextSeg.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    selectSegment(nextSeg.id, false);
+                    setTransitionPopover({
+                      kind: "video",
+                      x: Math.min(canvasW - 240, Math.max(10, splitX - 110)),
+                      y: VIDEO_TRACK_Y,
+                      targetSegId: nextSeg.id,
+                      fromSegIdx: i + 1,
+                      toSegIdx: i + 2,
+                    });
+                  }}
+                  title={`Screen Video Transition: ${transType} (${(nextSeg.transitionDuration ?? 0.45).toFixed(2)}s). Click to customize.`}
+                  className={`absolute z-20 flex h-[20px] w-[24px] -translate-x-1/2 items-center justify-center rounded-md border shadow-sm transition-all cursor-pointer ${
+                    transType !== "cut"
+                      ? "border-[#0070f3] bg-[#0070f3] text-white font-bold hover:bg-[#0060df] hover:scale-110 active:scale-95 ring-2 ring-[#0070f3]/20"
+                      : "border-[#cbd5e1] bg-white text-[#475569] hover:border-[#0070f3] hover:text-[#0070f3] hover:scale-110 active:scale-95"
+                  }`}
+                  style={{ left: splitX, top: VIDEO_TRACK_Y + (VIDEO_TRACK_HEIGHT - 20) / 2 }}
+                >
+                  <span className="flex items-center justify-center scale-90">
+                    {VIDEO_TRANSITION_ICONS[transType] ?? VIDEO_TRANSITION_ICONS.cut}
+                  </span>
+                </button>
+              );
+            });
+          })()}
+
+          {/* Facecam Transition Interactive Nodes on Facecam Track */}
           {(() => {
             let trAcc = 0;
             return project.segments.slice(0, -1).map((seg, i) => {
@@ -1792,7 +1917,8 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
                     e.stopPropagation();
                     selectSegment(nextSeg.id, false);
                     setTransitionPopover({
-                      x: Math.min(canvasW - 220, Math.max(10, splitX - 100)),
+                      kind: "facecam",
+                      x: Math.min(canvasW - 240, Math.max(10, splitX - 110)),
                       y: FACECAM_TRACK_Y,
                       targetSegId: nextSeg.id,
                       fromSegIdx: i + 1,
@@ -1811,14 +1937,17 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
             });
           })()}
 
-          {/* Inline Facecam Transition Popover */}
+          {/* Inline Transition Popover (Video or Facecam) */}
           {transitionPopover && (
             <div
-              id="facecam-transition-popover"
+              id="timeline-transition-popover"
               className="absolute z-40 w-[240px] rounded-2xl border bg-white p-3 shadow-vercel-4 animate-in fade-in zoom-in-95 duration-100"
               style={{
                 left: transitionPopover.x,
-                top: Math.max(10, FACECAM_TRACK_Y - 155),
+                top:
+                  transitionPopover.kind === "video"
+                    ? VIDEO_TRACK_Y + VIDEO_TRACK_HEIGHT + 6
+                    : Math.max(10, FACECAM_TRACK_Y - 155),
                 borderColor: "#ebebeb",
                 boxShadow: "0 12px 36px rgba(0,0,0,0.18)",
               }}
@@ -1830,7 +1959,7 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
               <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs font-bold text-[#111]">
-                    Facecam Transition
+                    {transitionPopover.kind === "video" ? "Video Transition" : "Facecam Transition"}
                   </span>
                   <span className="rounded bg-[#f0f7ff] px-1.5 py-0.2 text-[10px] font-semibold text-[#0070f3]">
                     Seg {transitionPopover.fromSegIdx} ➔ {transitionPopover.toSegIdx}
@@ -1844,57 +1973,102 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
                 </button>
               </div>
 
-              <div className="space-y-1">
-                {[
-                  { id: "smooth", name: "Smooth Float" },
-                  { id: "spring", name: "Spring Pop" },
-                  { id: "fade", name: "Crossfade" },
-                  { id: "slide", name: "Corner Slide" },
-                  { id: "cut", name: "Instant Cut" },
-                ].map((t) => {
-                  const targetSeg = project.segments.find((s) => s.id === transitionPopover.targetSegId);
-                  const currentType = targetSeg?.facecam.transition ?? "smooth";
-                  const active = currentType === t.id;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => {
-                        updateSegment(transitionPopover.targetSegId, {
-                          facecam: {
-                            ...(targetSeg?.facecam ?? { x: 0.8, y: 0.8, size: 0.22, src: null }),
-                            transition: t.id as any,
-                          },
-                        });
-                      }}
-                      className={`flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs font-medium transition-all ${
-                        active ? "bg-[#f0f7ff] text-[#0070f3] font-semibold" : "text-[#333] hover:bg-[#f5f5f5]"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className={`flex h-5 w-5 items-center justify-center rounded ${
-                          active ? "text-[#0070f3]" : "text-[#666]"
-                        }`}>
-                          {TRANSITION_ICONS[t.id]}
+              {transitionPopover.kind === "video" ? (
+                /* Screen Video Transitions list */
+                <div className="space-y-1">
+                  {VIDEO_TRANSITION_OPTIONS.map((t) => {
+                    const targetSeg = project.segments.find((s) => s.id === transitionPopover.targetSegId);
+                    const currentType = targetSeg?.transition ?? "cut";
+                    const active = currentType === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => {
+                          updateSegment(transitionPopover.targetSegId, {
+                            transition: t.id as VideoTransition,
+                          });
+                        }}
+                        className={`flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs font-medium transition-all ${
+                          active ? "bg-[#f0f7ff] text-[#0070f3] font-semibold" : "text-[#333] hover:bg-[#f5f5f5]"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className={`flex h-5 w-5 items-center justify-center rounded ${
+                            active ? "text-[#0070f3]" : "text-[#666]"
+                          }`}>
+                            {VIDEO_TRANSITION_ICONS[t.id]}
+                          </span>
+                          <span>{t.name}</span>
                         </span>
-                        <span>{t.name}</span>
-                      </span>
-                      {active && <span className="text-[11px]">✓</span>}
-                    </button>
-                  );
-                })}
-              </div>
+                        {active && <span className="text-[11px]">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                /* Facecam Transitions list */
+                <div className="space-y-1">
+                  {[
+                    { id: "smooth", name: "Smooth Float" },
+                    { id: "spring", name: "Spring Pop" },
+                    { id: "fade", name: "Crossfade" },
+                    { id: "slide", name: "Corner Slide" },
+                    { id: "cut", name: "Instant Cut" },
+                  ].map((t) => {
+                    const targetSeg = project.segments.find((s) => s.id === transitionPopover.targetSegId);
+                    const currentType = targetSeg?.facecam.transition ?? "smooth";
+                    const active = currentType === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => {
+                          updateSegment(transitionPopover.targetSegId, {
+                            facecam: {
+                              ...(targetSeg?.facecam ?? { x: 0.8, y: 0.8, size: 0.22, src: null }),
+                              transition: t.id as any,
+                            },
+                          });
+                        }}
+                        className={`flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs font-medium transition-all ${
+                          active ? "bg-[#f0f7ff] text-[#0070f3] font-semibold" : "text-[#333] hover:bg-[#f5f5f5]"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className={`flex h-5 w-5 items-center justify-center rounded ${
+                            active ? "text-[#0070f3]" : "text-[#666]"
+                          }`}>
+                            {TRANSITION_ICONS[t.id]}
+                          </span>
+                          <span>{t.name}</span>
+                        </span>
+                        {active && <span className="text-[11px]">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Duration slider */}
               {(() => {
                 const targetSeg = project.segments.find((s) => s.id === transitionPopover.targetSegId);
-                const dur = targetSeg?.facecam.transitionDuration ?? 0.45;
+                const dur =
+                  transitionPopover.kind === "video"
+                    ? targetSeg?.transitionDuration ?? 0.45
+                    : targetSeg?.facecam.transitionDuration ?? 0.45;
                 const setDuration = (val: number) => {
-                  updateSegment(transitionPopover.targetSegId, {
-                    facecam: {
-                      ...(targetSeg?.facecam ?? { x: 0.8, y: 0.8, size: 0.22, src: null }),
-                      transitionDuration: Math.max(0.05, Math.min(1.0, Number(val.toFixed(2)))),
-                    },
-                  });
+                  const clampedDur = Math.max(0.05, Math.min(1.5, Number(val.toFixed(2))));
+                  if (transitionPopover.kind === "video") {
+                    updateSegment(transitionPopover.targetSegId, {
+                      transitionDuration: clampedDur,
+                    });
+                  } else {
+                    updateSegment(transitionPopover.targetSegId, {
+                      facecam: {
+                        ...(targetSeg?.facecam ?? { x: 0.8, y: 0.8, size: 0.22, src: null }),
+                        transitionDuration: clampedDur,
+                      },
+                    });
+                  }
                 };
 
                 return (
@@ -1906,7 +2080,7 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
                     <input
                       type="range"
                       min={0.1}
-                      max={1.0}
+                      max={1.5}
                       step={0.05}
                       value={dur}
                       onPointerDown={(e) => e.stopPropagation()}
@@ -1918,6 +2092,7 @@ export function Timeline({ onSelectText }: { onSelectText?: () => void } = {}) {
                         { label: "0.2s", val: 0.2 },
                         { label: "0.45s", val: 0.45 },
                         { label: "0.8s", val: 0.8 },
+                        { label: "1.2s", val: 1.2 },
                       ].map((p) => (
                         <button
                           key={p.val}

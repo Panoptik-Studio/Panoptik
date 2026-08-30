@@ -311,4 +311,55 @@ describe("mergeSavedProject", () => {
     expect(out.segments[1]!.facecam.transitionDuration).toBe(0.8);
     expect(out.segments[1]!.facecam.shape).toBe("circle");
   });
+
+  it("preserves video transition and transitionDuration on split segments", () => {
+    const base = fresh();
+    const out = mergeSavedProject(
+      base,
+      {
+        segments: [
+          { id: "s1", mediaId: "m1", srcStart: 0, srcEnd: 5, transition: "cut" },
+          { id: "s2", mediaId: "m1", srcStart: 5, srcEnd: 10, transition: "fade", transitionDuration: 0.75 },
+        ],
+      } as unknown as Partial<Project>,
+    );
+
+    expect(out.segments).toHaveLength(2);
+    expect(out.segments[0]!.transition).toBe("cut");
+    expect(out.segments[1]!.transition).toBe("fade");
+    expect(out.segments[1]!.transitionDuration).toBe(0.75);
+  });
+
+  it("preserves facecam borderWidth, borderColor, shadowBlur, and shadowColor", () => {
+    const base = fresh();
+    const out = mergeSavedProject(
+      base,
+      {
+        segments: [
+          {
+            id: "s1",
+            mediaId: "m1",
+            srcStart: 0,
+            srcEnd: 5,
+            facecam: {
+              src: "blob:cam",
+              x: 0.8,
+              y: 0.8,
+              size: 0.2,
+              borderWidth: 4,
+              borderColor: "#0070f3",
+              shadowBlur: 16,
+              shadowColor: "rgba(0,112,243,0.5)",
+            },
+          },
+        ],
+      } as unknown as Partial<Project>,
+      ["blob:cam"],
+    );
+
+    expect(out.segments[0]!.facecam.borderWidth).toBe(4);
+    expect(out.segments[0]!.facecam.borderColor).toBe("#0070f3");
+    expect(out.segments[0]!.facecam.shadowBlur).toBe(16);
+    expect(out.segments[0]!.facecam.shadowColor).toBe("rgba(0,112,243,0.5)");
+  });
 });

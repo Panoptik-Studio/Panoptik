@@ -71,7 +71,7 @@ export function Inspector() {
           Zoom settings
         </h3>
         <p className="pk-help">
-          Select a zoom — click its handle on the canvas, its diamond on the timeline, or a row above.
+          Select a zoom
         </p>
       </div>
     );

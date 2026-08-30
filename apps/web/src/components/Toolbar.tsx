@@ -53,9 +53,7 @@ export function Toolbar() {
           <img src="/favicon-logo.webp" alt="" width={48} height={48} className="h-12 w-12 object-contain" draggable={false} style={{ opacity: 0.96 }} />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/text-logo-dark.webp" alt="Panoptik" width={132} height={32} className="hidden h-8 w-auto object-contain sm:block" draggable={false} style={{ opacity: 0.96 }} />
-          <span className="pk-chip hidden sm:inline-flex">
-            Local
-          </span>
+
         </div>
         <span className="hidden text-sm font-light sm:block" style={{ color: "#ebebeb" }}>|</span>
         <button

@@ -10,6 +10,7 @@ import {
   IDENTITY,
   renderFrame,
   resolveInterpolatedFacecam,
+  resolveVideoTransition,
   setCurrentFrame } from "./render";
 import { migrateProject, type Facecam, type Segment, type ZoomPoint, type Project } from "@panoptik/schema";
 import { resolveSegment } from "./timeline";
@@ -761,3 +762,122 @@ describe("outerCornerRadius", () => {
     expect(outerCornerRadius({ outerRadius: 8, cornerRadius: 64 } as never, 1920, 1080)).toBeCloseTo(12, 5);
   });
 });
+
+describe("resolveVideoTransition", () => {
+  const transProject: Project = {
+    id: "p-trans",
+    media: [{ id: "m1", src: "blob:x", duration: 10, width: 1920, height: 1080 }],
+    clickLog: [],
+    segments: [
+      {
+        id: "s1",
+        mediaId: "m1",
+        srcStart: 0,
+        srcEnd: 5,
+        speed: 1,
+        stagePadding: 0,
+        aspectPreset: "source",
+        background: { kind: "solid", color: "#000" },
+        facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+        zoomPoints: [],
+        stagedZoomPoints: [],
+        textOverlays: [],
+        stagedTextOverlays: [],
+      },
+      {
+        id: "s2",
+        mediaId: "m1",
+        srcStart: 5,
+        srcEnd: 10,
+        speed: 1,
+        stagePadding: 0,
+        aspectPreset: "source",
+        background: { kind: "solid", color: "#000" },
+        facecam: { src: null, x: 0.8, y: 0.8, size: 0.2 },
+        transition: "fade",
+        transitionDuration: 0.6,
+        zoomPoints: [],
+        stagedZoomPoints: [],
+        textOverlays: [],
+        stagedTextOverlays: [],
+      },
+    ],
+  };
+  const seg2 = transProject.segments[1]!;
+
+  it("first segment never transitions from preceding clips", () => {
+    const res = resolveVideoTransition(transProject, 0.5, transProject.segments[0]!, 1920, 1080);
+    expect(res.active).toBe(false);
+    expect(res.opacity).toBe(1);
+  });
+
+  it("cut transition is inactive and default", () => {
+    const cutSeg: Segment = { ...seg2, transition: "cut" };
+    const res = resolveVideoTransition(transProject, 5.2, cutSeg, 1920, 1080);
+    expect(res.active).toBe(false);
+    expect(res.opacity).toBe(1);
+  });
+
+  it("fade transition ramps opacity smoothly from 0 to 1 over duration", () => {
+    // at t = 5.0 (start of seg 2)
+    const atStart = resolveVideoTransition(transProject, 5.0, seg2, 1920, 1080);
+    expect(atStart.active).toBe(true);
+    expect(atStart.opacity).toBeCloseTo(0, 1);
+
+    // at t = 5.3 (halfway through 0.6s duration)
+    const atMid = resolveVideoTransition(transProject, 5.3, seg2, 1920, 1080);
+    expect(atMid.active).toBe(true);
+    expect(atMid.opacity).toBeGreaterThan(0.3);
+    expect(atMid.opacity).toBeLessThan(0.7);
+
+    // at t = 5.6 (end of transition)
+    const atEnd = resolveVideoTransition(transProject, 5.6, seg2, 1920, 1080);
+    expect(atEnd.active).toBe(false);
+    expect(atEnd.opacity).toBe(1);
+  });
+
+  it("dipToBlack smoothly ramps dipAlpha down to 0", () => {
+    const dipSeg: Segment = { ...seg2, transition: "dipToBlack", transitionDuration: 0.5 };
+    const atStart = resolveVideoTransition(transProject, 5.0, dipSeg, 1920, 1080);
+    expect(atStart.active).toBe(true);
+    expect(atStart.dipAlpha).toBeCloseTo(1, 2);
+
+    const atMid = resolveVideoTransition(transProject, 5.25, dipSeg, 1920, 1080);
+    expect(atMid.dipAlpha).toBeCloseTo(0.5, 1);
+
+    const atEnd = resolveVideoTransition(transProject, 5.5, dipSeg, 1920, 1080);
+    expect(atEnd.active).toBe(false);
+    expect(atEnd.dipAlpha).toBe(0);
+  });
+
+  it("slide-left starts with positive X offset and slides into 0", () => {
+    const slideSeg: Segment = { ...seg2, transition: "slide-left", transitionDuration: 0.4 };
+    const atStart = resolveVideoTransition(transProject, 5.0, slideSeg, 1920, 1080);
+    expect(atStart.active).toBe(true);
+    expect(atStart.offsetX).toBeGreaterThan(500);
+
+    const atMid = resolveVideoTransition(transProject, 5.2, slideSeg, 1920, 1080);
+    expect(atMid.offsetX).toBeLessThan(atStart.offsetX);
+    expect(atMid.offsetX).toBeGreaterThan(0);
+  });
+
+  it("zoom-in scales from ~0.85 to 1.0", () => {
+    const zoomSeg: Segment = { ...seg2, transition: "zoom-in", transitionDuration: 0.5 };
+    const atStart = resolveVideoTransition(transProject, 5.0, zoomSeg, 1920, 1080);
+    expect(atStart.scale).toBeCloseTo(0.85, 1);
+
+    const atMid = resolveVideoTransition(transProject, 5.25, zoomSeg, 1920, 1080);
+    expect(atMid.scale).toBeGreaterThan(0.85);
+    expect(atMid.scale).toBeLessThan(1.0);
+  });
+
+  it("wipe reveals from 0 to 1", () => {
+    const wipeSeg: Segment = { ...seg2, transition: "wipe", transitionDuration: 0.5 };
+    const atStart = resolveVideoTransition(transProject, 5.0, wipeSeg, 1920, 1080);
+    expect(atStart.wipeProgress).toBeCloseTo(0, 2);
+
+    const atMid = resolveVideoTransition(transProject, 5.25, wipeSeg, 1920, 1080);
+    expect(atMid.wipeProgress).toBeCloseTo(0.5, 1);
+  });
+});
+

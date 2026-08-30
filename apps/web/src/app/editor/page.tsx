@@ -54,7 +54,10 @@ export default function EditorPage() {
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
             <PreviewCanvas />
           </div>
-          <Timeline onSelectText={() => setActiveTab("text")} />
+          <Timeline
+            onSelectText={() => setActiveTab("text")}
+            onSelectAudio={() => setActiveTab("audio")}
+          />
         </main>
 
         {/* Right — tabbed inspector */}

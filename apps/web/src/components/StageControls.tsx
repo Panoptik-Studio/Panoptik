@@ -8,7 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_CORNER_RADIUS_UNITS } from "@panoptik/engine";
 import { useProjectStore } from "@/stores/projectStore";
-import type { Background } from "@panoptik/schema";
+import type { Background, VideoTransition } from "@panoptik/schema";
+import { VIDEO_TRANSITION_ICONS, VIDEO_TRANSITION_OPTIONS } from "./Timeline";
 
 const THEMES: { name: string; bg: { kind: "solid" | "gradient"; color?: string; stops?: [string, string] }; swatch: string }[] = [
   { name: "Vercel", bg: { kind: "gradient", stops: ["#007cf0", "#7928ca"] }, swatch: "linear-gradient(135deg, #007cf0 0%, #7928ca 55%, #ff0080 100%)" },
@@ -219,6 +220,10 @@ export function StageControls() {
   const allSameAspect = selectedSegs.every((s) => s.aspectPreset === seg.aspectPreset);
   const allSameBg = selectedSegs.every((s) => isSameBackground(s.background, seg.background));
   const isImageBg = allSameBg && seg.background.kind === "image";
+  const allSameTransition = selectedSegs.every((s) => (s.transition ?? "cut") === (seg.transition ?? "cut"));
+  const allSameTransitionDuration = selectedSegs.every(
+    (s) => (s.transitionDuration ?? 0.45) === (seg.transitionDuration ?? 0.45),
+  );
   return (
     <div className="pk-panel">
       <div className="mb-3 flex items-center justify-between">
@@ -462,6 +467,93 @@ export function StageControls() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Clip Transition */}
+      <div className="mb-4">
+        <div className="mb-1.5 flex items-center justify-between">
+          <p className="pk-label">Transition In</p>
+          <div className="flex items-center gap-1.5">
+            {prevSeg && (
+              <MatchClipButton
+                direction="prev"
+                onClick={() =>
+                  updateSelectedSegments({
+                    transition: prevSeg.transition ?? "cut",
+                    transitionDuration: prevSeg.transitionDuration ?? 0.45,
+                  })
+                }
+                title={`Apply transition from Seg ${minIndex}`}
+                label="Match prev"
+                isSame={
+                  allSameTransition &&
+                  (seg.transition ?? "cut") === (prevSeg.transition ?? "cut")
+                }
+              />
+            )}
+            {nextSeg && (
+              <MatchClipButton
+                direction="next"
+                onClick={() =>
+                  updateSelectedSegments({
+                    transition: nextSeg.transition ?? "cut",
+                    transitionDuration: nextSeg.transitionDuration ?? 0.45,
+                  })
+                }
+                title={`Apply transition from Seg ${maxIndex + 2}`}
+                label="Match next"
+                isSame={
+                  allSameTransition &&
+                  (seg.transition ?? "cut") === (nextSeg.transition ?? "cut")
+                }
+              />
+            )}
+            <span
+              className="pk-value ml-1 capitalize"
+              style={{
+                color: allSameTransition && (seg.transition ?? "cut") !== "cut" ? "#0070f3" : "#888",
+              }}
+            >
+              {allSameTransition ? (seg.transition ?? "cut") : "Mixed"}
+            </span>
+          </div>
+        </div>
+        <div className="grid grid-cols-4 gap-1.5">
+          {VIDEO_TRANSITION_OPTIONS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => updateSelectedSegments({ transition: t.id as VideoTransition })}
+              className="pk-seg flex items-center justify-center gap-1.5"
+              data-active={allSameTransition && (seg.transition ?? "cut") === t.id}
+              title={t.desc}
+            >
+              <span className="scale-75">{VIDEO_TRANSITION_ICONS[t.id]}</span>
+              <span className="truncate">{t.name.split(" ")[0]}</span>
+            </button>
+          ))}
+        </div>
+        {(seg.transition ?? "cut") !== "cut" && (
+          <div className="mt-2 space-y-1">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-[#666]">Duration</span>
+              <span className="font-mono font-bold text-[#0070f3]">
+                {(seg.transitionDuration ?? 0.45).toFixed(2)}s
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0.1}
+              max={1.5}
+              step={0.05}
+              value={seg.transitionDuration ?? 0.45}
+              onChange={(e) =>
+                updateSelectedSegments({ transitionDuration: Number(e.target.value) })
+              }
+              className="pk-range w-full"
+              aria-label="Transition duration"
+            />
+          </div>
+        )}
       </div>
 
       {/* Aspect */}

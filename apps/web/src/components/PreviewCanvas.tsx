@@ -1018,9 +1018,36 @@ export function PreviewCanvas() {
         redo();
       }
       // Space → play/pause (when not typing in an input)
-      if (e.key === " " && !mod && !e.altKey && (e.target as HTMLElement).tagName !== "INPUT") {
+      if (e.key === " " && !mod && !e.altKey && (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
         e.preventDefault();
         useProjectStore.getState().togglePlay();
+      }
+      // Delete / Backspace key → delete selected zoom point or text overlay
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        !mod &&
+        (e.target as HTMLElement).tagName !== "INPUT" &&
+        (e.target as HTMLElement).tagName !== "TEXTAREA"
+      ) {
+        const st = useProjectStore.getState();
+        if (st.selectedZoomId) {
+          e.preventDefault();
+          st.removeZoomPoint(st.selectedZoomId);
+          st.setSelectedZoom(null);
+          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+          setToast("Zoom deleted");
+          toastTimerRef.current = setTimeout(() => setToast(null), 1500);
+          return;
+        }
+        if (st.selectedTextOverlayId) {
+          e.preventDefault();
+          st.removeTextOverlay(st.selectedTextOverlayId);
+          st.setSelectedTextOverlay(null);
+          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+          setToast("Text overlay deleted");
+          toastTimerRef.current = setTimeout(() => setToast(null), 1500);
+          return;
+        }
       }
       // M key during playback → mark moment
       if (
@@ -1028,7 +1055,8 @@ export function PreviewCanvas() {
         !mod &&
         !e.altKey &&
         !e.shiftKey &&
-        (e.target as HTMLElement).tagName !== "INPUT"
+        (e.target as HTMLElement).tagName !== "INPUT" &&
+        (e.target as HTMLElement).tagName !== "TEXTAREA"
       ) {
         const st = useProjectStore.getState();
         if (st.project && st.isPlaying) {

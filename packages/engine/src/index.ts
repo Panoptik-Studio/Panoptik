@@ -58,10 +58,11 @@ export {
   outerCornerRadius,
   DEFAULT_CORNER_RADIUS_UNITS,
   resolveInterpolatedFacecam,
+  resolveVideoTransition,
   ensureBackgroundImages,
   clearBackgroundImages,
 } from "./render";
-export type { Transform, Viewport, RenderOptions } from "./render";
+export type { Transform, Viewport, RenderOptions, ResolvedVideoTransition } from "./render";
 
 export { segmentDuration, projectDuration, resolveSegment, sourceToTimeline } from "./timeline";
 export { decodeViaAudioContext } from "./audio";

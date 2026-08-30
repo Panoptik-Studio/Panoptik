@@ -76,6 +76,10 @@ export type Facecam = {
   transitionDuration?: number;
   startT?: number;
   audioVolume?: number; // 0.0 - 2.0 (1.0 = 100%)
+  borderWidth?: number; // border stroke width in px (0 for none, 0-24)
+  borderColor?: string; // border color hex/rgba
+  shadowBlur?: number; // shadow/glow blur radius in px (0 for none, 0-48)
+  shadowColor?: string; // shadow/glow color rgba/hex
 }; // all normalized 0-1, shape for PiP
 
 /**
@@ -125,6 +129,15 @@ export type Media = {
   height: number;
 };
 
+export type VideoTransition =
+  | "cut"
+  | "fade"
+  | "dipToBlack"
+  | "slide-left"
+  | "slide-right"
+  | "zoom-in"
+  | "wipe";
+
 export type Segment = {
   id: string;
   /** Which clip in Project.media this segment cuts from. */
@@ -153,6 +166,10 @@ export type Segment = {
   aspectPreset: AspectPreset;
   background: Background;
   facecam: Facecam;
+  /** Video transition applied when entering this segment from previous one (split video). */
+  transition?: VideoTransition;
+  /** Duration of the video transition in seconds (default 0.45s). */
+  transitionDuration?: number;
   audioVolume?: number; // 0.0 - 2.0 (1.0 = 100%)
   zoomPoints: ZoomPoint[];
   stagedZoomPoints: ZoomPoint[];

@@ -710,12 +710,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     if (!state.project) return;
     let found = false;
     const segments = state.project.segments.map((seg) => {
-      const has = seg.zoomPoints.some((z) => z.id === id);
-      if (!has) return seg;
+      const inCommitted = seg.zoomPoints.some((z) => z.id === id);
+      const inStaged = seg.stagedZoomPoints.some((z) => z.id === id);
+      if (!inCommitted && !inStaged) return seg;
       found = true;
       return {
         ...seg,
         zoomPoints: seg.zoomPoints.filter((z) => z.id !== id),
+        stagedZoomPoints: seg.stagedZoomPoints.filter((z) => z.id !== id),
       };
     });
     if (!found) return;

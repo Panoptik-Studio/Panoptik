@@ -169,7 +169,10 @@ function isSameFacecam(fc1: Facecam, fc2: Facecam): boolean {
     Math.abs(fc1.size - fc2.size) < 0.01 &&
     Math.abs(fc1.x - fc2.x) < 0.01 &&
     Math.abs(fc1.y - fc2.y) < 0.01 &&
-    (fc1.shape ?? "square") === (fc2.shape ?? "square")
+    (fc1.shape ?? "square") === (fc2.shape ?? "square") &&
+    (fc1.borderWidth ?? 2) === (fc2.borderWidth ?? 2) &&
+    (fc1.borderColor ?? "rgba(255,255,255,0.85)") === (fc2.borderColor ?? "rgba(255,255,255,0.85)") &&
+    (fc1.shadowBlur ?? 10) === (fc2.shadowBlur ?? 10)
   );
 }
 
@@ -431,6 +434,10 @@ export function CameraControls() {
                         x: prevSeg.facecam.x,
                         y: prevSeg.facecam.y,
                         shape: prevSeg.facecam.shape,
+                        borderWidth: prevSeg.facecam.borderWidth,
+                        borderColor: prevSeg.facecam.borderColor,
+                        shadowBlur: prevSeg.facecam.shadowBlur,
+                        shadowColor: prevSeg.facecam.shadowColor,
                       })
                     }
                     title={`Match placement from Seg ${minIndex}`}
@@ -447,6 +454,10 @@ export function CameraControls() {
                         x: nextSeg.facecam.x,
                         y: nextSeg.facecam.y,
                         shape: nextSeg.facecam.shape,
+                        borderWidth: nextSeg.facecam.borderWidth,
+                        borderColor: nextSeg.facecam.borderColor,
+                        shadowBlur: nextSeg.facecam.shadowBlur,
+                        shadowColor: nextSeg.facecam.shadowColor,
                       })
                     }
                     title={`Match placement from Seg ${maxIndex + 2}`}
@@ -602,6 +613,147 @@ export function CameraControls() {
                 <span>Circle</span>
               </button>
             </div>
+          </div>
+
+          {/* Border Width */}
+          <div className="mb-4">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="pk-label">Border Width</span>
+              <span className="pk-value font-mono font-bold" style={{ color: "#0070f3" }}>
+                {(seg.facecam.borderWidth ?? 2)}px
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={12}
+                step={0.5}
+                value={seg.facecam.borderWidth ?? 2}
+                onChange={(e) => setFacecam({ borderWidth: Number(e.target.value) })}
+                className="pk-range flex-1"
+                aria-label="Border width"
+              />
+            </div>
+            <div className="mt-2 grid grid-cols-4 gap-1.5">
+              {[
+                { label: "None", val: 0 },
+                { label: "Thin", val: 2 },
+                { label: "Medium", val: 4 },
+                { label: "Thick", val: 6 },
+              ].map((p) => (
+                <button
+                  key={p.val}
+                  onClick={() => setFacecam({ borderWidth: p.val })}
+                  className="pk-seg"
+                  data-active={(seg.facecam.borderWidth ?? 2) === p.val}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Border Color */}
+          {(seg.facecam.borderWidth ?? 2) > 0 && (
+            <div className="mb-4">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="pk-label">Border Color</span>
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="h-3.5 w-3.5 rounded-full border border-black/10 shadow-sm"
+                    style={{ background: seg.facecam.borderColor ?? "rgba(255,255,255,0.85)" }}
+                  />
+                  <span className="pk-value font-mono text-[10px]" style={{ color: "#666" }}>
+                    {seg.facecam.borderColor ?? "#ffffff"}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {[
+                  { name: "White", color: "#ffffff" },
+                  { name: "Glass", color: "rgba(255,255,255,0.4)" },
+                  { name: "Blue", color: "#0070f3" },
+                  { name: "Emerald", color: "#10b981" },
+                  { name: "Amber", color: "#f5a623" },
+                  { name: "Pink", color: "#ff0080" },
+                  { name: "Dark", color: "#0f172a" },
+                ].map((c) => (
+                  <button
+                    key={c.name}
+                    onClick={() => setFacecam({ borderColor: c.color })}
+                    className="relative flex h-6 w-6 items-center justify-center rounded-full border shadow-sm transition-transform hover:scale-110"
+                    style={{
+                      background: c.color,
+                      borderColor: (seg.facecam.borderColor ?? "#ffffff") === c.color ? "#0070f3" : "rgba(0,0,0,0.15)",
+                      boxShadow: (seg.facecam.borderColor ?? "#ffffff") === c.color ? "0 0 0 2px #0070f3" : undefined,
+                    }}
+                    title={c.name}
+                  />
+                ))}
+                {/* Custom Color Input */}
+                <label className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border border-dashed border-[#888] bg-transparent text-[10px] text-[#666] hover:border-[#0070f3] hover:text-[#0070f3]">
+                  +
+                  <input
+                    type="color"
+                    value={
+                      seg.facecam.borderColor?.startsWith("#")
+                        ? seg.facecam.borderColor
+                        : "#ffffff"
+                    }
+                    onChange={(e) => setFacecam({ borderColor: e.target.value })}
+                    className="sr-only"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Shadow & Glow */}
+          <div className="mb-4">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="pk-label">Drop Shadow</span>
+              <span className="pk-value font-mono font-bold" style={{ color: "#0070f3" }}>
+                {(seg.facecam.shadowBlur ?? 10)}px
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {[
+                { label: "Off", blur: 0, color: "none" },
+                { label: "Soft", blur: 10, color: "rgba(0,0,0,0.3)" },
+                { label: "Deep", blur: 20, color: "rgba(0,0,0,0.5)" },
+                { label: "Glow", blur: 16, color: "rgba(0,112,243,0.5)" },
+              ].map((s) => {
+                const isActive =
+                  s.blur === 0
+                    ? (seg.facecam.shadowBlur ?? 10) === 0
+                    : (seg.facecam.shadowBlur ?? 10) === s.blur;
+                return (
+                  <button
+                    key={s.label}
+                    onClick={() => setFacecam({ shadowBlur: s.blur, shadowColor: s.color })}
+                    className="pk-seg"
+                    data-active={isActive}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+            {(seg.facecam.shadowBlur ?? 10) > 0 && (
+              <div className="mt-2">
+                <input
+                  type="range"
+                  min={2}
+                  max={36}
+                  step={1}
+                  value={seg.facecam.shadowBlur ?? 10}
+                  onChange={(e) => setFacecam({ shadowBlur: Number(e.target.value) })}
+                  className="pk-range w-full"
+                  aria-label="Shadow blur"
+                />
+              </div>
+            )}
           </div>
 
         </div>

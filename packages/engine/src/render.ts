@@ -11,6 +11,7 @@ import type {
   Facecam,
   Project,
   Segment,
+  VideoTransition,
   ZoomPoint,
 } from "@panoptik/schema";
 import { mediaForSegment, primaryMedia } from "@panoptik/schema";
@@ -248,12 +249,14 @@ export function renderFrame(
   // ── Layer 1: Background ──
   drawBackground(ctx, seg.background, w, h);
 
-  // ── Layer 2: Letterboxed frame with camera zoom (virtual camera, clamped, aspect-aware) ──
+  // ── Layer 2: Letterboxed frame with camera zoom & screen video transition ──
   // The clip this segment cuts from — with several clips on the timeline the
   // frame rect follows whichever one is on screen.
   const media = mediaForSegment(project, seg);
   const paddingPx = (seg.stagePadding ?? 0) * (h / 1080) * 1.5;
   const rect = frameRect(w, h, media, seg.aspectPreset, paddingPx);
+  const trans = resolveVideoTransition(project, timelineT, seg, w, h);
+
   if (currentFrame) {
     const camTransform =
       options?.cameraOverride ??
@@ -262,25 +265,56 @@ export function renderFrame(
         : getProjectCameraTransform(project, timelineT));
     const view = cameraViewport(rect, camTransform);
     ctx.save();
-    // Clip with rounded corners when padded, or standard rect
+
+    if (trans.active) {
+      ctx.globalAlpha = trans.opacity;
+    }
+
+    // Clip with rounded corners when padded, or standard rect (with horizontal wipe support)
     ctx.beginPath();
     const cornerRadius = frameCornerRadius(seg, rect, h);
+    const clipW = trans.active && trans.wipeProgress < 1 ? rect.w * trans.wipeProgress : rect.w;
     if (cornerRadius > 0 && typeof ctx.roundRect === "function") {
-      ctx.roundRect(rect.x, rect.y, rect.w, rect.h, cornerRadius);
+      ctx.roundRect(rect.x, rect.y, clipW, rect.h, cornerRadius);
     } else {
-      ctx.rect(rect.x, rect.y, rect.w, rect.h);
+      ctx.rect(rect.x, rect.y, clipW, rect.h);
     }
     ctx.clip();
+
+    if (trans.active) {
+      if (trans.offsetX !== 0 || trans.offsetY !== 0) {
+        ctx.translate(trans.offsetX, trans.offsetY);
+      }
+      if (trans.scale !== 1) {
+        ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+        ctx.scale(trans.scale, trans.scale);
+        ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+      }
+    }
+
     // Put the focal point at the centre of the frame, magnified by scale.
     ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
     ctx.scale(view.scale, view.scale);
     ctx.translate(-(rect.x + view.cx), -(rect.y + view.cy));
     ctx.drawImage(currentFrame, rect.x, rect.y, rect.w, rect.h);
     ctx.restore();
+
+    if (trans.active && trans.dipAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = trans.dipAlpha;
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
   } else {
     // No decoded frame yet — draw a dark placeholder inside the frame rect
+    ctx.save();
+    if (trans.active) {
+      ctx.globalAlpha = trans.opacity;
+    }
     ctx.fillStyle = "#000";
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.restore();
   }
 
   // ── Layer 3: Facecam PiP (screen space, smoothly animated across segment transitions) ──
@@ -310,6 +344,107 @@ export function renderFrame(
     ctx.fillRect(0, 0, w, h);
     ctx.restore();
   }
+}
+
+export type ResolvedVideoTransition = {
+  active: boolean;
+  type: VideoTransition;
+  progress: number;
+  eased: number;
+  opacity: number;
+  dipAlpha: number;
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+  wipeProgress: number;
+};
+
+export function resolveVideoTransition(
+  project: Project,
+  timelineT: number,
+  seg: Segment,
+  canvasW: number,
+  canvasH: number,
+): ResolvedVideoTransition {
+  const transitionType = seg.transition ?? "cut";
+  const defaultRes: ResolvedVideoTransition = {
+    active: false,
+    type: transitionType,
+    progress: 1,
+    eased: 1,
+    opacity: 1,
+    dipAlpha: 0,
+    offsetX: 0,
+    offsetY: 0,
+    scale: 1,
+    wipeProgress: 1,
+  };
+
+  if (transitionType === "cut") return defaultRes;
+
+  const segIdx = project.segments.findIndex((s) => s.id === seg.id);
+  if (segIdx <= 0) return defaultRes;
+
+  let segStartT = 0;
+  for (let i = 0; i < segIdx; i++) {
+    segStartT += segmentDuration(project.segments[i]!);
+  }
+
+  const dur = Math.max(0.05, seg.transitionDuration ?? 0.45);
+  const timeInSeg = timelineT - segStartT;
+
+  if (timeInSeg < 0 || timeInSeg >= dur) {
+    return defaultRes;
+  }
+
+  const tFrac = Math.max(0, Math.min(1, timeInSeg / dur));
+  const eased = easeInOutCubic(tFrac);
+  const easedOut = easeOutCubic(tFrac);
+
+  let opacity = 1;
+  let dipAlpha = 0;
+  let offsetX = 0;
+  let offsetY = 0;
+  let scale = 1;
+  let wipeProgress = 1;
+
+  switch (transitionType) {
+    case "fade":
+      opacity = eased;
+      break;
+    case "dipToBlack":
+      dipAlpha = 1 - eased;
+      opacity = eased;
+      break;
+    case "slide-left":
+      offsetX = (1 - easedOut) * canvasW * 0.75;
+      opacity = 0.4 + 0.6 * easedOut;
+      break;
+    case "slide-right":
+      offsetX = -(1 - easedOut) * canvasW * 0.75;
+      opacity = 0.4 + 0.6 * easedOut;
+      break;
+    case "zoom-in":
+      scale = 0.85 + 0.15 * easedOut;
+      opacity = 0.3 + 0.7 * easedOut;
+      break;
+    case "wipe":
+      wipeProgress = eased;
+      break;
+  }
+
+  return {
+    active: true,
+    type: transitionType,
+    progress: tFrac,
+    eased,
+    opacity: Math.max(0, Math.min(1, opacity)),
+    dipAlpha: Math.max(0, Math.min(1, dipAlpha)),
+    offsetX,
+    offsetY,
+    scale,
+    wipeProgress: Math.max(0, Math.min(1, wipeProgress)),
+  };
 }
 
 export function resolveInterpolatedFacecam(
@@ -934,9 +1069,27 @@ function drawFacecam(
     sy = (sh - sCropH) / 2;
   }
 
+  const scale = canvasH / 1080;
+  const shadowBlur = fc.shadowBlur ?? 10;
+  const shadowColor = fc.shadowColor ?? "rgba(0,0,0,0.3)";
+
+  // 1. Drop shadow / glow behind facecam PiP
+  if (shadowBlur > 0 && shadowColor && shadowColor !== "none" && shadowColor !== "transparent") {
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.shadowColor = shadowColor;
+    ctx.shadowBlur = shadowBlur * scale;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 3 * scale;
+    ctx.fillStyle = "rgba(0,0,0,1)";
+    buildPath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 2. Facecam video frame with morphed rounded-square / circle clipping
   ctx.save();
   ctx.globalAlpha = opacity;
-  // Smoothly morphed rounded rect / circle clip
   buildPath();
   ctx.clip();
   try {
@@ -946,12 +1099,18 @@ function drawFacecam(
   }
   ctx.restore();
 
-  // Subtle border — matches smoothly morphed clip shape
-  ctx.save();
-  ctx.globalAlpha = opacity;
-  ctx.strokeStyle = "rgba(255,255,255,0.18)";
-  ctx.lineWidth = 1.5;
-  buildPath();
-  ctx.stroke();
-  ctx.restore();
+  // 3. Crisp border stroke — matches morphed clip shape and scales with canvas
+  const borderWidth = fc.borderWidth ?? 2;
+  const borderColor = fc.borderColor ?? "rgba(255,255,255,0.85)";
+  const effectiveBorderW = borderWidth * scale;
+
+  if (effectiveBorderW > 0 && borderColor && borderColor !== "none" && borderColor !== "transparent") {
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = effectiveBorderW;
+    buildPath();
+    ctx.stroke();
+    ctx.restore();
+  }
 }

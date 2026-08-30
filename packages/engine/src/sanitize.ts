@@ -16,11 +16,21 @@ import type {
   Project,
   Segment,
   TextOverlay,
+  VideoTransition,
   ZoomPoint,
 } from "@panoptik/schema";
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const ASPECTS: AspectPreset[] = ["source", "16:9", "9:16", "1:1", "4:3"];
+const VALID_VIDEO_TRANSITIONS: VideoTransition[] = [
+  "cut",
+  "fade",
+  "dipToBlack",
+  "slide-left",
+  "slide-right",
+  "zoom-in",
+  "wipe",
+];
 const POSITIONS = ["top", "bottom", "center"] as const;
 
 /** Ceilings that keep a corrupt file from stalling the renderer. */
@@ -131,6 +141,18 @@ function facecam(v: unknown, fallback: Segment["facecam"]): Segment["facecam"] {
         ? num(fc.transitionDuration, fallback.transitionDuration ?? 0.6, 0.05, 5)
         : fallback.transitionDuration,
     audioVolume: num(fc.audioVolume, fallback.audioVolume ?? 1, 0, 2),
+    borderWidth:
+      typeof fc.borderWidth === "number" && Number.isFinite(fc.borderWidth)
+        ? num(fc.borderWidth, fallback.borderWidth ?? 1.5, 0, 24)
+        : fallback.borderWidth,
+    borderColor:
+      typeof fc.borderColor === "string" ? fc.borderColor.slice(0, 48) : fallback.borderColor,
+    shadowBlur:
+      typeof fc.shadowBlur === "number" && Number.isFinite(fc.shadowBlur)
+        ? num(fc.shadowBlur, fallback.shadowBlur ?? 0, 0, 48)
+        : fallback.shadowBlur,
+    shadowColor:
+      typeof fc.shadowColor === "string" ? fc.shadowColor.slice(0, 48) : fallback.shadowColor,
   };
 }
 
@@ -220,6 +242,15 @@ function sanitizeSegment(
     aspectPreset: aspectPreset(saved?.aspectPreset, base.aspectPreset),
     background: background(saved?.background, base.background, savedBackgroundImageSrc),
     facecam: facecam(saved?.facecam, { ...base.facecam, src: savedFacecamSrc }),
+    transition:
+      typeof saved?.transition === "string" &&
+      VALID_VIDEO_TRANSITIONS.includes(saved.transition as VideoTransition)
+        ? (saved.transition as VideoTransition)
+        : base.transition,
+    transitionDuration:
+      typeof saved?.transitionDuration === "number" && Number.isFinite(saved.transitionDuration)
+        ? num(saved.transitionDuration, base.transitionDuration ?? 0.45, 0.05, 5)
+        : base.transitionDuration,
     audioVolume: num(saved?.audioVolume, base.audioVolume ?? 1, 0, 2),
     zoomPoints: arr<unknown>(saved?.zoomPoints, MAX_ZOOMS)
       .map((z) => zoomPoint(z, lo, hi))
