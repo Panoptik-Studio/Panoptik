@@ -70,6 +70,7 @@ export type { RecordingHandles } from "./record";
 export { setFacecamBlob, setAudioBlob } from "./decode";
 export {
   saveProject,
+  renameProject,
   loadProject,
   loadProjectRecord,
   listProjects,

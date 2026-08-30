@@ -159,6 +159,8 @@ interface ProjectStore {
   selectAllSegments: () => void;
   /** Non-destructively divide the segment under timelineT into two. */
   splitAt: (timelineT: number) => void;
+  /** Name the entire project/video, or clear with "". */
+  setProjectName: (name: string) => void;
   /** Name a single clip, or clear its name with "". */
   setSegmentName: (segmentId: string, name: string) => void;
   /** Remove a segment from the timeline (when >1 segment exists). */
@@ -375,6 +377,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       selectedSegmentIds: allIds,
       selectedSegmentId: allIds[0] ?? null,
     });
+  },
+
+  setProjectName: (name) => {
+    const state = get();
+    if (!state.project) return;
+    const trimmed = name.trim().slice(0, 120);
+    const project = {
+      ...state.project,
+      name: trimmed || undefined,
+    };
+    pushHistoryAndSet(project, state, set);
   },
 
   setSegmentName: (segmentId, name) => {

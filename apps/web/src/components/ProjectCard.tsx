@@ -98,16 +98,24 @@ export function ProjectCard({
   summary,
   onOpen,
   onDelete,
+  onRename,
 }: {
   summary: ProjectSummary;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename?: (id: string, newName: string) => void;
 }) {
   const [poster, setPoster] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [nameInput, setNameInput] = useState(summary.name);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const posterUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setNameInput(summary.name);
+  }, [summary.name]);
 
   // Only fetch a thumbnail once the card is actually on screen.
   useEffect(() => {
@@ -217,16 +225,61 @@ export function ProjectCard({
       </div>
 
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p
-            className="pk-ui truncate text-[13.5px] font-medium text-pk-ink"
-            title={summary.name}
-          >
-            {summary.name}
-          </p>
-          <p className="pk-help mt-0.5">
-            {summary.width}×{summary.height} · {formatBytes(summary.bytes)} · {formatWhen(summary.updatedAt)}
-          </p>
+        <div className="min-w-0 flex-1">
+          {isRenaming ? (
+            <div className="flex items-center gap-1 pt-0.5">
+              <input
+                type="text"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const trimmed = nameInput.trim();
+                    if (trimmed && trimmed !== summary.name) onRename?.(summary.id, trimmed);
+                    setIsRenaming(false);
+                  } else if (e.key === "Escape") {
+                    setNameInput(summary.name);
+                    setIsRenaming(false);
+                  }
+                }}
+                className="pk-input text-xs py-0.5 px-1.5 w-full"
+                autoFocus
+              />
+              <button
+                onClick={() => {
+                  const trimmed = nameInput.trim();
+                  if (trimmed && trimmed !== summary.name) onRename?.(summary.id, trimmed);
+                  setIsRenaming(false);
+                }}
+                className="pk-btn pk-btn-primary pk-btn-sm h-6 px-2 text-[11px]"
+                title="Save name"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => {
+                  setNameInput(summary.name);
+                  setIsRenaming(false);
+                }}
+                className="pk-btn pk-btn-ghost pk-btn-sm h-6 px-1.5 text-[11px]"
+                title="Cancel"
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <>
+              <p
+                className="pk-ui truncate text-[13.5px] font-medium text-pk-ink"
+                title={summary.name}
+              >
+                {summary.name}
+              </p>
+              <p className="pk-help mt-0.5">
+                {summary.width}×{summary.height} · {formatBytes(summary.bytes)} · {formatWhen(summary.updatedAt)}
+              </p>
+            </>
+          )}
         </div>
 
         {confirming ? (
@@ -244,18 +297,33 @@ export function ProjectCard({
               Keep
             </button>
           </div>
-        ) : (
-          <button
-            className="pk-icon-btn shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
-            onClick={() => setConfirming(true)}
-            title={`Delete ${summary.name}`}
-            aria-label={`Delete ${summary.name}`}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
-              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
-            </svg>
-          </button>
-        )}
+        ) : !isRenaming ? (
+          <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+            <button
+              className="pk-icon-btn h-7 w-7 text-pk-faint hover:text-[#0070f3]"
+              onClick={() => {
+                setNameInput(summary.name);
+                setIsRenaming(true);
+              }}
+              title={`Rename ${summary.name}`}
+              aria-label={`Rename ${summary.name}`}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+              </svg>
+            </button>
+            <button
+              className="pk-icon-btn h-7 w-7 text-pk-faint hover:text-red-500"
+              onClick={() => setConfirming(true)}
+              title={`Delete ${summary.name}`}
+              aria-label={`Delete ${summary.name}`}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+                <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+              </svg>
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

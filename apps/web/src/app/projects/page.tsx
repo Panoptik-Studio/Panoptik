@@ -74,6 +74,25 @@ export default function ProjectsPage() {
     router.push("/editor");
   }, [router]);
 
+  const rename = useCallback(
+    async (id: string, newName: string) => {
+      const trimmed = newName.trim();
+      if (!trimmed) return;
+      // Optimistic update
+      setProjects((prev) =>
+        prev?.map((p) => (p.id === id ? { ...p, name: trimmed } : p)) ?? prev,
+      );
+      try {
+        const { renameProject } = await import("@panoptik/engine");
+        await renameProject(id, trimmed);
+      } catch (err) {
+        console.warn("[Projects] Failed to rename project", err);
+      }
+      refresh();
+    },
+    [refresh],
+  );
+
   const remove = useCallback(
     async (id: string) => {
       // Drop it from the screen first; re-listing OPFS is slow enough to feel
@@ -198,7 +217,7 @@ export default function ProjectsPage() {
             </button>
 
             {shown.map((p) => (
-              <ProjectCard key={p.id} summary={p} onOpen={open} onDelete={remove} />
+              <ProjectCard key={p.id} summary={p} onOpen={open} onDelete={remove} onRename={rename} />
             ))}
           </div>
         )}

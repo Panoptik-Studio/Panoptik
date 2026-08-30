@@ -60,8 +60,11 @@ export function Toolbar() {
         <button
           className="pk-btn pk-btn-ghost pk-btn-sm hidden sm:flex"
           style={{ borderColor: "transparent", background: "transparent", fontSize: 14 }}
+          title={project?.name || project?.id}
         >
-          <span className="max-w-[160px] truncate" style={{ fontWeight: 500 }}>{project ? `${project.id.slice(0, 8)}…` : "product-demo.ods"}</span>
+          <span className="max-w-[180px] truncate" style={{ fontWeight: 500 }}>
+            {project ? (project.name?.trim() || `${project.id.slice(0, 8)}…`) : "product-demo.ods"}
+          </span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-50"><path d="m6 9 6 6 6-6" /></svg>
         </button>
       </div>

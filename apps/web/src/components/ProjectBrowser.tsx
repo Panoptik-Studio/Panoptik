@@ -29,14 +29,21 @@ function formatBytes(n: number): string {
 export function ProjectBrowser() {
   const project = useProjectStore((s) => s.project);
   const status = useProjectStore((s) => s.persistStatus);
+  const setStoreProjectName = useProjectStore((s) => s.setProjectName);
   // Actions only. Restore and autosave run once at the editor level — calling
   // the full persistence hook here mounted a second autosave, which saw an
   // unfamiliar project id and re-copied the whole video to OPFS on every mount.
   const { removeProject, openProject } = useProjectActions();
 
+  const [isEditing, setIsEditing] = useState(false);
+  const [nameInput, setNameInput] = useState(project?.name ?? "");
   const [saved, setSaved] = useState<SavedProject[]>([]);
   const [usage, setUsage] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    setNameInput(project?.name ?? "");
+  }, [project?.name, project?.id]);
 
   const refresh = useCallback(async () => {
     try {
@@ -55,7 +62,7 @@ export function ProjectBrowser() {
 
   useEffect(() => {
     refresh();
-  }, [refresh, project?.id]);
+  }, [refresh, project?.id, project?.name]);
 
   // Re-list when a save completes, so a new project appears. Keyed on the
   // transition rather than on `status` itself: status cycles through saving and
@@ -96,22 +103,66 @@ export function ProjectBrowser() {
 
       {project ? (
         <>
-          <div
-            className="mb-3 rounded-[12px] border p-3"
-            style={{ borderColor: "#ebebeb", background: "#f8f8f8" }}
-          >
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="pk-ui truncate text-[13px] font-medium" style={{ color: "#1a1a1a" }}>
-                {project.segments[0]?.facecam.src ? "Recording" : "Imported clip"}
+          {/* Project Title Card / Inline Rename */}
+          {isEditing ? (
+            <div
+              className="mb-3 rounded-[12px] border p-2.5 shadow-sm"
+              style={{ borderColor: "#0070f3", background: "#ffffff" }}
+            >
+              <label className="pk-label text-[10px] text-pk-faint mb-1 block">Rename Project</label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      setStoreProjectName(nameInput);
+                      setIsEditing(false);
+                    } else if (e.key === "Escape") {
+                      setNameInput(project.name ?? "");
+                      setIsEditing(false);
+                    }
+                  }}
+                  placeholder="Enter project name…"
+                  className="pk-input flex-1 text-xs py-1"
+                  autoFocus
+                />
+                <button
+                  onClick={() => {
+                    setStoreProjectName(nameInput);
+                    setIsEditing(false);
+                  }}
+                  className="pk-btn pk-btn-primary pk-btn-sm h-7 px-2.5 text-xs"
+                  title="Save name"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => {
+                    setNameInput(project.name ?? "");
+                    setIsEditing(false);
+                  }}
+                  className="pk-btn pk-btn-ghost pk-btn-sm h-7 px-2 text-xs"
+                  title="Cancel"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="mb-3 rounded-[12px] border p-3"
+              style={{ borderColor: "#ebebeb", background: "#f8f8f8" }}
+            >
+              <span className="block truncate text-[13px] font-semibold text-[#1a1a1a]">
+                {project.name?.trim() || "Untitled project"}
               </span>
-              <span className="pk-value shrink-0">
-                {primaryMedia(project).width}×{primaryMedia(project).height}
+              <span className="block text-[11px] text-pk-faint mt-0.5">
+                {primaryMedia(project).width}×{primaryMedia(project).height} · {primaryMedia(project).duration.toFixed(1)}s
               </span>
             </div>
-            <p className="pk-help mt-1" style={{ fontSize: 11 }}>
-              {primaryMedia(project).duration.toFixed(1)}s · kept on this device · reopens automatically
-            </p>
-          </div>
+          )}
 
           {confirmDelete ? (
             <div className="flex gap-2">
@@ -123,18 +174,33 @@ export function ProjectBrowser() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="pk-btn pk-btn-danger pk-btn-sm w-full"
-              title="Remove this video and its edits from this device"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
-                <path d="M3 6h18" />
-                <path d="M8 6V4h8v2" />
-                <path d="M19 6l-1 14H6L5 6" />
-              </svg>
-              Remove video
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setNameInput(project.name ?? "");
+                  setIsEditing(true);
+                }}
+                className="pk-btn pk-btn-ghost pk-btn-sm flex-1"
+                title="Rename this project"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                </svg>
+                Rename
+              </button>
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="pk-btn pk-btn-danger pk-btn-sm flex-1"
+                title="Remove this video and its edits from this device"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                </svg>
+                Remove
+              </button>
+            </div>
           )}
         </>
       ) : (

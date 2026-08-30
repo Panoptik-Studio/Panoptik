@@ -112,7 +112,6 @@ export function StageControls() {
   const selectAllSegments = useProjectStore((s) => s.selectAllSegments);
   const setStagePadding = useProjectStore((s) => s.setStagePadding);
   const setCornerRadius = useProjectStore((s) => s.setCornerRadius);
-  const setOuterRadius = useProjectStore((s) => s.setOuterRadius);
   const stageBackground = useProjectStore((s) => s.stageBackground);
   const bgFileRef = useRef<HTMLInputElement | null>(null);
   const [bgImageError, setBgImageError] = useState<string | null>(null);
@@ -216,8 +215,6 @@ export function StageControls() {
     sg.cornerRadius ?? (sg.stagePadding > 0 ? DEFAULT_CORNER_RADIUS_UNITS : 0);
   const effectiveRadius = radiusOf(seg);
   const allSameRadius = selectedSegs.every((s) => radiusOf(s) === effectiveRadius);
-  const outerRadius = seg.outerRadius ?? 0;
-  const allSameOuter = selectedSegs.every((s) => (s.outerRadius ?? 0) === outerRadius);
   const allSameSpeed = selectedSegs.every((s) => s.speed === seg.speed);
   const allSameAspect = selectedSegs.every((s) => s.aspectPreset === seg.aspectPreset);
   const allSameBg = selectedSegs.every((s) => isSameBackground(s.background, seg.background));
@@ -422,30 +419,7 @@ export function StageControls() {
         </p>
       </div>
 
-      {/* Outer radius — the edge of the whole frame, background included. */}
-      <div className="mb-4">
-        <div className="mb-1.5 flex items-center justify-between">
-          <span className="pk-label">Outer radius</span>
-          <span className="pk-value">{allSameOuter ? `${outerRadius}px` : "Mixed"}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setOuterRadius(outerRadius - 4)} className="pk-icon-btn h-7 w-7 text-xs">−</button>
-          <input
-            type="range"
-            min={0}
-            max={64}
-            step={2}
-            value={outerRadius}
-            onChange={(e) => setOuterRadius(Number(e.target.value))}
-            className="pk-range flex-1"
-          />
-          <button onClick={() => setOuterRadius(outerRadius + 4)} className="pk-icon-btn h-7 w-7 text-xs">+</button>
-        </div>
-        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>
-          Rounds the whole frame, background included. Video has no transparency,
-          so the corners come out black.
-        </p>
-      </div>
+
 
       {/* Speed */}
       <div className="mb-4">

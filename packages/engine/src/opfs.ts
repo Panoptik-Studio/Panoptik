@@ -577,6 +577,25 @@ export async function markExported(id: string): Promise<void> {
   }
 }
 
+export async function renameProject(id: string, name: string): Promise<void> {
+  if (!isSecureContext()) return;
+  const trimmed = name.trim().slice(0, 120);
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle(id);
+    const jsonHandle = await dir.getFileHandle("project.json");
+    const jsonFile = await jsonHandle.getFile();
+    const project = migrateProject(JSON.parse(await jsonFile.text()));
+    project.name = trimmed || undefined;
+    const jsonWritable = await jsonHandle.createWritable();
+    await jsonWritable.write(JSON.stringify(project));
+    await jsonWritable.close();
+  } catch (err) {
+    console.warn(`[OPFS] Failed to rename project ${id}`, err);
+    throw err;
+  }
+}
+
 export async function listProjects(): Promise<
   { id: string; name: string }[]
 > {
@@ -597,9 +616,10 @@ export async function listProjects(): Promise<
         const project = migrateProject(
           JSON.parse(await file.text()),
         );
+        const fallbackName = `${project.segments[0]?.facecam.src ? "Recording" : "Clip"} ${primaryMedia(project).duration.toFixed(0)}s`;
         projects.push({
           id: name,
-          name: `Clip ${primaryMedia(project).duration.toFixed(0)}s`,
+          name: project.name && project.name.trim() ? project.name : fallbackName,
         });
       } catch {
         // skip corrupt/empty dirs

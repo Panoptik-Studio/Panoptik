@@ -161,34 +161,7 @@ export function Inspector() {
         />
       </Row>
 
-      <Row label="Focal" value={`${zoom.to.x.toFixed(2)}, ${zoom.to.y.toFixed(2)}`}>
-        <div className="flex gap-2">
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={zoom.to.x}
-            onChange={(e) => patchTo({ x: Number(e.target.value) })}
-            onPointerUp={commitDrag}
-            onKeyUp={commitDrag}
-            className="pk-range"
-            aria-label="Focal X"
-          />
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={zoom.to.y}
-            onChange={(e) => patchTo({ y: Number(e.target.value) })}
-            onPointerUp={commitDrag}
-            onKeyUp={commitDrag}
-            className="pk-range"
-            aria-label="Focal Y"
-          />
-        </div>
-      </Row>
+
 
       <Row label="Easing" value="">
         <div className="flex gap-1">
