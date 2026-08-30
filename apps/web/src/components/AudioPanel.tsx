@@ -128,25 +128,33 @@ export function AudioPanel() {
             </label>
           </div>
           {track.kind === "music" && (
-            <label className="pk-help mt-2 block">
-              <span className="flex items-center justify-between">
-                Duck under dialogue
+            <div className="mt-2">
+              <label className="pk-help flex items-center justify-between">
+                <span>
+                  Duck under dialogue
+                  <span className="ml-1.5 text-[10px] text-pk-faint font-normal">(export only)</span>
+                </span>
                 <input
                   type="checkbox"
                   checked={!!track.ducking}
                   onChange={(e) => updateAudioTrack(track.id, { ducking: e.target.checked ? 0.6 : null })}
                 />
-              </span>
+              </label>
               {!!track.ducking && (
-                <input
-                  type="range" min={0} max={1} step={0.05} value={track.ducking}
-                  onChange={(e) => updateAudioTrack(track.id, { ducking: Number(e.target.value) })}
-                  className="mt-1 w-full"
-                />
+                <div className="mt-1">
+                  <input
+                    type="range" min={0} max={1} step={0.05} value={track.ducking}
+                    onChange={(e) => updateAudioTrack(track.id, { ducking: Number(e.target.value) })}
+                    className="w-full"
+                  />
+                  <p className="mt-0.5 text-[11px] text-pk-faint">
+                    Ducking will be applied in the exported video.
+                  </p>
+                </div>
               )}
-            </label>
+            </div>
           )}
-          <p className="pk-help mt-2">Starts at {track.startT.toFixed(1)}s — drag the block in the timeline to move it.</p>
+          <p className="pk-help mt-2">Starts at {track.startT.toFixed(1)}s</p>
         </div>
       ))}
     </div>

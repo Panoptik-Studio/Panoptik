@@ -117,6 +117,64 @@ function hexFromRgba(colorStr?: string): string {
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }
 
+function MatchSettingButton({
+  direction,
+  onClick,
+  title,
+  label,
+  isSame,
+}: {
+  direction: "prev" | "next";
+  onClick: () => void;
+  title: string;
+  label?: string;
+  isSame?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={isSame}
+      title={isSame ? `Already matches ${direction === "prev" ? "previous" : "next"} text` : title}
+      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all ${
+        isSame
+          ? "cursor-default opacity-40 text-[#888] bg-[#f5f5f5]"
+          : "border border-[#e2e8f0] bg-[#fafafa] text-[#555] hover:border-[#0070f3] hover:bg-[#f0f7ff] hover:text-[#0070f3] active:scale-95 shadow-xs cursor-pointer"
+      }`}
+    >
+      {direction === "prev" ? (
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="9 14 4 9 9 4" />
+          <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+        </svg>
+      ) : (
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="15 14 20 9 15 4" />
+          <path d="M4 20v-7a4 4 0 0 1 4-4h12" />
+        </svg>
+      )}
+      <span>{label ?? (direction === "prev" ? "Prev" : "Next")}</span>
+    </button>
+  );
+}
+
 export function TextPanel() {
   const project = useProjectStore((s) => s.project);
   const selectedSegmentId = useProjectStore((s) => s.selectedSegmentId);
@@ -144,6 +202,15 @@ export function TextPanel() {
     () => overlays.find((t) => t.id === selectedTextOverlayId),
     [overlays, selectedTextOverlayId],
   );
+
+  const activeIdx = useMemo(() => {
+    if (!activeOverlay) return -1;
+    return overlays.findIndex((t) => t.id === activeOverlay.id);
+  }, [overlays, activeOverlay]);
+
+  const prevOverlay = activeIdx > 0 ? overlays[activeIdx - 1] : null;
+  const nextOverlay =
+    activeIdx >= 0 && activeIdx < overlays.length - 1 ? overlays[activeIdx + 1] : null;
 
   if (!project || !seg) {
     return (
@@ -201,7 +268,7 @@ export function TextPanel() {
       </div>
 
       {/* Overlay Quick Selector / Badges */}
-      {overlays.length > 0 ? (
+      {overlays.length > 0 && (
         <div className="space-y-1.5">
           <div className="text-[11px] font-medium text-pk-faint">
             Timeline Text Items ({overlays.length})
@@ -241,16 +308,6 @@ export function TextPanel() {
             })}
           </div>
         </div>
-      ) : (
-        <div className="rounded-lg border border-dashed border-pk-hairline bg-pk-surface-soft p-4 text-center">
-          <div className="text-xs text-pk-faint">No text overlays yet</div>
-          <button
-            onClick={handleAddNew}
-            className="mt-2 text-xs font-semibold text-[#0070f3] hover:underline"
-          >
-            Create first text callout
-          </button>
-        </div>
       )}
 
       {/* Selected Overlay Inspector */}
@@ -258,13 +315,63 @@ export function TextPanel() {
         <div className="space-y-4 border-t border-pk-hairline pt-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-[#111]">Style & Content</span>
-            <button
-              onClick={() => seek(activeOverlay.timestamp)}
-              className="pk-chip text-[10px]"
-              title="Seek playhead to text start time"
-            >
-              Seek to {activeOverlay.timestamp.toFixed(1)}s
-            </button>
+            <div className="flex items-center gap-1.5">
+              {prevOverlay && (
+                <MatchSettingButton
+                  direction="prev"
+                  onClick={() => {
+                    patch({
+                      fontFamily: prevOverlay.fontFamily,
+                      fontSize: prevOverlay.fontSize,
+                      fontWeight: prevOverlay.fontWeight,
+                      fontStyle: prevOverlay.fontStyle,
+                      textAlign: prevOverlay.textAlign,
+                      color: prevOverlay.color,
+                      backgroundColor: prevOverlay.backgroundColor,
+                      backgroundPadding: prevOverlay.backgroundPadding,
+                      borderRadius: prevOverlay.borderRadius,
+                      shadowColor: prevOverlay.shadowColor,
+                      shadowBlur: prevOverlay.shadowBlur,
+                      animation: prevOverlay.animation,
+                      animationDuration: prevOverlay.animationDuration,
+                    });
+                  }}
+                  title={`Copy all style settings from previous text ("${prevOverlay.text?.slice(0, 15) ?? "Text"}")`}
+                  label="Match all prev"
+                />
+              )}
+              {nextOverlay && (
+                <MatchSettingButton
+                  direction="next"
+                  onClick={() => {
+                    patch({
+                      fontFamily: nextOverlay.fontFamily,
+                      fontSize: nextOverlay.fontSize,
+                      fontWeight: nextOverlay.fontWeight,
+                      fontStyle: nextOverlay.fontStyle,
+                      textAlign: nextOverlay.textAlign,
+                      color: nextOverlay.color,
+                      backgroundColor: nextOverlay.backgroundColor,
+                      backgroundPadding: nextOverlay.backgroundPadding,
+                      borderRadius: nextOverlay.borderRadius,
+                      shadowColor: nextOverlay.shadowColor,
+                      shadowBlur: nextOverlay.shadowBlur,
+                      animation: nextOverlay.animation,
+                      animationDuration: nextOverlay.animationDuration,
+                    });
+                  }}
+                  title={`Copy all style settings from next text ("${nextOverlay.text?.slice(0, 15) ?? "Text"}")`}
+                  label="Match all next"
+                />
+              )}
+              <button
+                onClick={() => seek(activeOverlay.timestamp)}
+                className="pk-chip text-[10px]"
+                title="Seek playhead to text start time"
+              >
+                Seek {activeOverlay.timestamp.toFixed(1)}s
+              </button>
+            </div>
           </div>
 
           {/* Text Input */}
@@ -281,7 +388,57 @@ export function TextPanel() {
 
           {/* Typography */}
           <div className="space-y-2">
-            <label className="pk-label block">Typography</label>
+            <div className="flex items-center justify-between">
+              <label className="pk-label">Typography</label>
+              <div className="flex items-center gap-1">
+                {prevOverlay && (
+                  <MatchSettingButton
+                    direction="prev"
+                    onClick={() =>
+                      patch({
+                        fontFamily: prevOverlay.fontFamily,
+                        fontSize: prevOverlay.fontSize,
+                        fontWeight: prevOverlay.fontWeight,
+                        fontStyle: prevOverlay.fontStyle,
+                        textAlign: prevOverlay.textAlign,
+                      })
+                    }
+                    title="Match font & typography from previous text"
+                    label="Prev"
+                    isSame={
+                      activeOverlay.fontFamily === prevOverlay.fontFamily &&
+                      activeOverlay.fontSize === prevOverlay.fontSize &&
+                      activeOverlay.fontWeight === prevOverlay.fontWeight &&
+                      activeOverlay.fontStyle === prevOverlay.fontStyle &&
+                      activeOverlay.textAlign === prevOverlay.textAlign
+                    }
+                  />
+                )}
+                {nextOverlay && (
+                  <MatchSettingButton
+                    direction="next"
+                    onClick={() =>
+                      patch({
+                        fontFamily: nextOverlay.fontFamily,
+                        fontSize: nextOverlay.fontSize,
+                        fontWeight: nextOverlay.fontWeight,
+                        fontStyle: nextOverlay.fontStyle,
+                        textAlign: nextOverlay.textAlign,
+                      })
+                    }
+                    title="Match font & typography from next text"
+                    label="Next"
+                    isSame={
+                      activeOverlay.fontFamily === nextOverlay.fontFamily &&
+                      activeOverlay.fontSize === nextOverlay.fontSize &&
+                      activeOverlay.fontWeight === nextOverlay.fontWeight &&
+                      activeOverlay.fontStyle === nextOverlay.fontStyle &&
+                      activeOverlay.textAlign === nextOverlay.textAlign
+                    }
+                  />
+                )}
+              </div>
+            </div>
             <select
               value={activeOverlay.fontFamily ?? "Inter, sans-serif"}
               onChange={(e) => patch({ fontFamily: e.target.value })}
@@ -370,9 +527,29 @@ export function TextPanel() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="pk-label">Text Color</label>
-              <span className="font-mono text-[11px] text-pk-faint">
-                {activeOverlay.color ?? "#ffffff"}
-              </span>
+              <div className="flex items-center gap-1.5">
+                {prevOverlay && (
+                  <MatchSettingButton
+                    direction="prev"
+                    onClick={() => patch({ color: prevOverlay.color })}
+                    title="Match text color from previous text"
+                    label="Prev"
+                    isSame={(activeOverlay.color ?? "#ffffff") === (prevOverlay.color ?? "#ffffff")}
+                  />
+                )}
+                {nextOverlay && (
+                  <MatchSettingButton
+                    direction="next"
+                    onClick={() => patch({ color: nextOverlay.color })}
+                    title="Match text color from next text"
+                    label="Next"
+                    isSame={(activeOverlay.color ?? "#ffffff") === (nextOverlay.color ?? "#ffffff")}
+                  />
+                )}
+                <span className="font-mono text-[11px] text-pk-faint">
+                  {activeOverlay.color ?? "#ffffff"}
+                </span>
+              </div>
             </div>
 
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -423,23 +600,73 @@ export function TextPanel() {
           <div className="rounded-lg border border-pk-hairline bg-pk-surface-soft p-2.5 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-[#333]">Text Backdrop</span>
-              <button
-                onClick={() => {
-                  const hasBg = !!activeOverlay.backgroundColor && activeOverlay.backgroundColor !== "transparent";
-                  patch({
-                    backgroundColor: hasBg ? "transparent" : "rgba(0,0,0,0.75)",
-                  });
-                }}
-                className={`pk-chip ${
-                  activeOverlay.backgroundColor && activeOverlay.backgroundColor !== "transparent"
-                    ? "pk-chip-blue font-bold"
-                    : ""
-                }`}
-              >
-                {activeOverlay.backgroundColor && activeOverlay.backgroundColor !== "transparent"
-                  ? "Enabled"
-                  : "Transparent"}
-              </button>
+              <div className="flex items-center gap-1.5">
+                {prevOverlay && (
+                  <MatchSettingButton
+                    direction="prev"
+                    onClick={() =>
+                      patch({
+                        backgroundColor: prevOverlay.backgroundColor,
+                        backgroundPadding: prevOverlay.backgroundPadding,
+                        borderRadius: prevOverlay.borderRadius,
+                      })
+                    }
+                    title="Match backdrop style from previous text"
+                    label="Prev"
+                    isSame={
+                      (activeOverlay.backgroundColor ?? "transparent") ===
+                        (prevOverlay.backgroundColor ?? "transparent") &&
+                      (activeOverlay.backgroundPadding ?? 14) ===
+                        (prevOverlay.backgroundPadding ?? 14) &&
+                      (activeOverlay.borderRadius ?? 10) ===
+                        (prevOverlay.borderRadius ?? 10)
+                    }
+                  />
+                )}
+                {nextOverlay && (
+                  <MatchSettingButton
+                    direction="next"
+                    onClick={() =>
+                      patch({
+                        backgroundColor: nextOverlay.backgroundColor,
+                        backgroundPadding: nextOverlay.backgroundPadding,
+                        borderRadius: nextOverlay.borderRadius,
+                      })
+                    }
+                    title="Match backdrop style from next text"
+                    label="Next"
+                    isSame={
+                      (activeOverlay.backgroundColor ?? "transparent") ===
+                        (nextOverlay.backgroundColor ?? "transparent") &&
+                      (activeOverlay.backgroundPadding ?? 14) ===
+                        (nextOverlay.backgroundPadding ?? 14) &&
+                      (activeOverlay.borderRadius ?? 10) ===
+                        (nextOverlay.borderRadius ?? 10)
+                    }
+                  />
+                )}
+                <button
+                  onClick={() => {
+                    const hasBg =
+                      !!activeOverlay.backgroundColor &&
+                      activeOverlay.backgroundColor !== "transparent";
+                    patch({
+                      backgroundColor: hasBg ? "transparent" : "rgba(0,0,0,0.75)",
+                    });
+                  }}
+                  className={`pk-chip ${
+                    activeOverlay.backgroundColor &&
+                    activeOverlay.backgroundColor !== "transparent"
+                      ? "pk-chip-blue font-bold"
+                      : ""
+                  }`}
+                >
+                  {activeOverlay.backgroundColor &&
+                  activeOverlay.backgroundColor !== "transparent"
+                    ? "Enabled"
+                    : "Transparent"}
+                </button>
+              </div>
             </div>
 
             {activeOverlay.backgroundColor && activeOverlay.backgroundColor !== "transparent" && (
@@ -561,9 +788,43 @@ export function TextPanel() {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="pk-label">Animation</label>
-              <span className="text-[10px] text-pk-faint">
-                {ANIMATION_OPTIONS.find((a) => a.value === (activeOverlay.animation ?? "fade"))?.desc}
-              </span>
+              <div className="flex items-center gap-1.5">
+                {prevOverlay && (
+                  <MatchSettingButton
+                    direction="prev"
+                    onClick={() =>
+                      patch({
+                        animation: prevOverlay.animation,
+                        animationDuration: prevOverlay.animationDuration,
+                      })
+                    }
+                    title="Match animation from previous text"
+                    label="Prev"
+                    isSame={
+                      (activeOverlay.animation ?? "fade") === (prevOverlay.animation ?? "fade")
+                    }
+                  />
+                )}
+                {nextOverlay && (
+                  <MatchSettingButton
+                    direction="next"
+                    onClick={() =>
+                      patch({
+                        animation: nextOverlay.animation,
+                        animationDuration: nextOverlay.animationDuration,
+                      })
+                    }
+                    title="Match animation from next text"
+                    label="Next"
+                    isSame={
+                      (activeOverlay.animation ?? "fade") === (nextOverlay.animation ?? "fade")
+                    }
+                  />
+                )}
+                <span className="text-[10px] text-pk-faint">
+                  {ANIMATION_OPTIONS.find((a) => a.value === (activeOverlay.animation ?? "fade"))?.desc}
+                </span>
+              </div>
             </div>
             <select
               value={activeOverlay.animation ?? "fade"}

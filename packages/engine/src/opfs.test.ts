@@ -136,4 +136,88 @@ describe("opfs serialize/deserialize", () => {
     expect(parsed.segments[1]!.facecam.src).toBe("blob:http://localhost/take2-reshoot");
     expect(parsed.segments[1]!.facecam.startT).toBe(4);
   });
+
+  it("persists project name, extended zoom hold, and text overlay styling with transparency", () => {
+    const fullFeaturedProject: Project = {
+      ...mockProject,
+      name: "My Custom Project Title",
+      audioTracks: [
+        {
+          id: "track-1",
+          kind: "music",
+          name: "Background Beats",
+          src: "blob:http://localhost/audio-1",
+          duration: 30,
+          volume: 0.8,
+          startT: 0,
+        },
+      ],
+      segments: [
+        {
+          ...mockProject.segments[0]!,
+          zoomPoints: [
+            {
+              id: "z1",
+              t: 1.5,
+              to: { scale: 3.2, x: 0.4, y: 0.6 },
+              dur: 0.6,
+              hold: 3.5, // extended hold
+              ease: "easeInOutCubic",
+              staged: false,
+            },
+          ],
+          textOverlays: [
+            {
+              id: "text-1",
+              text: "Pro Video Callout",
+              timestamp: 1.0,
+              duration: 4.5,
+              position: "custom",
+              x: 0.5,
+              y: 0.85,
+              fontFamily: "Outfit, sans-serif",
+              fontSize: 42,
+              fontWeight: "bold",
+              fontStyle: "italic",
+              textAlign: "center",
+              color: "#f59e0b",
+              backgroundColor: "rgba(0, 112, 243, 0.45)", // transparency
+              backgroundPadding: 18,
+              borderRadius: 12,
+              shadowColor: "rgba(0,0,0,0.6)",
+              shadowBlur: 8,
+              animation: "pop",
+              animationDuration: 0.4,
+              staged: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    const serialized = JSON.stringify(fullFeaturedProject);
+    const parsed = JSON.parse(serialized) as Project;
+
+    expect(parsed.name).toBe("My Custom Project Title");
+    expect(parsed.audioTracks?.[0]!.name).toBe("Background Beats");
+    expect(parsed.audioTracks?.[0]!.volume).toBe(0.8);
+
+    // Zoom hold
+    expect(parsed.segments[0]!.zoomPoints[0]!.hold).toBe(3.5);
+    expect(parsed.segments[0]!.zoomPoints[0]!.to.scale).toBe(3.2);
+
+    // Text overlay properties
+    const to = parsed.segments[0]!.textOverlays[0]!;
+    expect(to.text).toBe("Pro Video Callout");
+    expect(to.fontFamily).toBe("Outfit, sans-serif");
+    expect(to.fontSize).toBe(42);
+    expect(to.fontWeight).toBe("bold");
+    expect(to.fontStyle).toBe("italic");
+    expect(to.color).toBe("#f59e0b");
+    expect(to.backgroundColor).toBe("rgba(0, 112, 243, 0.45)");
+    expect(to.backgroundPadding).toBe(18);
+    expect(to.borderRadius).toBe(12);
+    expect(to.animation).toBe("pop");
+    expect(to.animationDuration).toBe(0.4);
+  });
 });

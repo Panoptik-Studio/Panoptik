@@ -341,9 +341,6 @@ export function StageControls() {
             )}
           </div>
         )}
-        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>
-          Ctrl / Cmd + Click to group multiple clips and edit together.
-        </p>
       </div>
 
       {/* Padding resizer */}
@@ -387,9 +384,6 @@ export function StageControls() {
           />
           <button onClick={() => setStagePadding(seg.stagePadding + 4)} className="pk-icon-btn h-7 w-7 text-xs">+</button>
         </div>
-        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>
-          {isGrouped ? `Applies to all ${selectedSegs.length} selected clips.` : "White space around video. 0 = edge-to-edge."}
-        </p>
       </div>
 
       {/* Corner radius — rounds the recorded frame itself, so it carries
@@ -412,11 +406,6 @@ export function StageControls() {
           />
           <button onClick={() => setCornerRadius(effectiveRadius + 4)} className="pk-icon-btn h-7 w-7 text-xs">+</button>
         </div>
-        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>
-          {seg.stagePadding === 0 && effectiveRadius > 0
-            ? "Add padding to see the rounding — with none, the corners sit on the canvas edge."
-            : "Rounds the recorded screen. Applies to the exported video too."}
-        </p>
       </div>
 
 
@@ -473,9 +462,6 @@ export function StageControls() {
             </button>
           ))}
         </div>
-        <p className="pk-help mt-1.5" style={{ fontSize: 11 }}>
-          {isGrouped ? `Sets playback speed for all ${selectedSegs.length} clips.` : "0.25x–3x · affects preview & export · cam+screen synced"}
-        </p>
       </div>
 
       {/* Aspect */}
@@ -653,10 +639,6 @@ export function StageControls() {
         {bgImageError && (
           <p className="pk-help mt-2" style={{ fontSize: 11, color: "#e11d48" }}>{bgImageError}</p>
         )}
-
-        <p className="pk-help mt-2" style={{ fontSize: 11 }}>
-          {isGrouped ? `Applies background to all ${selectedSegs.length} selected clips.` : "Applies to stage background behind video. Staged, commit to keep."}
-        </p>
       </div>
     </div>
   );
