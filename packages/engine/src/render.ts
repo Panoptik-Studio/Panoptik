@@ -14,6 +14,7 @@ import type {
   ZoomPoint,
 } from "@panoptik/schema";
 import { mediaForSegment, primaryMedia } from "@panoptik/schema";
+import type { Rect } from "./layout";
 import { frameRect } from "./layout";
 import { resolveSegment, segmentDuration } from "./timeline";
 
@@ -263,7 +264,7 @@ export function renderFrame(
     ctx.save();
     // Clip with rounded corners when padded, or standard rect
     ctx.beginPath();
-    const cornerRadius = seg.stagePadding > 0 ? Math.min(24, Math.max(8, rect.w * 0.015)) : 0;
+    const cornerRadius = frameCornerRadius(seg, rect, h);
     if (cornerRadius > 0 && typeof ctx.roundRect === "function") {
       ctx.roundRect(rect.x, rect.y, rect.w, rect.h, cornerRadius);
     } else {
@@ -288,6 +289,27 @@ export function renderFrame(
 
   // ── Layer 4: Text overlays ──
   drawTextOverlays(ctx, seg, srcT, w, h);
+
+  // ── Layer 5: Outer corner rounding ──
+  //
+  // Applied last, over everything, because it shapes the frame itself rather
+  // than any one layer. Video has no alpha channel, so the area outside the
+  // curve is filled black rather than left transparent — an encoder would
+  // otherwise composite it against whatever it felt like.
+  const outer = outerCornerRadius(seg, w, h);
+  if (outer > 0 && typeof ctx.roundRect === "function") {
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, outer);
+    ctx.fill();
+    // Put an opaque backdrop behind what survived, so the corners read as
+    // black in the file instead of undefined alpha.
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
 }
 
 export function resolveInterpolatedFacecam(
@@ -420,6 +442,48 @@ export function clearBackgroundImages(keep?: Set<string>): void {
     bgImages.delete(src);
   }
 }
+
+/**
+ * Rounding applied to the recorded frame, in canvas pixels.
+ *
+ * Scaled off the canvas height like stagePadding, so the same setting looks the
+ * same at 720p and 4K, and capped at half the shorter side — beyond that the
+ * corners meet and the frame turns into a lozenge.
+ *
+ * With no explicit value this reproduces what the renderer did before the
+ * control existed: rounded only when there is padding to reveal it.
+ */
+export function frameCornerRadius(
+  seg: { stagePadding?: number; cornerRadius?: number },
+  rect: Rect,
+  canvasH: number,
+): number {
+  const units =
+    seg.cornerRadius ?? ((seg.stagePadding ?? 0) > 0 ? DEFAULT_CORNER_RADIUS_UNITS : 0);
+  if (units <= 0) return 0;
+  const px = units * (canvasH / 1080) * 1.5;
+  return Math.min(px, Math.min(rect.w, rect.h) / 2);
+}
+
+/**
+ * Rounding on the outer edge of the frame, in canvas pixels.
+ *
+ * Scaled off canvas height like the inner radius, and capped at half the
+ * shorter side of the whole canvas.
+ */
+export function outerCornerRadius(
+  seg: { outerRadius?: number },
+  canvasW: number,
+  canvasH: number,
+): number {
+  const units = seg.outerRadius ?? 0;
+  if (units <= 0) return 0;
+  const px = units * (canvasH / 1080) * 1.5;
+  return Math.min(px, Math.min(canvasW, canvasH) / 2);
+}
+
+/** Matches the radius the old hardcoded formula produced at 1080p. */
+export const DEFAULT_CORNER_RADIUS_UNITS = 16;
 
 function drawBackground(
   ctx: CanvasRenderingContext2D,

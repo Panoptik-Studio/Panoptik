@@ -1391,7 +1391,14 @@ export function PreviewCanvas() {
          * lets the browser fit it to whatever space there actually is, so it
          * tracks timeline drags and window resizes with no measuring code.
          */
-        className="relative flex max-h-full max-w-full items-center justify-center overflow-hidden rounded-2xl border shadow-vercel-4 transition-all"
+        /*
+         * The rounding here is editor chrome, not part of the video — a hard
+         * rectangle looks unfinished on the stage. Kept deliberately small so
+         * it reads as the frame of the preview rather than as the shape of the
+         * output: the real outer corner is Segment.outerRadius, which the
+         * renderer draws into the canvas and the exported file carries.
+         */
+        className="relative flex max-h-full max-w-full items-center justify-center overflow-hidden rounded-xl border shadow-vercel-4 transition-all"
         style={{
           borderColor: "rgba(0,0,0,0.08)",
           aspectRatio: `${canvasSize.w} / ${canvasSize.h}`,

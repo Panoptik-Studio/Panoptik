@@ -207,6 +207,16 @@ function sanitizeSegment(
     name: typeof saved?.name === "string" ? saved.name.slice(0, 120) : base.name,
     speed: speed(saved?.speed, base.speed),
     stagePadding: num(saved?.stagePadding, base.stagePadding, 0, 48),
+    // Undefined is meaningful here: it selects the automatic radius, so an
+    // absent value must not become 0.
+    cornerRadius:
+      typeof saved?.cornerRadius === "number" && Number.isFinite(saved.cornerRadius)
+        ? Math.min(64, Math.max(0, saved.cornerRadius))
+        : base.cornerRadius,
+    outerRadius:
+      typeof saved?.outerRadius === "number" && Number.isFinite(saved.outerRadius)
+        ? Math.min(64, Math.max(0, saved.outerRadius))
+        : base.outerRadius,
     aspectPreset: aspectPreset(saved?.aspectPreset, base.aspectPreset),
     background: background(saved?.background, base.background, savedBackgroundImageSrc),
     facecam: facecam(saved?.facecam, { ...base.facecam, src: savedFacecamSrc }),

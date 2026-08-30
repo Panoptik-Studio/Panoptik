@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { Media } from "@panoptik/schema";
+import { frameCornerRadius, outerCornerRadius, DEFAULT_CORNER_RADIUS_UNITS } from "./render";
 import {
   cameraViewport,
   canvasToFrame,
@@ -701,5 +702,62 @@ describe("resolveInterpolatedFacecam smooth size & position transitions", () => 
     // At t = 5.5s (end): shapeProgress = 0.0 (square)
     const atEnd = resolveInterpolatedFacecam(pCircleToSquare, 5.5, seg2);
     expect(atEnd.shapeProgress).toBeCloseTo(0.0, 2);
+  });
+});
+
+describe("frameCornerRadius", () => {
+  const rect = { x: 0, y: 0, w: 1600, h: 900 };
+
+  it("keeps the old behaviour when no radius was ever set", () => {
+    // Projects made before this control must look exactly as they did:
+    // rounded once there is padding to reveal it, square without.
+    expect(frameCornerRadius({ stagePadding: 0 }, rect, 1080)).toBe(0);
+    expect(frameCornerRadius({ stagePadding: 12 }, rect, 1080)).toBeGreaterThan(0);
+  });
+
+  it("an explicit zero beats the automatic default", () => {
+    // Undefined means "automatic"; 0 means the user asked for square corners.
+    expect(frameCornerRadius({ stagePadding: 12, cornerRadius: 0 }, rect, 1080)).toBe(0);
+  });
+
+  it("scales with canvas height, so one setting looks the same at any output size", () => {
+    const at1080 = frameCornerRadius({ stagePadding: 8, cornerRadius: 16 }, rect, 1080);
+    const at2160 = frameCornerRadius({ stagePadding: 8, cornerRadius: 16 }, { ...rect, w: 3200, h: 1800 }, 2160);
+    expect(at2160 / at1080).toBeCloseTo(2, 1);
+  });
+
+  it("caps at half the shorter side so the frame cannot become a lozenge", () => {
+    const r = frameCornerRadius({ stagePadding: 8, cornerRadius: 64 }, { x: 0, y: 0, w: 200, h: 100 }, 1080);
+    expect(r).toBeLessThanOrEqual(50);
+  });
+
+  it("the automatic value matches what the hardcoded formula produced", () => {
+    // The old rule capped at 24px on a 1080-tall canvas.
+    expect(frameCornerRadius({ stagePadding: 10 }, rect, 1080)).toBeCloseTo(
+      DEFAULT_CORNER_RADIUS_UNITS * 1.5,
+      5,
+    );
+  });
+});
+
+describe("outerCornerRadius", () => {
+  it("is square by default, which is what every export has produced so far", () => {
+    expect(outerCornerRadius({}, 1920, 1080)).toBe(0);
+    expect(outerCornerRadius({ outerRadius: 0 }, 1920, 1080)).toBe(0);
+  });
+
+  it("scales with canvas height like the inner radius", () => {
+    const at1080 = outerCornerRadius({ outerRadius: 16 }, 1920, 1080);
+    const at2160 = outerCornerRadius({ outerRadius: 16 }, 3840, 2160);
+    expect(at2160 / at1080).toBeCloseTo(2, 1);
+  });
+
+  it("caps at half the shorter side of the canvas", () => {
+    expect(outerCornerRadius({ outerRadius: 64 }, 200, 100)).toBeLessThanOrEqual(50);
+  });
+
+  it("is independent of the inner frame radius", () => {
+    // They shape different things: one the recorded frame, one the whole file.
+    expect(outerCornerRadius({ outerRadius: 8, cornerRadius: 64 } as never, 1920, 1080)).toBeCloseTo(12, 5);
   });
 });

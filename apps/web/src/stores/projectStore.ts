@@ -239,6 +239,8 @@ interface ProjectStore {
 
   // Stage UI
   setStagePadding: (n: number) => void;
+  setCornerRadius: (n: number) => void;
+  setOuterRadius: (n: number) => void;
   setAspectPreset: (preset: AspectPreset) => void;
 
   setFacecam: (updates: Partial<Facecam>) => void;
@@ -1038,6 +1040,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     if (s.selectedSegmentIds.length === 0) return;
     const clamped = Math.max(0, Math.min(48, n));
     s.updateSelectedSegments({ stagePadding: clamped });
+  },
+
+  setCornerRadius: (n) => {
+    const s = get();
+    if (s.selectedSegmentIds.length === 0) return;
+    s.updateSelectedSegments({ cornerRadius: Math.max(0, Math.min(64, n)) });
+  },
+
+  setOuterRadius: (n) => {
+    const s = get();
+    if (s.selectedSegmentIds.length === 0) return;
+    s.updateSelectedSegments({ outerRadius: Math.max(0, Math.min(64, n)) });
   },
 
   setAspectPreset: (preset) => {

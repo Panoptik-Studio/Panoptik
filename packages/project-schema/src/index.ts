@@ -102,6 +102,21 @@ export type Segment = {
   mediaId: string;
   /** Chapter/scene name, shown on the timeline. */
   name?: string;
+  /**
+   * Corner rounding on the recorded frame, in the same units as stagePadding.
+   *
+   * Undefined keeps the old automatic behaviour — rounded only when padded —
+   * so projects made before this control look exactly as they did.
+   */
+  cornerRadius?: number;
+  /**
+   * Rounding on the outer edge of the whole frame, in the same units.
+   *
+   * The exported file has no transparency, so the area outside the curve is
+   * filled black. Defaults to 0 — square, which is what every export has
+   * produced until now.
+   */
+  outerRadius?: number;
   srcStart: number;
   srcEnd: number;
   speed: number;
