@@ -1,11 +1,13 @@
 /**
- * OWNER: DEV A. Single registration entry point.
- * editor/page.tsx calls this in a mount effect and unregisterAllTools() on cleanup.
+ * WebMCP Tool Suite Entrypoint.
+ * Mounts in editor/page.tsx on startup.
  */
+
 import { registerEditingTools } from "./tools-b";
 import { registerEngineTools } from "./tools-a";
 
-export { unregisterAllTools } from "./lifecycle";
+export { unregisterAllTools, getRegisteredTools, registerToolWithLifecycle } from "./lifecycle";
+export type { ToolConfig, TraceEntry } from "./lifecycle";
 
 export function registerAllTools(): void {
   registerEngineTools();

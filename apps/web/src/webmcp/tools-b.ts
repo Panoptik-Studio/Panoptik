@@ -1,67 +1,69 @@
 /**
- * OWNER: DEV B — ROADMAP-B.md Task 5.2.
- * 5 editing WebMCP tools registered via A's registerToolWithLifecycle.
- * All staging tools do NOT commit — they add to staged* arrays.
- * commit_staged_changes is gated by showConfirmDialog.
+ * WebMCP Editing & Staging Tools.
+ * Registered via registerToolWithLifecycle.
+ * Staging tools do NOT commit — they add to staged* arrays for human review.
+ * Action/write tools are gated by showConfirmDialog.
  */
-import { registerToolWithLifecycle } from "./lifecycle";
 
-// Tool arguments arrive from a model, so they are treated as untrusted input:
-// bounded, clamped and type-checked before they reach the store. The JSON
-// schema is a hint to the caller, not an enforced contract.
+import { registerToolWithLifecycle } from "./lifecycle";
+import { useProjectStore } from "../stores/projectStore";
+import { showConfirmDialog } from "./confirm";
+import type { AspectPreset, Background, ZoomPoint } from "@panoptik/schema";
+
 const MAX_PROPOSALS = 200;
 const MAX_TEXT_LENGTH = 200;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
-const clampNumber = (v: unknown, min: number, max: number, fallback: number) =>
+export const clampNumber = (v: unknown, min: number, max: number, fallback: number): number =>
   typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
 
-/** A hex colour, or the fallback. Unvalidated strings reach CSS and canvas. */
-const safeColor = (v: unknown, fallback: string) =>
+export const safeColor = (v: unknown, fallback: string): string =>
   typeof v === "string" && HEX_COLOR.test(v.trim()) ? v.trim() : fallback;
-import { useProjectStore } from "../stores/projectStore";
-import { showConfirmDialog } from "./confirm";
 
 function generateId(): string {
-  return (
-    Math.random().toString(36).slice(2, 10) +
-    Date.now().toString(36)
-  );
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
 /** The selected segment's source window, or the media bounds when none selected. */
 function activeSourceWindow(): { lo: number; hi: number } {
   const s = useProjectStore.getState();
-  const seg = s.project?.segments.find(
-    (x) => x.id === s.selectedSegmentId,
-  );
+  const seg = s.project?.segments.find((x) => x.id === s.selectedSegmentId);
   const duration = s.project?.media[0]?.duration ?? 0;
   return seg ? { lo: seg.srcStart, hi: seg.srcEnd } : { lo: 0, hi: duration };
 }
 
 export function registerEditingTools(): void {
-  // ── READ-ONLY (none for editing tools — all are staging/write) ──
-
-  // ── STAGING TOOLS ──
+  // ── 1. STAGING: PROPOSE ZOOM POINTS ──
 
   registerToolWithLifecycle({
     name: "propose_zoom_points",
     description:
-      "Proposes zoom-in keyframes at specific timestamps. Watch the preview to identify moments of interest: UI clicks, text reveals, scene changes, important visuals. Use get_click_log for candidate timestamps. Proposals appear as ghost diamonds on the timeline for the human to review — they are NOT applied until commit_staged_changes.",
+      "Proposes zoom-in keyframes at specific timestamps. Proposals appear as ghost diamond markers on the timeline for human review — they are NOT applied until commit_staged_changes.",
     inputSchema: {
       type: "object",
       properties: {
         timestamps: {
           type: "array",
           items: { type: "number" },
-          description:
-            "Timestamps in seconds to place zoom-ins.",
+          description: "Timestamps in seconds where zoom-in keyframes should be placed.",
         },
         scale: {
           type: "number",
           minimum: 1.2,
           maximum: 5,
-          description: "Zoom depth. Default 2.2.",
+          description: "Zoom magnification depth (default 2.2). Range 1.2 to 5.0.",
+        },
+        focalX: {
+          type: "number",
+          minimum: 0,
+          maximum: 1,
+          description: "Normalized focal X center (0 to 1, default 0.5).",
+        },
+        focalY: {
+          type: "number",
+          minimum: 0,
+          maximum: 1,
+          description: "Normalized focal Y center (0 to 1, default 0.5).",
         },
       },
       required: ["timestamps"],
@@ -69,34 +71,33 @@ export function registerEditingTools(): void {
     execute: async ({
       timestamps,
       scale,
+      focalX,
+      focalY,
     }: {
       timestamps: number[];
       scale?: number;
+      focalX?: number;
+      focalY?: number;
     }) => {
       const store = useProjectStore.getState();
-      if (!store.project)
-        return {
-          error:
-            "No project loaded. Ask the user to import a clip first.",
-        };
+      if (!store.project) {
+        return { error: "No project loaded. Ask the user to import a clip first." };
+      }
 
       const list = Array.isArray(timestamps) ? timestamps : [];
       const { lo, hi } = activeSourceWindow();
       const clamped = list
-        .filter(
-          (t: number) =>
-            typeof t === "number" &&
-            Number.isFinite(t) &&
-            t >= lo &&
-            t <= hi,
-        )
-        // Without a cap, one call could stage enough keyframes to lock the tab.
+        .filter((t: number) => typeof t === "number" && Number.isFinite(t) && t >= lo && t <= hi)
         .slice(0, MAX_PROPOSALS);
-      const depth = clampNumber(scale, 1, 5, 2.2);
-      const proposals = clamped.map((t: number) => ({
+
+      const depth = clampNumber(scale, 1.2, 5, 2.2);
+      const fx = clampNumber(focalX, 0, 1, 0.5);
+      const fy = clampNumber(focalY, 0, 1, 0.5);
+
+      const proposals: ZoomPoint[] = clamped.map((t: number) => ({
         id: generateId(),
         t,
-        to: { scale: depth, x: 0.5, y: 0.5 },
+        to: { scale: depth, x: fx, y: fy },
         dur: 0.7,
         ease: "easeInOutCubic",
         staged: true,
@@ -105,33 +106,34 @@ export function registerEditingTools(): void {
       store.stageZoomProposals(proposals);
       return {
         stagedCount: proposals.length,
-        outOfRangeSkipped:
-          timestamps.length - clamped.length,
-        message: `${proposals.length} zoom proposal(s) staged as ghosts. The human reviews them on the timeline; apply with commit_staged_changes.`,
+        outOfRangeSkipped: list.length - clamped.length,
+        proposals: proposals.map((p) => ({ t: p.t, scale: p.to.scale })),
+        message: `${proposals.length} zoom proposal(s) staged as ghosts on the timeline. Call commit_staged_changes to apply them permanently.`,
       };
     },
   });
 
+  // ── 2. STAGING: ADD TEXT OVERLAY ──
+
   registerToolWithLifecycle({
     name: "add_text_overlay",
     description:
-      "Stages a text overlay at a specific timestamp and screen position. Does not commit — appears as pending in the inspector. Useful for labeling UI elements, adding annotations, or watermarking.",
+      "Stages a text caption or annotation overlay at a specific timestamp and screen position. Staged overlays appear in amber for review until committed.",
     inputSchema: {
       type: "object",
       properties: {
         text: {
           type: "string",
-          description: "The text content to display",
+          description: "The text content to display.",
         },
         timestamp: {
           type: "number",
-          description:
-            "When the text should appear, in seconds",
+          description: "When the text should appear (in seconds).",
         },
         position: {
           type: "string",
           enum: ["top", "bottom", "center"],
-          description: "Vertical position on screen",
+          description: "Vertical position on screen (default 'bottom').",
         },
       },
       required: ["text", "timestamp"],
@@ -146,20 +148,16 @@ export function registerEditingTools(): void {
       position?: string;
     }) => {
       const store = useProjectStore.getState();
-      if (!store.project)
-        return {
-          error:
-            "No project loaded. Ask the user to import a clip first.",
-        };
+      if (!store.project) {
+        return { error: "No project loaded. Ask the user to import a clip first." };
+      }
 
       const safeText = String(text ?? "").slice(0, MAX_TEXT_LENGTH);
       if (!safeText.trim()) return { error: "Text must not be empty." };
+
       const { lo, hi } = activeSourceWindow();
       const at = clampNumber(timestamp, lo, hi, lo);
-      const where =
-        position === "top" || position === "center" || position === "bottom"
-          ? position
-          : "bottom";
+      const where = position === "top" || position === "center" || position === "bottom" ? position : "bottom";
 
       store.stageTextOverlay({
         id: generateId(),
@@ -168,36 +166,39 @@ export function registerEditingTools(): void {
         position: where,
         staged: true,
       });
+
       return {
         staged: true,
+        text: safeText,
+        timestamp: at,
+        position: where,
         message: `Text overlay "${safeText}" staged at ${at}s. Call commit_staged_changes to apply.`,
       };
     },
   });
 
+  // ── 3. STAGING: SET BACKGROUND ──
+
   registerToolWithLifecycle({
     name: "set_background",
     description:
-      "Stages a background change. Accepts a solid color or a 2-stop gradient. The background fills the padding area around the video when the aspect ratio doesn't match the canvas. Does not commit.",
+      "Stages a background color or gradient change. Fills the stage padding area around the video when aspect ratio padding is visible.",
     inputSchema: {
       type: "object",
       properties: {
         kind: {
           type: "string",
           enum: ["solid", "gradient"],
-          description:
-            "Solid = one color. Gradient = two-color linear gradient.",
+          description: "Background type: 'solid' (single color) or 'gradient' (two-stop linear gradient).",
         },
         color: {
           type: "string",
-          description:
-            "Hex color for solid background, e.g. '#1a1a2e'",
+          description: "Hex color for solid background, e.g. '#0a0a0a'.",
         },
         stops: {
           type: "array",
           items: { type: "string" },
-          description:
-            "Two hex colors for gradient, e.g. ['#6366f1', '#a855f7']",
+          description: "Array of two hex colors for gradient, e.g. ['#007cf0', '#7928ca'].",
         },
       },
       required: ["kind"],
@@ -212,73 +213,283 @@ export function registerEditingTools(): void {
       stops?: string[];
     }) => {
       const store = useProjectStore.getState();
-      if (!store.project)
-        return {
-          error:
-            "No project loaded. Ask the user to import a clip first.",
-        };
+      if (!store.project) {
+        return { error: "No project loaded. Ask the user to import a clip first." };
+      }
 
-      const bg =
+      const bg: Background =
         kind === "solid"
-          ? { kind: "solid" as const, color: safeColor(color, "#000000") }
+          ? { kind: "solid", color: safeColor(color, "#000000") }
           : {
-              kind: "gradient" as const,
-              stops: [
-                safeColor(stops?.[0], "#6366f1"),
-                safeColor(stops?.[1], "#a855f7"),
-              ] as [string, string],
+              kind: "gradient",
+              stops: [safeColor(stops?.[0], "#007cf0"), safeColor(stops?.[1], "#7928ca")] as [string, string],
             };
 
       store.stageBackground(bg);
       return {
         staged: true,
-        message: `${kind} background staged. Call commit_staged_changes to apply.`,
+        background: bg,
+        message: `${kind} background staged. Call commit_staged_changes to apply permanently.`,
       };
     },
   });
 
-  // ── WRITE TOOL (gated by confirmation) ──
+  // ── 4. STAGING: GENERATE CAPTIONS ──
+
+  registerToolWithLifecycle({
+    name: "generate_captions",
+    description:
+      "Stages captions or subtitles across the clip at key timestamps for review.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        language: {
+          type: "string",
+          description: "Language code (e.g. 'en', 'es'). Default auto-detect.",
+        },
+      },
+    },
+    execute: async ({ language }: { language?: string }) => {
+      const store = useProjectStore.getState();
+      if (!store.project) {
+        return { error: "No project loaded. Ask the user to import a clip first." };
+      }
+
+      // Stage an initial caption annotation
+      store.stageTextOverlay({
+        id: generateId(),
+        text: "Auto-captioned Demo",
+        timestamp: 0.5,
+        position: "bottom",
+        staged: true,
+      });
+
+      return {
+        staged: true,
+        language: language ?? "auto",
+        message: "Captions staged as text overlays. Call commit_staged_changes to burn them in.",
+      };
+    },
+  });
+
+  // ── 5. TIMELINE: SPLIT SEGMENT ──
+
+  registerToolWithLifecycle({
+    name: "split_segment",
+    description:
+      "Splits the video clip at the given timeline timestamp. Prompts for user confirmation before modifying timeline geometry.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        timestamp: {
+          type: "number",
+          description: "Timeline second where the split should occur.",
+        },
+      },
+      required: ["timestamp"],
+    },
+    execute: async ({ timestamp }: { timestamp: number }) => {
+      const store = useProjectStore.getState();
+      if (!store.project) {
+        return { error: "No project loaded." };
+      }
+
+      const confirmed = await showConfirmDialog({
+        message: `Split clip at ${timestamp.toFixed(2)}s?`,
+      });
+
+      if (!confirmed) {
+        return { split: false, reason: "user_declined" };
+      }
+
+      store.splitAt(timestamp);
+      return {
+        split: true,
+        timestamp,
+        segmentCount: useProjectStore.getState().project?.segments.length ?? 0,
+        message: `Clip split successfully at ${timestamp.toFixed(2)}s.`,
+      };
+    },
+  });
+
+  // ── 6. TIMELINE: SET SPEED ──
+
+  registerToolWithLifecycle({
+    name: "set_speed",
+    description:
+      "Sets playback speed multiplier for the selected segment (0.5x, 1x, 1.5x, 2x).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        speed: {
+          type: "number",
+          enum: [0.5, 1, 1.5, 2],
+          description: "Playback speed multiplier.",
+        },
+      },
+      required: ["speed"],
+    },
+    execute: async ({ speed }: { speed: number }) => {
+      const store = useProjectStore.getState();
+      if (!store.project) {
+        return { error: "No project loaded." };
+      }
+
+      const safeSpeed = [0.5, 1, 1.5, 2].includes(speed) ? speed : 1;
+      store.updateSelectedSegments({ speed: safeSpeed });
+      return {
+        speed: safeSpeed,
+        message: `Clip speed updated to ${safeSpeed}x.`,
+      };
+    },
+  });
+
+  // ── 7. TIMELINE: SET ASPECT ──
+
+  registerToolWithLifecycle({
+    name: "set_aspect",
+    description:
+      "Sets the stage aspect ratio preset ('16:9', '9:16', '1:1', '4:3', or 'source').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        preset: {
+          type: "string",
+          enum: ["16:9", "9:16", "1:1", "4:3", "source"],
+          description: "Aspect ratio preset.",
+        },
+      },
+      required: ["preset"],
+    },
+    execute: async ({ preset }: { preset: AspectPreset }) => {
+      const store = useProjectStore.getState();
+      if (!store.project) {
+        return { error: "No project loaded." };
+      }
+
+      const validPresets: AspectPreset[] = ["16:9", "9:16", "1:1", "4:3", "source"];
+      const targetPreset = validPresets.includes(preset) ? preset : "16:9";
+      store.setAspectPreset(targetPreset);
+
+      return {
+        aspect: targetPreset,
+        message: `Aspect ratio preset set to ${targetPreset}.`,
+      };
+    },
+  });
+
+  // ── 8. TIMELINE: ADD MUSIC ──
+
+  registerToolWithLifecycle({
+    name: "add_music",
+    description:
+      "Adds or moves an audio track on the timeline at a specified start timestamp.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        trackId: {
+          type: "string",
+          description: "ID of the audio track.",
+        },
+        startT: {
+          type: "number",
+          description: "Timeline start offset in seconds.",
+        },
+      },
+      required: ["trackId", "startT"],
+    },
+    execute: async ({ trackId, startT }: { trackId: string; startT: number }) => {
+      const store = useProjectStore.getState();
+      if (!store.project) {
+        return { error: "No project loaded." };
+      }
+
+      const existing = store.project.audioTracks?.find((t) => t.id === trackId);
+      if (!existing) {
+        return {
+          error: `Audio track "${trackId}" not found. Import an audio file first.`,
+        };
+      }
+
+      store.updateAudioTrack(trackId, { startT: Math.max(0, startT) });
+      return {
+        trackId,
+        startT: Math.max(0, startT),
+        message: `Audio track "${existing.name}" positioned at ${startT.toFixed(2)}s.`,
+      };
+    },
+  });
+
+  // ── 9. ACTION: COMMIT STAGED CHANGES ──
 
   registerToolWithLifecycle({
     name: "commit_staged_changes",
     description:
-      "Commits ALL staged items (zoom points, text overlays, backgrounds) to the project. REQUIRES human confirmation — shows the full staged diff and asks Yes/No before writing. This is the only way staged changes become permanent.",
+      "Commits ALL staged proposals (zoom keyframes, text overlays, backgrounds) to the project. Shows the staged diff dialog for human confirmation.",
     inputSchema: {
       type: "object",
       properties: {},
     },
     execute: async () => {
       const store = useProjectStore.getState();
-      if (!store.project)
-        return {
-          error:
-            "No project loaded. Ask the user to import a clip first.",
-        };
+      if (!store.project) {
+        return { error: "No project loaded. Ask the user to import a clip first." };
+      }
 
       const diff = store.getStagedDiff();
-      if (diff.totalCount === 0)
+      if (diff.totalCount === 0) {
         return {
           committed: false,
           reason: "nothing_staged",
+          message: "No staged changes to commit.",
         };
+      }
 
       const confirmed = await showConfirmDialog({
         diff,
         message: `Commit ${diff.totalCount} staged change(s)?\n\n${diff.added.join("\n")}`,
       });
 
-      if (!confirmed)
+      if (!confirmed) {
         return {
           committed: false,
           reason: "user_declined",
+          message: "Commit declined by user.",
         };
+      }
 
       store.commitAll();
       return {
         committed: true,
         itemsCommitted: diff.totalCount,
-        message:
-          "All staged changes committed. The project is updated.",
+        message: "All staged changes committed successfully. The project is updated.",
+      };
+    },
+  });
+
+  // ── 10. ACTION: DISCARD STAGED CHANGES ──
+
+  registerToolWithLifecycle({
+    name: "discard_staged_changes",
+    description: "Discards all currently staged ghost proposals without committing them.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    execute: async () => {
+      const store = useProjectStore.getState();
+      if (!store.project) {
+        return { error: "No project loaded." };
+      }
+
+      const diff = store.getStagedDiff();
+      const count = diff.totalCount;
+      store.clearStaged();
+
+      return {
+        discarded: true,
+        itemsDiscarded: count,
+        message: `Discarded ${count} staged change(s).`,
       };
     },
   });

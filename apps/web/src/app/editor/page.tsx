@@ -23,6 +23,7 @@ import { ToolTrace } from "@/components/ToolTrace";
 import { Toolbar } from "@/components/Toolbar";
 import { ZoomPanel } from "@/components/ZoomPanel";
 import { useProjectPersistence } from "@/lib/useProjectPersistence";
+import { registerAllTools, unregisterAllTools } from "@/webmcp";
 
 type LeftTab = "media" | "zoom" | "text" | "audio" | "camera" | "stage";
 export default function EditorPage() {
@@ -30,6 +31,11 @@ export default function EditorPage() {
   // Above the tabs: the clip must come back on reload regardless of which
   // panel happens to be open.
   useProjectPersistence();
+
+  React.useEffect(() => {
+    registerAllTools();
+    return () => unregisterAllTools();
+  }, []);
   return (
     <div className="flex h-screen flex-col" style={{ background: "#f8f8f8" }}>
       <Toolbar />
