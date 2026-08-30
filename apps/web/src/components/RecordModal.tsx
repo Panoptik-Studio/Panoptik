@@ -159,6 +159,8 @@ export function RecordModal() {
     }
     return "";
   });
+  const [showSystemAudioHelp, setShowSystemAudioHelp] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("panoptik:systemAudio", String(systemAudioEnabled));
@@ -273,8 +275,8 @@ export function RecordModal() {
         const allAudio = devices.filter((d) => d.kind === "audioinput");
 
         // Separate physical voice microphones from system monitor / loopback sources
-        const voiceInputs = allAudio.filter((d) => !/monitor|loopback/i.test(d.label));
-        const monitorInputs = allAudio.filter((d) => /monitor|loopback|stereo mix/i.test(d.label));
+        const voiceInputs = allAudio.filter((d) => !/monitor|loopback|stereo mix|system audio|desktop audio|virtual source/i.test(d.label));
+        const monitorInputs = allAudio.filter((d) => /monitor|loopback|stereo mix|system audio|desktop audio|virtual source/i.test(d.label));
 
         setCameras(cams);
         setMics(voiceInputs.length ? voiceInputs : allAudio);
@@ -965,7 +967,7 @@ export function RecordModal() {
 
               {/* System Audio (Desktop / Apps) */}
               {layout !== "cameraOnly" && (
-                <div className="flex items-center gap-1.5 rounded-[var(--radius-pk-btn)] border border-pk-hairline bg-pk-canvas p-1">
+                <div className="relative flex items-center gap-1.5 rounded-[var(--radius-pk-btn)] border border-pk-hairline bg-pk-canvas p-1">
                   <button
                     onClick={() => setSystemAudioEnabled((v) => !v)}
                     className="pk-icon-btn h-7 w-7"
@@ -999,6 +1001,61 @@ export function RecordModal() {
                       </>
                     )}
                   </select>
+
+                  {/* Help button for Linux system audio setup */}
+                  <button
+                    onClick={() => setShowSystemAudioHelp((s) => !s)}
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold text-[#64748b] hover:bg-[#ebebeb] hover:text-[#0f172a] transition-colors"
+                    title="System audio setup info for Linux"
+                  >
+                    ?
+                  </button>
+
+                  {/* System Audio Help Popover */}
+                  {showSystemAudioHelp && (
+                    <div
+                      className="absolute bottom-11 left-0 z-50 w-80 rounded-xl border border-[#ebebeb] bg-white p-3.5 shadow-vercel-4 animate-in fade-in zoom-in-95 duration-150"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-[#0f172a]">Linux Desktop Audio Capture</span>
+                        <button
+                          onClick={() => setShowSystemAudioHelp(false)}
+                          className="h-4 w-4 rounded-full text-xs text-[#94a3b8] hover:text-[#0f172a]"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-[#64748b] leading-relaxed mb-2.5">
+                        Chromium on Linux hides output monitors from standard input lists by default. Enable it via either method:
+                      </p>
+                      
+                      <div className="rounded-lg bg-[#f8fafc] border border-[#e2e8f0] p-2 mb-2 text-[11px]">
+                        <span className="font-semibold text-[#0f172a] block mb-0.5">Method 1: Terminal Loopback (Instant)</span>
+                        <p className="text-[#64748b] mb-1.5 text-[10px]">Run in terminal to expose your audio output as an input source:</p>
+                        <div className="flex items-center justify-between gap-1 bg-[#0f172a] text-[#f8fafc] px-2 py-1 rounded text-[9px] font-mono select-all">
+                          <span className="truncate">pactl load-module module-remap-source master=@DEFAULT_SINK@.monitor source_name=system_audio_loopback source_properties=device.description="System_Audio_Loopback"</span>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(`pactl load-module module-remap-source master=@DEFAULT_SINK@.monitor source_name=system_audio_loopback source_properties=device.description="System_Audio_Loopback"`);
+                              setCopiedCmd(true);
+                              setTimeout(() => setCopiedCmd(false), 2000);
+                            }}
+                            className="text-[#38bdf8] hover:text-white shrink-0 font-sans text-[9px] font-semibold"
+                          >
+                            {copiedCmd ? "Copied!" : "Copy"}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg bg-[#f8fafc] border border-[#e2e8f0] p-2 text-[11px]">
+                        <span className="font-semibold text-[#0f172a] block mb-0.5">Method 2: Chrome Flag</span>
+                        <p className="text-[#64748b] text-[10px]">
+                          Open <code className="bg-[#e2e8f0] px-1 rounded text-[#0f172a]">chrome://flags/#pulseaudio-loopback-for-screen-share</code>, set to <strong>Enabled</strong>, and restart Chrome.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
