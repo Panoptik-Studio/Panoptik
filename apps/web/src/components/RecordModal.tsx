@@ -159,6 +159,14 @@ export function RecordModal() {
     }
     return "";
   });
+  /**
+   * True when the browser has the camera blocked for this site.
+   *
+   * Chrome only prompts once. After a denial getUserMedia rejects instantly
+   * with no prompt, which looks identical to "no camera attached" — so this is
+   * read explicitly rather than inferred from a failed open.
+   */
+  const [cameraBlocked, setCameraBlocked] = useState(false);
   const [showSystemAudioHelp, setShowSystemAudioHelp] = useState(false);
   const [copiedCmd, setCopiedCmd] = useState(false);
 
@@ -257,6 +265,32 @@ export function RecordModal() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isOpen, state]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    let status: PermissionStatus | null = null;
+    const sync = () => {
+      if (!cancelled && status) setCameraBlocked(status.state === "denied");
+    };
+    navigator.permissions
+      ?.query({ name: "camera" as PermissionName })
+      .then((s) => {
+        if (cancelled) return;
+        status = s;
+        sync();
+        // Granting it happens in Chrome's own UI, so listen rather than making
+        // the user reopen the recorder to clear the warning.
+        s.addEventListener("change", sync);
+      })
+      .catch(() => {
+        /* Firefox and Safari do not expose the camera permission; leave it. */
+      });
+    return () => {
+      cancelled = true;
+      status?.removeEventListener("change", sync);
+    };
+  }, [isOpen]);
 
   // Enumerate devices on open
   useEffect(() => {
@@ -738,10 +772,14 @@ export function RecordModal() {
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-pk-faint)" strokeWidth="1.7"><path d="M16 16l4 4M2 12a10 10 0 1 0 20 0 10 10 0 0 0-20 0z" /><path d="M10 10a2 2 0 1 1 4 0 2 2 0 0 1-4 0z" /></svg>
                   </div>
                   <p className="pk-ui text-[11px] font-medium text-pk-body">
-                    {pipHasVideo ? "Starting camera…" : "No camera"}
+                    {pipHasVideo ? "Starting camera…" : cameraBlocked ? "Camera blocked" : "No camera"}
                   </p>
                   {!pipHasVideo && (
-                    <p className="pk-help text-[10px]">Enable camera or check permissions</p>
+                    <p className="pk-help text-[10px]">
+                      {cameraBlocked
+                        ? "Allow it from the camera icon in the address bar, then reopen this panel."
+                        : "Enable camera or check permissions"}
+                    </p>
                   )}
                 </div>
                 {pipHasVideo && (
@@ -1172,6 +1210,18 @@ export function RecordModal() {
                 rows={3}
                 className="w-full resize-none rounded-[var(--radius-pk-inner)] border border-pk-hairline bg-pk-surface p-3 font-sans text-sm leading-relaxed text-pk-body outline-none transition placeholder:text-pk-faint focus:border-pk-blue"
               />
+            </div>
+          )}
+
+          {/* A blocked camera produces no prompt and no error — without saying so,
+              the recorder just looks broken. */}
+          {cameraBlocked && wantsCameraSlot && (
+            <div className="pk-ui flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-pk-hairline bg-[#ffefcf] px-4 py-2.5 text-xs" style={{ color: "#ab570a" }}>
+              <strong className="font-semibold">Camera is blocked for this site.</strong>
+              <span>
+                Chrome only asks once. Click the camera icon in the address bar, choose Allow,
+                then reload — or record with <em>Screen only</em>.
+              </span>
             </div>
           )}
 
