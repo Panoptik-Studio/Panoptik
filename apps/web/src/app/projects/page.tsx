@@ -129,7 +129,15 @@ export default function ProjectsPage() {
           <div className="flex items-center gap-2">
             <Link href="/" className="pk-btn pk-btn-ghost pk-btn-sm">Home</Link>
             <button onClick={startNew} className="pk-btn pk-btn-ghost pk-btn-sm">New project</button>
-            <Link href="/editor" className="pk-btn pk-btn-primary pk-btn-sm">Open editor</Link>
+            {/* Reopens whatever was last edited — the editor restores from the
+                same pointer the cards write, so the name matches what happens. */}
+            <Link
+              href="/editor"
+              className="pk-btn pk-btn-primary pk-btn-sm"
+              title="Reopen the clip you were last working on"
+            >
+              Last session
+            </Link>
           </div>
         </div>
       </header>

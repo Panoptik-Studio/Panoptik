@@ -278,8 +278,21 @@ function num(v: unknown, fallback: number, min = -Infinity, max = Infinity): num
   return typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
 }
 
+/**
+ * Frame rates offered for export.
+ *
+ * 24 is the standard step down for a smaller file — a screen demo loses very
+ * little at that rate, and the encoder derives its bitrate partly from frame
+ * rate, so the saving is real rather than cosmetic.
+ */
+export type ExportFps = 24 | 30 | 60;
+export const EXPORT_FPS_OPTIONS: ExportFps[] = [24, 30, 60];
+export const DEFAULT_EXPORT_FPS: ExportFps = 30;
+
 export type ExportOpts = {
   format: "mp4" | "webm";
   resolution: "720p" | "1080p" | "4k";
+  /** Frames per second in the written file. Defaults to 30. */
+  fps?: ExportFps;
   playbackRate?: number; // 0.25–3, affects cam+screen together, preview & export
 };
