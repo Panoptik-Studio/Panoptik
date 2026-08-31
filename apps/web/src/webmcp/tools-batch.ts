@@ -109,7 +109,7 @@ export function registerBatchTools(): void {
   // ── 3. probe_frames (Read-Only Free) ──
   registerToolWithLifecycle({
     name: "probe_frames",
-    description: "Returns deterministic text feature summaries for visual keyframes at requested timestamps.",
+    description: "Returns deterministic feature summaries and visual snapshot images with optional 3x3 grid overlays for visual keyframes.",
     inputSchema: {
       type: "object",
       properties: {
@@ -118,23 +118,117 @@ export function registerBatchTools(): void {
           items: { type: "number" },
           description: "List of timestamps to query",
         },
+        includeSnapshot: {
+          type: "boolean",
+          description: "Whether to generate base64 image snapshots for VLM inspection",
+        },
+        gridOverlay: {
+          type: "boolean",
+          description: "Whether to overlay a 3x3 alphanumeric grid (A1..C3) on the snapshot",
+        },
       },
       required: ["timestamps"],
     },
     annotations: { readOnlyHint: true },
-    execute: async ({ timestamps }) => {
+    execute: async ({ timestamps, includeSnapshot, gridOverlay }) => {
+      const store = useProjectStore.getState();
       const times = Array.isArray(timestamps) ? timestamps : [];
-      return {
-        frames: times.map((t) => {
+      const { captureProbeSnapshot } = await import("@panoptik/engine");
+
+      const frames = await Promise.all(
+        times.map(async (t) => {
           const scene = currentAnalysisCache?.scenes.find((s) => t >= s.t0 && t <= s.t1);
+          let snapshot: string | undefined;
+          if (includeSnapshot && store.project) {
+            try {
+              snapshot = await captureProbeSnapshot(store.project, t, { gridOverlay: Boolean(gridOverlay) });
+            } catch (e) {
+              console.warn("[WebMCP] probe snapshot failed:", e);
+            }
+          }
+
           return {
             t,
             sceneId: scene?.id ?? 0,
             features: scene
               ? `${scene.motionCategory} motion, palette: ${scene.paletteIndex}, camCorner: ${scene.camCorner}`
               : "Standard video frame",
+            snapshot,
           };
         }),
+      );
+
+      return { frames };
+    },
+  });
+
+  // ── 3b. locate_visual_target (Tiered Grounding & Viewport Verification) ──
+  registerToolWithLifecycle({
+    name: "locate_visual_target",
+    description: "Locates a visual element via 3-Tier hierarchy: (1) Click Telemetry, (2) Grounded VLM 0-1000 BBox & 3x3 Grid centroid, (3) Crop-and-verify loop for deep zooms.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Target element description, e.g. 'elephant' or 'search bar'" },
+        timestamp: { type: "number", description: "Video timestamp to search in" },
+        scale: { type: "number", description: "Desired zoom depth (default: 2.2)" },
+        vlmOutput: { type: "string", description: "Raw VLM response containing bbox or grid cell (if already called)" },
+      },
+      required: ["query", "timestamp"],
+    },
+    annotations: { readOnlyHint: true },
+    execute: async ({ query, timestamp, scale = 2.2, vlmOutput }) => {
+      const store = useProjectStore.getState();
+      const project = store.project;
+      if (!project) return { error: "NO_ACTIVE_PROJECT" };
+
+      const { calculateZoomTolerance, parseGroundingOutput } = await import("../lib/ai/grounding");
+
+      // Tier 1: Check Deterministic Click Telemetry (within ±1.5s window)
+      const clicks = project.clickLog ?? [];
+      const match = clicks.find((c) => Math.abs(c.t - timestamp) <= 1.5);
+      if (match) {
+        return {
+          target: query,
+          t: timestamp,
+          x: match.x,
+          y: match.y,
+          confidence: 1.0,
+          verified: true,
+          source: "interaction_telemetry",
+          tolerance: calculateZoomTolerance(scale),
+        };
+      }
+
+      // Tier 2: Grounded VLM Output Parser
+      const parsed = parseGroundingOutput(vlmOutput);
+      const tolerance = calculateZoomTolerance(scale, parsed.width);
+
+      if (!parsed.objectPresent || parsed.confidence < 0.2) {
+        return {
+          target: query,
+          t: timestamp,
+          objectPresent: false,
+          fallback: "USER_CLICK_REQUIRED",
+          message: `Target '${query}' could not be grounded in frame at ${timestamp}s. Prompt user to click on canvas.`,
+        };
+      }
+
+      // Tier 3: High Zoom (>3.5x) verification check
+      const isDeepZoom = scale >= 3.5;
+      return {
+        target: query,
+        t: timestamp,
+        x: parsed.x,
+        y: parsed.y,
+        width: parsed.width,
+        height: parsed.height,
+        gridCell: parsed.gridCell,
+        confidence: parsed.confidence,
+        verified: !isDeepZoom,
+        requiresCropVerification: isDeepZoom,
+        source: parsed.source,
+        tolerance,
       };
     },
   });

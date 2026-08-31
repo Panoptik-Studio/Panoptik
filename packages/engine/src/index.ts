@@ -69,6 +69,7 @@ export { decodeViaAudioContext } from "./audio";
 export { startRecording, openCameraTrack, openMicrophoneTrack } from "./record";
 export type { RecordingHandles } from "./record";
 export { setFacecamBlob, setAudioBlob, getFirstVideoTimestamp } from "./decode";
+export { captureProbeSnapshot, captureCropSnapshot, draw3x3GridOverlay, type ProbeSnapshotOptions } from "./probe";
 export {
   saveProject,
   renameProject,
