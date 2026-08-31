@@ -36,18 +36,6 @@ let activeMediaId: string | null = null;
 export function getActiveMediaId(): string | null {
   return activeMediaId;
 }
-// Screen debug — enable via localStorage.setItem("panoptik:debugScreen","1")
-let screenDebugLastLog = 0;
-let screenDebugFrames = 0;
-let screenDebugDecodes = 0;
-function screenLog(msg: string, data?: Record<string, unknown>) {
-  if (typeof localStorage === "undefined" || localStorage.getItem("panoptik:debugScreen") !== "1") return;
-  const now = performance.now();
-  if (now - screenDebugLastLog > 1000) {
-    console.log(`[Screen] ${msg}`, data ?? "");
-    screenDebugLastLog = now;
-  }
-}
 
 let iterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
 let iteratorTime = -1;
@@ -102,23 +90,18 @@ export async function setAudioBlob(blob: Blob | null): Promise<string | null> {
   // Keep fallback for export decodeAudioData path
   setAudioBlobFallback(blob);
   if (!blob || blob.size === 0) {
-    console.log("[Audio] setAudioBlob: empty blob");
     return null;
   }
   try {
     audioInput = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
     const track = await audioInput.getPrimaryAudioTrack();
-    console.log("[Audio] setAudioBlob: track", !!track, "blob", `${blob.type} ${blob.size}`);
     if (track) {
       const can = await track.canDecode();
-      console.log("[Audio] setAudioBlob: canDecode", can);
       if (can) setAudioSink(track);
       else {
-        console.warn("[Audio] setAudioBlob: track cannot be decoded -> preview will work (blob URL) but export will be silent");
         setAudioSink(null);
       }
     } else {
-      console.warn("[Audio] setAudioBlob: no audio track found");
       setAudioSink(null);
     }
   } catch (e) {
@@ -239,7 +222,6 @@ async function openFacecamSink(blob: Blob): Promise<void> {
     if (!fcSurfaceCtx) {
       fcSurface = null;
     }
-    console.log("[Facecam] openFacecamSink: ready", { dw, dh, aspect: fcAspect });
   } catch (err) {
     console.error("[Facecam] openFacecamSink failed", err);
     fcSink = null;
@@ -650,16 +632,9 @@ export async function prepareFrame(t: number): Promise<void> {
     }
     return;
   }
-  screenDebugFrames++;
-  if (presented && t >= presented.start && t < presented.end) {
-    screenLog("prepareFrame cache hit", { t: t.toFixed(3), window: `${presented.start.toFixed(3)}-${presented.end.toFixed(3)}`, pending: !!pump });
-  }
   desiredTime = Math.max(0, t);
   if (!pump) {
-    const start = performance.now();
     pump = runPump().finally(() => {
-      screenDebugDecodes++;
-      screenLog("pump done", { decodes: screenDebugDecodes, frames: screenDebugFrames, took: `${(performance.now() - start).toFixed(1)}ms`, target: t.toFixed(3) });
       pump = null;
     });
   }
@@ -674,10 +649,6 @@ async function runPump(): Promise<void> {
   while (sink) {
     const target = desiredTime;
     if (presented && target >= presented.start && target < presented.end) {
-      if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - pumpLastLog > 1000) {
-        console.log("[Screen] pump cache hit", { target: target.toFixed(3), window: `${presented.start.toFixed(3)}-${presented.end.toFixed(3)}`, framesInThisPump });
-        pumpLastLog = performance.now();
-      }
       return;
     }
 
@@ -692,9 +663,6 @@ async function runPump(): Promise<void> {
       if (!sink) return;
       iterator = sink.canvases(target);
       iteratorTime = target;
-      if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1") {
-        console.log("[Screen] seek new iterator", { target: target.toFixed(3), seekTook: `${(performance.now() - seekStart).toFixed(1)}ms` });
-      }
     }
 
     // If we buffered the next frame while handling a hole, use it before pulling a new one.
@@ -709,13 +677,8 @@ async function runPump(): Promise<void> {
       pendingFrameEnd = 0;
       // iteratorTime already reflects this frame's timestamp from when it was buffered
     } else {
-      const frameStart = performance.now();
       const active = iterator!;
       const res = await active.next();
-      const frameTook = performance.now() - frameStart;
-      if (frameTook > 50 && typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1") {
-        console.log("[Screen] slow frame decode", { took: `${frameTook.toFixed(1)}ms`, target: target.toFixed(3), timestamp: res.value?.timestamp?.toFixed(3) });
-      }
       if (active !== iterator) continue;
       if (res.done || !res.value) {
         await closeIterator();
@@ -729,23 +692,8 @@ async function runPump(): Promise<void> {
     }
     // Ensure iteratorTime is set for pending path as well (already set when buffered)
     if (value) iteratorTime = value.timestamp;
-    // Only present the frame whose interval [timestamp, end) contains target.
-    // The old `!presented || end > target` also presented future frames that
-    // start *after* target (e.g. 14.811 when target is 14.800) which made
-    // `presented.start > target`, so the cache check `target >= presented.start`
-    // failed and the next loop thought `target < iteratorTime` → not
-    // continuable → seek. That seek-storm repeated 130ms VideoDecoder re-inits
-    // on Linux mp4/avc1 and looked like an infinite hang at tail (14.8s).
     if (value.timestamp <= target && target < end) {
-      const presentStart = performance.now();
       present(value, end);
-      framesInThisPump++;
-      pumpFramesDecoded++;
-      if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - pumpLastLog > 1000) {
-        const fps = (pumpFramesDecoded / ((performance.now() - pumpStart) / 1000)).toFixed(1);
-        console.log("[Screen] video fps", { fps, framesInThisPump, totalDecoded: pumpFramesDecoded, target: target.toFixed(3), presented: `${value.timestamp.toFixed(3)}-${end.toFixed(3)}`, blitTook: `${(performance.now() - presentStart).toFixed(1)}ms` });
-        pumpLastLog = performance.now();
-      }
     } else if (value.timestamp > target) {
       // Walked past the target without a frame covering it. Variable-rate
       // footage emits nothing while the picture is still, so the timeline has
@@ -881,4 +829,51 @@ async function teardown(): Promise<void> {
 
 export function currentFrame(): CanvasImageSource | null {
   return getCurrentFrame();
+}
+
+const firstVideoTimestampCache = new Map<string, number>();
+
+/**
+ * Returns the presentation timestamp (PTS) of the first video frame relative to audio in a media blob.
+ *
+ * - On macOS, Windows, and Chrome Tab Sharing: Video and audio start synchronously at t=0 (vTs < 0.05s -> returns 0).
+ * - On Linux system loopback monitor capture: Audio begins at t=0 while desktop screen capture
+ *   first paints ~0.5s-1.0s later (returns vTs to compensate for lead-in audio).
+ * - On imported MP4/WebM files: Video starts at t=0 (returns 0).
+ *
+ * This ensures universal, sample-accurate lip-sync across all OS platforms and capture modes.
+ */
+export async function getFirstVideoTimestamp(blob: Blob, srcKey?: string): Promise<number> {
+  if (srcKey && firstVideoTimestampCache.has(srcKey)) {
+    return firstVideoTimestampCache.get(srcKey)!;
+  }
+  try {
+    const probe = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
+    try {
+      const track = await probe.getPrimaryVideoTrack();
+      const aTrack = await probe.getPrimaryAudioTrack();
+      // If there is no audio track or no video track, there is no relative offset to align
+      if (!track || !aTrack) {
+        if (srcKey) firstVideoTimestampCache.set(srcKey, 0);
+        return 0;
+      }
+      const s = new CanvasSink(track, { width: 64, height: 64, fit: "fill", poolSize: 1 });
+      const it = s.canvases(0);
+      const res = await it.next();
+      try { await it.return(); } catch {}
+      const ts = (!res.done && res.value && typeof res.value.timestamp === "number") ? res.value.timestamp : 0;
+      // If first video timestamp is close to 0 (< 50ms), tracks started synchronously (Mac/Windows/Tab Share) -> no shift
+      const delta = ts >= 0.05 ? ts : 0;
+      if (srcKey) firstVideoTimestampCache.set(srcKey, delta);
+      if (delta > 0) {
+        console.log("[Decode] Compensating screen audio offset:", delta.toFixed(3), "s", srcKey ? `(${srcKey})` : "");
+      }
+      return delta;
+    } finally {
+      try { await probe.dispose(); } catch {}
+    }
+  } catch (e) {
+    console.warn("[Decode] failed to probe firstVideoTimestamp:", e);
+    return 0;
+  }
 }

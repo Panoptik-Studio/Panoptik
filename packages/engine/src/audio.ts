@@ -22,13 +22,11 @@ export function setAudioSink(track: InputAudioTrack | null) {
   if (!track) {
     audioSink = null;
     audioTrackId = null;
-    console.log("[Audio] setAudioSink: null (no track)");
     return;
   }
   try {
     audioSink = new AudioBufferSink(track);
     audioTrackId = (track as unknown as { id?: string }).id ?? "audio";
-    console.log("[Audio] setAudioSink: ok", { trackId: audioTrackId });
   } catch (e) {
     console.warn("[Audio] setAudioSink failed", e);
     audioSink = null;
@@ -48,7 +46,6 @@ export async function decodeViaAudioContext(blob: Blob): Promise<AudioBuffer | n
     const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     try {
       const buf = await ctx.decodeAudioData(arrayBuf.slice(0));
-      console.log("[Audio] decodeViaAudioContext: ok", { dur: buf.duration.toFixed(2), sr: buf.sampleRate, ch: buf.numberOfChannels });
       // Close context to free
       try { await ctx.close(); } catch { /* ignore */ }
       return buf;
@@ -64,7 +61,6 @@ export async function decodeViaAudioContext(blob: Blob): Promise<AudioBuffer | n
 }
 
 export async function getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
-  console.log("[Audio] getAudioBuffer: sink?", !!audioSink, "trackId", audioTrackId, "fallbackBlob", !!audioFallbackBlob, "project.audioSrc", !!project?.audioSrc);
   // Try WebCodecs path first (fast, single-pass demux)
   if (audioSink) {
     const chunks: AudioBuffer[] = [];
@@ -72,7 +68,6 @@ export async function getAudioBuffer(project: Project): Promise<AudioBuffer | nu
       for await (const wrapped of audioSink.buffers()) {
         chunks.push(wrapped.buffer);
       }
-      console.log("[Audio] getAudioBuffer: decoded chunks via sink", chunks.length, chunks[0] ? { sr: chunks[0].sampleRate, ch: chunks[0].numberOfChannels, len: chunks[0].length } : null);
       if (chunks.length) {
         const sampleRate = chunks[0]!.sampleRate;
         const numberOfChannels = Math.max(...chunks.map((c) => c.numberOfChannels));
@@ -140,7 +135,6 @@ export async function getAudioBuffer(project: Project): Promise<AudioBuffer | nu
   // but MediaElement can still play.
   const fallbackBlob = audioFallbackBlob;
   if (fallbackBlob && fallbackBlob.size > 0) {
-    console.log("[Audio] getAudioBuffer: trying fallback blob", `${fallbackBlob.type} ${fallbackBlob.size}`);
     const decoded = await decodeViaAudioContext(fallbackBlob);
     if (decoded) return decoded;
   }
@@ -148,10 +142,8 @@ export async function getAudioBuffer(project: Project): Promise<AudioBuffer | nu
   const src = (project as unknown as { audioSrc?: string | null })?.audioSrc ?? (project as unknown as { clip?: { src?: string } })?.clip?.src;
   if (src && src.startsWith("blob:")) {
     try {
-      console.log("[Audio] getAudioBuffer: trying fetch from project src", src.slice(0, 32));
       const res = await fetch(src);
       const blob = await res.blob();
-      console.log("[Audio] getAudioBuffer: fetched blob for fallback", `${blob.type} ${blob.size}`);
       if (blob.size > 0) {
         const decoded = await decodeViaAudioContext(blob);
         if (decoded) return decoded;

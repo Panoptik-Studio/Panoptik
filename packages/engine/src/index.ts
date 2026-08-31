@@ -68,7 +68,7 @@ export { segmentDuration, projectDuration, resolveSegment, sourceToTimeline } fr
 export { decodeViaAudioContext } from "./audio";
 export { startRecording, openCameraTrack, openMicrophoneTrack } from "./record";
 export type { RecordingHandles } from "./record";
-export { setFacecamBlob, setAudioBlob } from "./decode";
+export { setFacecamBlob, setAudioBlob, getFirstVideoTimestamp } from "./decode";
 export {
   saveProject,
   renameProject,

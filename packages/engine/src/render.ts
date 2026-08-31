@@ -236,14 +236,6 @@ export function renderFrame(
   if (!seg) return;
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
-  screenRenderFrames++;
-  if (typeof localStorage !== "undefined" && localStorage.getItem("panoptik:debugScreen") === "1" && performance.now() - screenRenderLastLog > 1000) {
-    const isOffscreen = typeof OffscreenCanvas !== "undefined" && ctx.canvas instanceof OffscreenCanvas;
-    console.log(`[Screen] renderFrame ${isOffscreen ? "export" : "canvas"}`, { t: timelineT.toFixed(3), seg: seg.id, hasFrame: !!currentFrame, canvas: `${w}x${h}`, draws: screenRenderFrames, noFrame: screenRenderNoFrame });
-    screenRenderLastLog = performance.now();
-    screenRenderFrames = 0;
-    screenRenderNoFrame = 0;
-  }
   if (!currentFrame) screenRenderNoFrame++;
 
   // ── Layer 1: Background ──

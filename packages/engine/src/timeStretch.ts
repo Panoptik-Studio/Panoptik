@@ -78,6 +78,7 @@ function crossCorrelate(a: Float32Array, aOff: number, b: Float32Array, bOff: nu
  * rate === 1 → near-identity copy. Output length ≈ input.length / rate.
  */
 export function timeStretch(buffer: AudioBuffer, rate: number): AudioBuffer {
+  if (Math.abs(rate - 1) < 0.001) return buffer;
   const sr = buffer.sampleRate;
   const nCh = buffer.numberOfChannels;
   const inLen = buffer.length;
@@ -215,6 +216,95 @@ export function sliceAndStretchAudio(buffer: AudioBuffer, seg: Segment): AudioBu
   return timeStretch(sliceSegment(buffer, seg.srcStart, seg.srcEnd), seg.speed);
 }
 
+/**
+ * Slice and pad screen audio for a segment, prepending pre-video silence when the
+ * screen capture video track was delayed relative to container audio start.
+ */
+export function sliceAndPadScreenAudio(
+  buffer: AudioBuffer,
+  seg: Segment,
+  firstVideoTs = 0,
+): AudioBuffer {
+  const sr = buffer.sampleRate;
+  const nCh = buffer.numberOfChannels;
+  const segStart = seg.srcStart;
+  const segEnd = seg.srcEnd;
+  const segDur = Math.max(0, segEnd - segStart);
+
+  if (firstVideoTs <= 0.005) {
+    return sliceAndStretchAudio(buffer, seg);
+  }
+
+  // Prepend firstVideoTs silence so audio delays to match the video start
+  const preDur = Math.max(0, Math.min(segDur, firstVideoTs - segStart));
+  const takeSrcStart = Math.max(0, segStart - firstVideoTs);
+  const takeSrcEnd = Math.max(0, Math.min(buffer.duration, segEnd - firstVideoTs));
+  const takeDur = Math.max(0, takeSrcEnd - takeSrcStart);
+  const postDur = Math.max(0, segDur - (preDur + takeDur));
+
+  const parts: AudioBuffer[] = [];
+  if (preDur > 0.001) {
+    const preLen = Math.max(1, Math.round(preDur * sr));
+    parts.push(makeBuffer(nCh, preLen, sr, Array.from({ length: nCh }, () => new Float32Array(preLen))));
+  }
+  if (takeDur > 0.001) {
+    parts.push(sliceSegment(buffer, takeSrcStart, takeSrcEnd));
+  }
+  if (postDur > 0.001) {
+    const postLen = Math.max(1, Math.round(postDur * sr));
+    parts.push(makeBuffer(nCh, postLen, sr, Array.from({ length: nCh }, () => new Float32Array(postLen))));
+  }
+
+  const assembled = concatAudio(parts);
+  if (Math.abs(seg.speed - 1) < 0.001) {
+    return assembled;
+  }
+  return timeStretch(assembled, seg.speed);
+}
+
+/**
+ * Slice and pad facecam audio for a segment, correctly positioning takes with fcStartT > 0.
+ */
+export function sliceAndPadFacecamAudio(fcBuf: AudioBuffer, seg: Segment): AudioBuffer {
+  const sr = fcBuf.sampleRate;
+  const nCh = fcBuf.numberOfChannels;
+  const fcStartT = seg.facecam?.startT ?? 0;
+  const segStart = seg.srcStart;
+  const segEnd = seg.srcEnd;
+  const segDur = Math.max(0, segEnd - segStart);
+  const fcDur = fcBuf.duration;
+
+  if (fcStartT <= 0) {
+    return sliceAndStretchAudio(fcBuf, seg);
+  }
+
+  // Pre-take silence before the take started
+  const preDur = Math.max(0, Math.min(segDur, fcStartT - segStart));
+  const takeSrcStart = Math.max(0, segStart - fcStartT);
+  const takeSrcEnd = Math.max(0, Math.min(fcDur, segEnd - fcStartT));
+  const takeDur = Math.max(0, takeSrcEnd - takeSrcStart);
+  const postDur = Math.max(0, segDur - (preDur + takeDur));
+
+  const parts: AudioBuffer[] = [];
+  if (preDur > 0.001) {
+    const preLen = Math.max(1, Math.round(preDur * sr));
+    parts.push(makeBuffer(nCh, preLen, sr, Array.from({ length: nCh }, () => new Float32Array(preLen))));
+  }
+  if (takeDur > 0.001) {
+    parts.push(sliceSegment(fcBuf, takeSrcStart, takeSrcEnd));
+  }
+  if (postDur > 0.001) {
+    const postLen = Math.max(1, Math.round(postDur * sr));
+    parts.push(makeBuffer(nCh, postLen, sr, Array.from({ length: nCh }, () => new Float32Array(postLen))));
+  }
+
+  const assembled = concatAudio(parts);
+  if (Math.abs(seg.speed - 1) < 0.001) {
+    return assembled;
+  }
+  return timeStretch(assembled, seg.speed);
+}
+
 /** Concatenate audio parts end-to-end at the first part's sample rate. */
 export function concatAudio(parts: AudioBuffer[]): AudioBuffer {
   if (parts.length === 0) return makeMock(1);
@@ -229,7 +319,12 @@ export function concatAudio(parts: AudioBuffer[]): AudioBuffer {
   let offset = 0;
   for (const part of parts) {
     for (let ch = 0; ch < numberOfChannels; ch++) {
-      const src = ch < part.numberOfChannels ? part.getChannelData(ch) : null;
+      const src =
+        part.numberOfChannels === 1
+          ? part.getChannelData(0)
+          : ch < part.numberOfChannels
+          ? part.getChannelData(ch)
+          : null;
       if (src) channels[ch]!.set(src, offset);
     }
     offset += part.length;
@@ -283,8 +378,19 @@ export function mixAudio(
 
   for (let ch = 0; ch < nCh; ch++) {
     const dst = new Float32Array(len);
-    const dataA = ch < bufA.numberOfChannels ? bufA.getChannelData(ch) : null;
-    const dataB = ch < bufB.numberOfChannels ? bufB.getChannelData(ch) : null;
+    // When a source buffer is mono (e.g. microphone), replicate channel 0 to both L and R channels
+    const dataA =
+      bufA.numberOfChannels === 1
+        ? bufA.getChannelData(0)
+        : ch < bufA.numberOfChannels
+        ? bufA.getChannelData(ch)
+        : null;
+    const dataB =
+      bufB.numberOfChannels === 1
+        ? bufB.getChannelData(0)
+        : ch < bufB.numberOfChannels
+        ? bufB.getChannelData(ch)
+        : null;
     for (let i = 0; i < len; i++) {
       const sA = (dataA && i < dataA.length ? dataA[i]! : 0) * volA;
       const sB = (dataB && i < dataB.length ? dataB[i]! : 0) * volB;

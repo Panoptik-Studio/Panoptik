@@ -753,12 +753,15 @@ export function PreviewCanvas() {
           if (audio.playbackRate !== active.seg.speed) audio.playbackRate = active.seg.speed;
           const targetVol = Math.max(0, Math.min(1, active.seg.audioVolume ?? 1));
           if (audio.volume !== targetVol) audio.volume = targetVol;
-          if (screenSrc && audio.src !== screenSrc) {
-            audio.src = screenSrc;
-            audio.currentTime = tSrc;
-            if (targetVol > 0) audio.play().catch(() => {});
-          } else if (audio.paused && targetVol > 0) {
-            audio.play().catch(() => {});
+          if (screenSrc) {
+            if (audio.src !== screenSrc) {
+              audio.src = screenSrc;
+              audio.currentTime = tSrc;
+              if (targetVol > 0) audio.play().catch(() => {});
+            } else if (audio.paused && targetVol > 0) {
+              audio.currentTime = tSrc;
+              audio.play().catch(() => {});
+            }
           }
         }
 
@@ -769,13 +772,19 @@ export function PreviewCanvas() {
           if (fcAudio.volume !== targetFcVol) fcAudio.volume = targetFcVol;
           if (fcSrc) {
             const fcStartT = active.seg.facecam?.startT ?? 0;
-            const targetFc = fcStartT > 0 ? Math.max(0, tEff - fcStartT) : tSrc;
-            if (fcAudio.src !== fcSrc) {
-              fcAudio.src = fcSrc;
-              fcAudio.currentTime = targetFc;
-              if (targetFcVol > 0) fcAudio.play().catch(() => {});
-            } else if (fcAudio.paused && targetFcVol > 0) {
-              fcAudio.play().catch(() => {});
+            const isBeforeTake = fcStartT > 0 && tEff < fcStartT;
+            if (isBeforeTake) {
+              if (!fcAudio.paused) fcAudio.pause();
+            } else {
+              const targetFc = fcStartT > 0 ? Math.max(0, tEff - fcStartT) : tSrc;
+              if (fcAudio.src !== fcSrc) {
+                fcAudio.src = fcSrc;
+                fcAudio.currentTime = targetFc;
+                if (targetFcVol > 0) fcAudio.play().catch(() => {});
+              } else if (fcAudio.paused && targetFcVol > 0) {
+                fcAudio.currentTime = targetFc;
+                fcAudio.play().catch(() => {});
+              }
             }
           } else if (!fcAudio.paused) {
             fcAudio.pause();

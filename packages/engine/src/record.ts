@@ -45,60 +45,6 @@ export type StartRecordingOpts = {
   cameraStream?: MediaStream | null;
 };
 
-// ── WebCodecs VP9 HW path (preferred) — falls back to MediaRecorder if unsupported ──
-async function tryWebCodecsScreen(
-  screenStream: MediaStream,
-): Promise<{ output: import("mediabunny").Output; start: () => Promise<void>; stop: () => Promise<Blob> } | null> {
-  try {
-    const { Output, WebMOutputFormat, BufferTarget, MediaStreamVideoTrackSource, MediaStreamAudioTrackSource } = await import("mediabunny");
-    const track = screenStream.getVideoTracks()[0];
-    if (!track) return null;
-    // Probe: will throw if codec/HW not supported
-    const output = new Output({ format: new WebMOutputFormat(), target: new BufferTarget() });
-    const source = new MediaStreamVideoTrackSource(track as unknown as MediaStreamVideoTrack, {
-      codec: "vp09.00.10.08" as unknown as import("mediabunny").VideoCodec,
-      bitrate: 12_000_000,
-      // @ts-ignore — mediabunny forwards to WebCodecs VideoEncoderConfig.hardwareAcceleration
-      hardwareAcceleration: "prefer-hardware",
-      keyFrameInterval: 2,
-    } as unknown as import("mediabunny").VideoEncodingConfig);
-    output.addVideoTrack(source);
-    let audioSource: InstanceType<typeof MediaStreamAudioTrackSource> | null = null;
-    const audioTrack = screenStream.getAudioTracks()[0];
-    if (audioTrack) {
-      try {
-        audioSource = new MediaStreamAudioTrackSource(audioTrack as unknown as MediaStreamAudioTrack, {
-          codec: "opus",
-          bitrate: 128_000,
-        } as unknown as import("mediabunny").AudioEncodingConfig);
-        output.addAudioTrack(audioSource);
-        console.log("[Record] screen: WebCodecs audio track added (system audio)");
-      } catch (e) {
-        console.warn("[Record] screen: WebCodecs audio track failed, continuing video-only", e);
-        audioSource = null;
-      }
-    } else {
-      console.log("[Record] screen: no system audio track in stream (user may have declined 'Share audio')");
-    }
-    return {
-      output,
-      // Starting the Output is what makes it consume the track, so it is held
-      // back until the countdown has finished.
-      start: () => output.start(),
-      stop: async () => {
-        source.close?.();
-        audioSource?.close?.();
-        await output.finalize();
-        const buf = (output.target as InstanceType<typeof BufferTarget>).buffer;
-        if (!buf) throw new Error("WebCodecs output produced no data");
-        return new Blob([buf], { type: "video/webm;codecs=vp09" + (audioSource ? ";codecs=opus" : "") });
-      },
-    };
-  } catch {
-    return null;
-  }
-}
-
 /** Longest we wait for a recorder's final chunk before giving up on it. */
 const FLUSH_TIMEOUT_MS = 4000;
 
@@ -397,11 +343,15 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   // so 1920p60 vp8 → 13fps SW, while avc1 → 60fps HW. Keep webm fallback for browsers without mp4.
   const screenMime =
     [
+      "video/mp4;codecs=avc1,opus",
+      "video/mp4;codecs=avc1,aac",
       "video/mp4;codecs=avc1",
       "video/mp4",
-      "video/webm;codecs=h264",
-      "video/webm;codecs=avc1",
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=h264,opus",
+      "video/webm;codecs=avc1,opus",
       "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8,opus",
       "video/webm;codecs=vp8",
       "video/webm",
     ].find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) || "video/webm";
@@ -425,26 +375,18 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     await waitForFirstFrame(screen);
   }
 
-  // ── Try WebCodecs VP9 HW for screen (1920p60 HW → 60fps) before MediaRecorder VP8 SW (13fps)
-  let webCodecsScreen: { output: import("mediabunny").Output; start: () => Promise<void>; stop: () => Promise<Blob> } | null = null;
-  if (screen.getTracks().length > 0) {
-    webCodecsScreen = await tryWebCodecsScreen(screen);
-    if (webCodecsScreen) console.log("[Record] screen: WebCodecs VP9 HW (prefer-hardware) — expect 60fps at 1920");
-    else console.log("[Record] screen: MediaRecorder", screenMime, "— may be SW");
-  }
-
   // Only create recorders for non-empty streams
   let screenRecorder: MediaRecorder | null = null;
   let facecamRecorder: MediaRecorder | null = null;
   const screenChunks: Blob[] = [];
   const facecamChunks: Blob[] = [];
 
-  if (!webCodecsScreen && screen.getTracks().length > 0) {
+  if (screen.getTracks().length > 0) {
     screenRecorder = new MediaRecorder(
       screen,
       MediaRecorder.isTypeSupported(screenMime)
-        ? { mimeType: screenMime, videoBitsPerSecond: screenBitrate }
-        : { videoBitsPerSecond: screenBitrate } as Record<string, unknown>,
+        ? ({ mimeType: screenMime, videoBitsPerSecond: screenBitrate, audioBitsPerSecond: 192_000 } as unknown as MediaRecorderOptions)
+        : ({ videoBitsPerSecond: screenBitrate, audioBitsPerSecond: 192_000 } as unknown as MediaRecorderOptions),
     );
     screenRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) screenChunks.push(e.data);
@@ -469,9 +411,7 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     return {
       screenStream: screen,
       facecamStream: facecam,
-      begin: async () => {
-        if (webCodecsScreen) await webCodecsScreen.start();
-      },
+      begin: async () => {},
       layout,
       shape,
       stop: async () => {
@@ -487,20 +427,14 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     layout,
     shape,
     begin: async () => {
-      // One instant for every source, after the countdown.
-      if (webCodecsScreen) await webCodecsScreen.start();
+      // One synchronous instant for every source, after the countdown.
       if (screenRecorder && screenRecorder.state === "inactive") screenRecorder.start(100);
       if (facecamRecorder && facecamRecorder.state === "inactive") facecamRecorder.start(100);
     },
     stop: async () => {
-      let screenBlob: Blob;
-      if (webCodecsScreen) {
-        const [scBlob] = await Promise.all([webCodecsScreen.stop(), flushRecorder(facecamRecorder)]);
-        screenBlob = scBlob;
-      } else {
-        await Promise.all([flushRecorder(screenRecorder), flushRecorder(facecamRecorder)]);
-        screenBlob = new Blob(screenChunks, { type: screenRecorder?.mimeType || "video/webm" });
-      }
+      await Promise.all([flushRecorder(screenRecorder), flushRecorder(facecamRecorder)]);
+      const screenBlob = new Blob(screenChunks, { type: screenRecorder?.mimeType || "video/webm" });
+      const facecamBlob = new Blob(facecamChunks, { type: facecamRecorder?.mimeType || "video/webm" });
 
       // Only now release the devices; stopping tracks first can truncate the
       // tail. A camera passed in by the caller is not ours to close.
@@ -508,7 +442,7 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
 
       return {
         screenBlob,
-        facecamBlob: new Blob(facecamChunks, { type: facecamRecorder?.mimeType || "video/webm" }),
+        facecamBlob,
       };
     },
   };

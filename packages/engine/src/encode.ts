@@ -22,15 +22,21 @@ import type { ExportFps, ExportOpts, Project } from "@panoptik/schema";
 import { EXPORT_FPS_OPTIONS } from "@panoptik/schema";
 import { mediaForSegment, primaryMedia } from "@panoptik/schema";
 import { presetAspect } from "./layout";
-import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator, activateMedia } from "./decode";
+import { prepareAllFrames, resetExportIterator, resetFacecamExportIterator, activateMedia, getFirstVideoTimestamp } from "./decode";
 import { ensureBackgroundImages, renderFrame } from "./render";
-import { applyVolume, concatAudio, mixAudio, sliceAndStretchAudio } from "./timeStretch";
+import { applyVolume, concatAudio, mixAudio, sliceAndStretchAudio, sliceAndPadFacecamAudio, sliceAndPadScreenAudio } from "./timeStretch";
 import { projectDuration, segmentDuration } from "./timeline";
 
 // Register WASM AAC encoder fallback so all platforms/browsers (including Linux Chrome/Chromium)
 // can encode genuine, universal AAC audio in MP4 files.
 try {
-  registerAacEncoder();
+  if (typeof globalThis !== "undefined") {
+    const g = globalThis as unknown as { __panoptikAacRegistered?: boolean };
+    if (!g.__panoptikAacRegistered) {
+      g.__panoptikAacRegistered = true;
+      registerAacEncoder();
+    }
+  }
 } catch (e) {
   console.warn("[Export] could not register AAC encoder fallback", e);
 }
@@ -131,19 +137,39 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
   try {
     const { width, height } = exportSize(project, opts.resolution, opts.selectedSegmentId);
     const requestedIsMp4 = opts.format === "mp4";
-    console.log("[Export]", project.segments.map((s) => `seg ${s.id} ${s.srcStart}-${s.srcEnd} @${s.speed}x`).join(" | "));
+    const startTime = performance.now();
+    const totalTimeline = projectDuration(project);
+    console.log(`[Export] 🎬 Starting: ${width}x${height} @ ${exportFps}fps | ${totalTimeline.toFixed(2)}s | Format: ${requestedIsMp4 ? "MP4" : "WebM"} (${project.segments.length} segment${project.segments.length > 1 ? "s" : ""})`);
 
     // Shared AudioBuffer resolver for any blob src (screen, facecam, music,
     // voiceover) — hoisted so the audio-track mix below can reuse it.
     const { decodeViaAudioContext } = await import("./audio");
     const audioBufferCache = new Map<string, AudioBuffer | null>();
-    const getBufferForSrc = async (src: string | null | undefined): Promise<AudioBuffer | null> => {
+    const blobCache = new Map<string, Blob | null>();
+
+    const getBlobForSrc = async (src: string | null | undefined): Promise<Blob | null> => {
       if (!src) return null;
-      if (audioBufferCache.has(src)) return audioBufferCache.get(src) || null;
+      if (blobCache.has(src)) return blobCache.get(src) || null;
       if (src.startsWith("blob:")) {
         try {
           const res = await fetch(src);
           const blob = await res.blob();
+          blobCache.set(src, blob);
+          return blob;
+        } catch {
+          blobCache.set(src, null);
+          return null;
+        }
+      }
+      return null;
+    };
+
+    const getBufferForSrc = async (src: string | null | undefined): Promise<AudioBuffer | null> => {
+      if (!src) return null;
+      if (audioBufferCache.has(src)) return audioBufferCache.get(src) || null;
+      const blob = await getBlobForSrc(src);
+      if (blob) {
+        try {
           const decoded = await decodeViaAudioContext(blob);
           audioBufferCache.set(src, decoded);
           return decoded;
@@ -155,23 +181,117 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
       return null;
     };
 
-    // Need audioBuffer early to decide container when aac not encodable.
-    // For maximal compatibility: mp4+avc+aac is the gold standard for every
-    // native player (VLC, MPV, COSMIC/GStreamer, QuickTime). Linux Chrome
-    // can't encode aac via WebCodecs, so mp4 would fall back to opus-in-mp4
-    // which is browser-only. In that case we transparently switch to
-    // webm+vp9+opus which is the next-most compatible and works on Pop!_OS.
-    const audioBuffer = await getExportAudio(project);
-    console.log("[Export] audioBuffer", audioBuffer ? { dur: audioBuffer.duration.toFixed(2), sr: audioBuffer.sampleRate, ch: audioBuffer.numberOfChannels, len: audioBuffer.length } : null);
+    // 1. Resolve and compose master audio across all sources:
+    // - Per-segment screen audio (if media contains audio, or standalone project.audioSrc)
+    // - Per-segment facecam mic audio (with startT offset support)
+    // - Music / Voiceover tracks (wall-clock timeline mixing)
+    let spedAudioBuffer: AudioBuffer | null = null;
+    try {
+      const parts: AudioBuffer[] = [];
+      let hasAnyAudio = false;
+
+      for (const seg of project.segments) {
+        const screenVol = seg.audioVolume ?? 1;
+        const fcVol = seg.facecam?.audioVolume ?? 1;
+
+        // 1. Process Screen Audio — per-segment media (multiclip).
+        let screenPart: AudioBuffer | null = null;
+        const segMedia = mediaForSegment(project, seg);
+        const segScreenBuf = segMedia ? await getBufferForSrc(segMedia.src) : null;
+        // If the segment has no facecam, standalone project.audioSrc acts as screen/narration audio
+        const standaloneAudioSrc = !seg.facecam?.src ? project.audioSrc : null;
+        const standaloneBuf = standaloneAudioSrc ? await getBufferForSrc(standaloneAudioSrc) : null;
+        const screenBufForSeg = segScreenBuf ?? standaloneBuf;
+        if (screenBufForSeg) {
+          const screenSrc = segMedia?.src || standaloneAudioSrc;
+          const blob = await getBlobForSrc(screenSrc);
+          const firstTs = blob ? await getFirstVideoTimestamp(blob, screenSrc ?? undefined) : 0;
+          screenPart = sliceAndPadScreenAudio(screenBufForSeg, seg, firstTs);
+          hasAnyAudio = true;
+        }
+
+        // 2. Process Facecam / Mic Audio
+        const fcSrc = seg.facecam?.src;
+        let fcPart: AudioBuffer | null = null;
+        if (fcSrc) {
+          const fcBuf = await getBufferForSrc(fcSrc);
+          if (fcBuf) {
+            fcPart = sliceAndPadFacecamAudio(fcBuf, seg);
+            hasAnyAudio = true;
+          }
+        }
+
+        // 3. Dual-track mixing with volume scaling
+        let mixedSegAudio: AudioBuffer | null = null;
+        if (screenPart && fcPart) {
+          mixedSegAudio = mixAudio(screenPart, screenVol, fcPart, fcVol);
+        } else if (screenPart) {
+          mixedSegAudio = applyVolume(screenPart, screenVol);
+        } else if (fcPart) {
+          mixedSegAudio = applyVolume(fcPart, fcVol);
+        } else {
+          // Neither source has audio for this segment — produce silence of correct timeline duration
+          const dur = segmentDuration(seg);
+          const sr = 48000;
+          const len = Math.max(1, Math.round(dur * sr));
+          const { makeBuffer } = await import("./timeStretch");
+          mixedSegAudio = makeBuffer(2, len, sr, [new Float32Array(len), new Float32Array(len)]);
+        }
+
+        parts.push(mixedSegAudio);
+      }
+
+      if (parts.length > 0 && hasAnyAudio) {
+        spedAudioBuffer = concatAudio(parts);
+        console.log(`[Export] 🎵 Audio assembled: ${spedAudioBuffer.numberOfChannels}ch, ${spedAudioBuffer.sampleRate}Hz, ${spedAudioBuffer.duration.toFixed(2)}s`);
+      }
+    } catch (e) {
+      console.warn("[Export] audio assembly failed", e);
+    }
+
+    // Music/voiceover tracks
+    const audioTracks = project.audioTracks ?? [];
+    if (audioTracks.length > 0) {
+      try {
+        const at = await import("./audioTracks");
+        const resolved: { track: (typeof audioTracks)[number]; buffer: AudioBuffer }[] = [];
+        for (const track of audioTracks) {
+          const buffer =
+            at.getTrackBuffer(track.id) ??
+            (track.src.startsWith("blob:") ? await getBufferForSrc(track.src) : null);
+          if (buffer) resolved.push({ track, buffer });
+        }
+        if (resolved.length > 0) {
+          if (spedAudioBuffer) {
+            spedAudioBuffer = at.mixTracksIntoBase(spedAudioBuffer, resolved);
+          } else {
+            const totalDur = Math.max(
+              projectDuration(project),
+              ...resolved.map((r) => r.track.startT + r.buffer.duration),
+            );
+            const sr = resolved[0]!.buffer.sampleRate;
+            const { makeBuffer } = await import("./timeStretch");
+            const silence = makeBuffer(2, Math.max(1, Math.round(totalDur * sr)), sr, [
+              new Float32Array(Math.round(totalDur * sr)),
+              new Float32Array(Math.round(totalDur * sr)),
+            ]);
+            spedAudioBuffer = at.mixTracksIntoBase(silence, resolved);
+          }
+          console.log("[Export] mixed audio tracks into master", resolved.map((r) => `${r.track.kind}:"${r.track.name}"@${r.track.startT}s`));
+        }
+      } catch (e) {
+        console.warn("[Export] audio track mix failed", e);
+      }
+    }
 
     const actualIsMp4 = requestedIsMp4;
     let audioCodec: AudioCodec | null = null;
-    if (audioBuffer) {
+    if (spedAudioBuffer) {
       if (requestedIsMp4) {
         const tryAacConfigs: Array<{ numberOfChannels: number; sampleRate: number }> = [
-          { numberOfChannels: audioBuffer.numberOfChannels, sampleRate: audioBuffer.sampleRate },
-          { numberOfChannels: 2, sampleRate: audioBuffer.sampleRate },
-          { numberOfChannels: audioBuffer.numberOfChannels, sampleRate: 44100 },
+          { numberOfChannels: spedAudioBuffer.numberOfChannels, sampleRate: spedAudioBuffer.sampleRate },
+          { numberOfChannels: 2, sampleRate: spedAudioBuffer.sampleRate },
+          { numberOfChannels: spedAudioBuffer.numberOfChannels, sampleRate: 44100 },
           { numberOfChannels: 2, sampleRate: 44100 },
           { numberOfChannels: 1, sampleRate: 48000 },
           { numberOfChannels: 2, sampleRate: 48000 },
@@ -183,8 +303,8 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         if (!audioCodec) {
           // If AAC encoder is not available (e.g. Linux Chromium/Chrome), mux with Opus in MP4
           audioCodec = await getFirstEncodableAudioCodec(["opus"] as AudioCodec[], {
-            numberOfChannels: audioBuffer.numberOfChannels,
-            sampleRate: audioBuffer.sampleRate,
+            numberOfChannels: spedAudioBuffer.numberOfChannels,
+            sampleRate: spedAudioBuffer.sampleRate,
           });
           if (audioCodec) {
             console.log("[Export] aac not encodable, encoding opus audio into MP4 container");
@@ -192,13 +312,13 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         }
       } else {
         audioCodec = await getFirstEncodableAudioCodec(WEBM_AUDIO, {
-          numberOfChannels: audioBuffer.numberOfChannels,
-          sampleRate: audioBuffer.sampleRate,
+          numberOfChannels: spedAudioBuffer.numberOfChannels,
+          sampleRate: spedAudioBuffer.sampleRate,
         });
       }
-      console.log("[Export] audioCodec for", requestedIsMp4 ? "mp4" : "webm", "requested ->", audioCodec, "actual", actualIsMp4 ? "mp4" : "webm", "candidates", requestedIsMp4 ? MP4_AUDIO : WEBM_AUDIO);
+      console.log("[Export] audioCodec for", requestedIsMp4 ? "mp4" : "webm", "requested ->", audioCodec, "channels:", spedAudioBuffer.numberOfChannels, "sampleRate:", spedAudioBuffer.sampleRate);
     } else {
-      console.warn("[Export] no audioBuffer -> silent export (preview uses <audio> blob URL, different decoder)");
+      console.log("[Export] no audio tracks in project -> video-only export");
     }
 
     const videoCodec = await getFirstEncodableVideoCodec(
@@ -241,170 +361,25 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
       },
     });
     output.addVideoTrack(videoSource, { frameRate: exportFps });
-
-    // Audio is optional: a screen recording may carry no track at all.
     let audioSource: AudioBufferSource | null = null;
-    if (audioBuffer && audioCodec) {
+    if (spedAudioBuffer && audioCodec) {
       audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: 192_000 });
       output.addAudioTrack(audioSource);
-      console.log("[Export] audio track added", audioCodec, "to", actualIsMp4 ? "mp4" : "webm");
-    } else if (audioBuffer) {
-      console.warn("[Export] no encodable audio codec -> silent. Try WebM on Linux.");
     }
-
-    // Pitch-preserving per-segment time-stretch. The old path stretched the
-    // whole clip by a single playbackRate (and before that used vari-speed
-    // playbackRate, which raised pitch like a chipmunk). Speed is now per
-    // segment: each segment's source window is sliced out and stretched to its
-    // own timeline length, then concatenated so the muxed audio matches video.
-    let spedAudioBuffer: AudioBuffer | null = audioBuffer;
-    const hasAnyFacecamAudio = project.segments.some((s) => !!s.facecam?.src);
-    if (audioBuffer || hasAnyFacecamAudio) {
-      try {
-        const screenSrc = primaryMedia(project).src;
-        const defaultScreenBuf = (await getBufferForSrc(screenSrc)) || audioBuffer;
-
-        const parts: AudioBuffer[] = [];
-        for (const seg of project.segments) {
-          const screenVol = seg.audioVolume ?? 1;
-          const fcVol = seg.facecam?.audioVolume ?? 1;
-
-          // 1. Process Screen Audio — per-segment media (multiclip).
-          let screenPart: AudioBuffer | null = null;
-          const segMedia = mediaForSegment(project, seg);
-          const segScreenBuf = segMedia ? await getBufferForSrc(segMedia.src) : null;
-          // For the primary clip, fall back to the pre-decoded default buffer
-          // (covers single-clip case where getBufferForSrc fails but AudioSink
-          // succeeded). For other clips, no fallback — silence is correct.
-          const isPrimary = segMedia?.id === primaryMedia(project).id;
-          const screenBufForSeg = segScreenBuf ?? (isPrimary ? defaultScreenBuf : null);
-          if (screenBufForSeg) {
-            screenPart = sliceAndStretchAudio(screenBufForSeg, seg);
-          }
-
-          // 2. Process Facecam / Mic Audio
-          const fcSrc = seg.facecam?.src;
-          let fcPart: AudioBuffer | null = null;
-          if (fcSrc) {
-            const fcBuf = await getBufferForSrc(fcSrc);
-            if (fcBuf) {
-              const fcStartT = seg.facecam?.startT ?? 0;
-              const fcSliceSeg =
-                fcStartT > 0
-                  ? {
-                      ...seg,
-                      srcStart: Math.max(0, seg.srcStart - fcStartT),
-                      srcEnd: Math.max(0, seg.srcEnd - fcStartT),
-                    }
-                  : seg;
-              fcPart = sliceAndStretchAudio(fcBuf, fcSliceSeg);
-            }
-          }
-
-          // 3. Dual-track mixing with volume scaling
-          let mixedSegAudio: AudioBuffer | null = null;
-          if (screenPart && fcPart) {
-            mixedSegAudio = mixAudio(screenPart, screenVol, fcPart, fcVol);
-          } else if (screenPart) {
-            mixedSegAudio = applyVolume(screenPart, screenVol);
-          } else if (fcPart) {
-            mixedSegAudio = applyVolume(fcPart, fcVol);
-          } else {
-            // Neither source has audio for this segment — produce silence of correct timeline duration
-            const dur = segmentDuration(seg);
-            const sr = (screenBufForSeg ?? fcPart ?? audioBuffer)?.sampleRate ?? 48000;
-            const len = Math.max(1, Math.round(dur * sr));
-            const { makeBuffer } = await import("./timeStretch");
-            mixedSegAudio = makeBuffer(1, len, sr, [new Float32Array(len)]);
-          }
-
-          parts.push(mixedSegAudio);
-        }
-
-        if (parts.length > 0) {
-          spedAudioBuffer = concatAudio(parts);
-        }
-        console.log("[Export] per-segment audio windows", {
-          parts: parts.length,
-          from: audioBuffer ? audioBuffer.duration.toFixed(2) : "0 (no screen audio)",
-          to: spedAudioBuffer ? spedAudioBuffer.duration.toFixed(2) : "0",
-          segments: project.segments.map((s) => `${s.srcStart}-${s.srcEnd}@${s.speed}x`),
-        });
-      } catch (e) {
-        console.warn("[Export] audio time-stretch failed, using original", e);
-        spedAudioBuffer = audioBuffer;
-        // If we failed but facecam audio exists and base was null, try to build from facecam alone as fallback
-        if (!spedAudioBuffer && hasAnyFacecamAudio) {
-          try {
-            const fallbackParts: AudioBuffer[] = [];
-            for (const seg of project.segments) {
-              const fcSrc = seg.facecam?.src;
-              if (!fcSrc) continue;
-              const fcBuf = await getBufferForSrc(fcSrc);
-              if (fcBuf) fallbackParts.push(sliceAndStretchAudio(fcBuf, seg));
-            }
-            if (fallbackParts.length > 0) {
-              const { concatAudio: ca } = await import("./timeStretch");
-              spedAudioBuffer = ca(fallbackParts);
-            }
-          } catch { /* leave null */ }
-        }
-      }
-    }
-
-    // Music/voiceover ride on wall-clock timeline time — no speed stretching.
-    // Buffers come from the preview registry, or are decoded from the track's
-    // blob URL on the spot (fresh page → straight-to-export).
-    const audioTracks = project.audioTracks ?? [];
-    if (audioTracks.length > 0) {
-      try {
-        const at = await import("./audioTracks");
-        const resolved: { track: (typeof audioTracks)[number]; buffer: AudioBuffer }[] = [];
-        for (const track of audioTracks) {
-          const buffer =
-            at.getTrackBuffer(track.id) ??
-            (track.src.startsWith("blob:") ? await getBufferForSrc(track.src) : null);
-          if (buffer) resolved.push({ track, buffer });
-        }
-        if (resolved.length > 0) {
-          if (spedAudioBuffer) {
-            spedAudioBuffer = at.mixTracksIntoBase(spedAudioBuffer, resolved);
-          } else {
-            // No base audio (silent clip, no mic) but music/voiceover exists — create silence base
-            const totalDur = Math.max(
-              projectDuration(project),
-              ...resolved.map((r) => r.track.startT + r.buffer.duration),
-            );
-            const sr = resolved[0]!.buffer.sampleRate;
-            const { makeBuffer } = await import("./timeStretch");
-            const silence = makeBuffer(1, Math.max(1, Math.round(totalDur * sr)), sr, [new Float32Array(Math.round(totalDur * sr))]);
-            spedAudioBuffer = at.mixTracksIntoBase(silence, resolved);
-          }
-          console.log("[Export] mixed audio tracks", resolved.map((r) => `${r.track.kind}:"${r.track.name}"@${r.track.startT}s`));
-        } else {
-          console.warn("[Export] audioTracks present but none resolvable -> skipped");
-        }
-      } catch (e) {
-        console.warn("[Export] audio track mix failed, exporting base audio only", e);
-      }
-    }
+    console.log(`[Export] ⚙️ Encoders ready: video=${videoCodec}, audio=${audioCodec ?? "none (silent)"}`);
 
     await output.start();
 
-    const totalTimeline = projectDuration(project);
     const frameDuration = 1 / exportFps;
+    const grandTotalFrames = Math.max(1, Math.ceil(totalTimeline * exportFps));
+    let framesRendered = 0;
+    let lastLoggedPct = -1;
 
     try {
-      // Temporal mapping: renderFrame resolves the active segment from timeline
-      // time, so we step each segment at its own speed and feed it the absolute
-      // timeline cursor. Frames decode at source time (srcT) which changes with
-      // segment speed; present times are timeline time.
       let timelineCursor = 0;
       let activeFacecamSrc: string | null = null;
       let activeMediaId: string | null = null;
       for (const seg of project.segments) {
-        // Multiclip: swap the decode pipeline to this segment's clip once per
-        // boundary. Adjacent same-clip segments group into one swap.
         const segMedia = mediaForSegment(project, seg);
         if (segMedia?.id !== activeMediaId) {
           try {
@@ -432,25 +407,25 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         for (let i = 0; i < totalFrames; i++) {
           const tEff = i / exportFps;
           const srcT = seg.srcStart + tEff * seg.speed;
-          if (i % 60 === 0) console.log("[Export] frame", i, "/", totalFrames, "seg", seg.id, "tEff", tEff.toFixed(2), "srcT", srcT.toFixed(2));
           const fcStartT = seg.facecam?.startT ?? 0;
           const fcT = fcStartT > 0 ? Math.max(0, (timelineCursor + tEff) - fcStartT) : srcT;
           await prepareAllFrames(srcT, fcT);
           renderFrame(ctx as unknown as CanvasRenderingContext2D, project, timelineCursor + tEff);
-          // Awaited so encoder backpressure actually throttles us rather than
-          // queueing the whole clip into memory.
           await videoSource.add(timelineCursor + tEff, frameDuration);
+          framesRendered++;
+          const pct = Math.floor((framesRendered / grandTotalFrames) * 100);
+          if (pct >= lastLoggedPct + 25 || pct === 100) {
+            lastLoggedPct = pct;
+            console.log(`[Export] ⏳ Rendering frames: ${pct}% (${framesRendered}/${grandTotalFrames})`);
+          }
           if (i % Math.round(exportFps) === 0) emitProgress(totalTimeline > 0 ? (timelineCursor + tEff) / totalTimeline : i / totalFrames);
         }
         timelineCursor += dur;
       }
 
       if (audioSource && spedAudioBuffer) {
-        console.log("[Export] adding audio buffer to muxer", spedAudioBuffer.duration.toFixed(2), "s");
+        console.log(`[Export] 📦 Muxing ${spedAudioBuffer.duration.toFixed(2)}s audio into container...`);
         await audioSource.add(spedAudioBuffer);
-        console.log("[Export] audio added");
-      } else {
-        console.log("[Export] skipping audio mux (silent)", { hasSource: !!audioSource, hasBuffer: !!spedAudioBuffer });
       }
 
       videoSource.close();
@@ -467,7 +442,9 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
 
     const buffer = (output.target as BufferTarget).buffer;
     if (!buffer) throw new Error("Export produced no data");
-    // Use actual container for MIME so download extension matches (mp4->webm switch on Linux)
+    const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(1);
+    const sizeMb = (buffer.byteLength / (1024 * 1024)).toFixed(2);
+    console.log(`[Export] ✅ Export complete in ${elapsedSec}s | Output: ${actualIsMp4 ? "MP4" : "WebM"} (${sizeMb} MB)`);
     return new Blob([buffer], { type: actualIsMp4 ? "video/mp4" : "video/webm" });
   } finally {
     if (typeof window !== "undefined") (window as unknown as { __isExporting?: boolean }).__isExporting = false;
