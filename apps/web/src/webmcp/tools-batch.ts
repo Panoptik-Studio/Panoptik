@@ -30,6 +30,10 @@ export function setAnalysisCache(analysis: FullMediaAnalysis | null): void {
   currentAnalysisCache = analysis;
 }
 
+export function getAnalysisCache(): FullMediaAnalysis | null {
+  return currentAnalysisCache;
+}
+
 export function registerBatchTools(): void {
   // ── 0. get_director_guidelines (Read-Only Free) ──
   registerToolWithLifecycle({

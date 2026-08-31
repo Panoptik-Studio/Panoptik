@@ -8,6 +8,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { projectDuration, segmentDuration } from "@panoptik/engine";
 import { engine } from "@/lib/engineProvider";
 import { showConfirmDialog } from "./confirm";
+import { getAnalysisCache } from "./tools-batch";
 import type { ExportFps, ExportOpts } from "@panoptik/schema";
 import { DEFAULT_EXPORT_FPS } from "@panoptik/schema";
 
@@ -98,6 +99,49 @@ export function registerEngineTools(): void {
   });
 
   registerToolWithLifecycle({
+    name: "list_clips",
+    description:
+      "Returns a list of all timeline video clips with cumulative start/end timestamps, durations, speeds, and transitions.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    annotations: { readOnlyHint: true },
+    execute: async () => {
+      const project = useProjectStore.getState().project;
+      if (!project) {
+        return { error: "No project loaded. Ask the user to import a clip first." };
+      }
+
+      let timelineCursor = 0;
+      const clips = project.segments.map((seg, idx) => {
+        const dur = segmentDuration(seg);
+        const start = timelineCursor;
+        const end = timelineCursor + dur;
+        timelineCursor = end;
+
+        return {
+          clipIndex: idx,
+          id: seg.id,
+          name: seg.name ?? `Clip ${idx + 1}`,
+          timelineStart: Number(start.toFixed(2)),
+          timelineEnd: Number(end.toFixed(2)),
+          duration: Number(dur.toFixed(2)),
+          speed: seg.speed,
+          transition: seg.transition ?? "cut",
+          transitionDuration: seg.transitionDuration ?? 0.45,
+        };
+      });
+
+      return {
+        totalClips: clips.length,
+        totalDuration: Number(timelineCursor.toFixed(2)),
+        clips,
+      };
+    },
+  });
+
+  registerToolWithLifecycle({
     name: "list_scenes",
     description:
       "Returns a list of all timeline segments (scenes) with their cumulative timeline start/end timestamps, duration, speed, and transitions.",
@@ -135,6 +179,162 @@ export function registerEngineTools(): void {
         totalScenes: scenes.length,
         totalDuration: Number(timelineCursor.toFixed(2)),
         scenes,
+      };
+    },
+  });
+
+  registerToolWithLifecycle({
+    name: "get_silence_intervals",
+    description:
+      "Detects audio silence and dead-air intervals in the video where the speaker is inactive. Returns start/end timestamps and durations for ripple trimming.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        minDurationSec: {
+          type: "number",
+          description: "Minimum silence duration threshold in seconds (default 1.0).",
+        },
+      },
+    },
+    annotations: { readOnlyHint: true },
+    execute: async ({ minDurationSec = 1.0 }: { minDurationSec?: number } = {}) => {
+      const store = useProjectStore.getState();
+      const project = store.project;
+      if (!project) {
+        return { error: "No project loaded." };
+      }
+
+      const totalDur = projectDuration(project);
+      const cache = getAnalysisCache();
+
+      if (cache?.audio?.silences && cache.audio.silences.length > 0) {
+        const silences = cache.audio.silences
+          .filter((s) => s.duration >= minDurationSec)
+          .map((s) => ({
+            start: Number(s.start.toFixed(2)),
+            end: Number(s.end.toFixed(2)),
+            duration: Number(s.duration.toFixed(2)),
+          }));
+        return {
+          totalDuration: Number(totalDur.toFixed(2)),
+          count: silences.length,
+          silences,
+        };
+      }
+
+      // Compute silences from text overlays / captions / speech phrases
+      const allTextOverlays = project.segments.flatMap((s) => [
+        ...(s.textOverlays ?? []),
+        ...(s.stagedTextOverlays ?? []),
+      ]);
+      const phrases =
+        cache?.phrases && cache.phrases.length > 0
+          ? cache.phrases
+          : allTextOverlays
+              .filter((o) => Boolean(o.text && o.text.trim()))
+              .map((c) => ({
+                start: c.timestamp,
+                end: c.timestamp + (c.duration ?? 3),
+                text: c.text,
+                speaker: c.speaker === "Screen" ? 1 : 0,
+              }));
+
+      const silences: Array<{ start: number; end: number; duration: number }> = [];
+      const sorted = [...phrases].sort((a, b) => a.start - b.start);
+
+      let prevEnd = 0;
+      for (const p of sorted) {
+        if (p.start - prevEnd >= minDurationSec) {
+          silences.push({
+            start: Number(prevEnd.toFixed(2)),
+            end: Number(p.start.toFixed(2)),
+            duration: Number((p.start - prevEnd).toFixed(2)),
+          });
+        }
+        prevEnd = Math.max(prevEnd, p.end);
+      }
+      if (totalDur - prevEnd >= minDurationSec) {
+        silences.push({
+          start: Number(prevEnd.toFixed(2)),
+          end: Number(totalDur.toFixed(2)),
+          duration: Number((totalDur - prevEnd).toFixed(2)),
+        });
+      }
+
+      return {
+        totalDuration: Number(totalDur.toFixed(2)),
+        count: silences.length,
+        silences,
+      };
+    },
+  });
+
+  registerToolWithLifecycle({
+    name: "get_transcript",
+    description: "Returns the spoken transcript with timestamps and speaker tags.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    execute: async () => {
+      const store = useProjectStore.getState();
+      const project = store.project;
+      if (!project) return { error: "No project loaded." };
+      const allOverlays = project.segments.flatMap((s) => [
+        ...(s.textOverlays ?? []),
+        ...(s.stagedTextOverlays ?? []),
+      ]);
+      const cache = getAnalysisCache();
+      const phrases =
+        cache?.phrases && cache.phrases.length > 0
+          ? cache.phrases
+          : allOverlays
+              .filter((o) => Boolean(o.text && o.text.trim()))
+              .map((c) => ({
+                start: c.timestamp,
+                end: c.timestamp + (c.duration ?? 3),
+                text: c.text,
+                speaker: c.speaker === "Screen" ? 1 : 0,
+              }));
+
+      const formatted = phrases
+        .map((p) => {
+          const mm = Math.floor(p.start / 60)
+            .toString()
+            .padStart(2, "0");
+          const ss = (p.start % 60).toFixed(1).padStart(4, "0");
+          return `[${mm}:${ss}] ${p.text}`;
+        })
+        .join("\n");
+
+      return {
+        phraseCount: phrases.length,
+        transcript: formatted,
+        phrases,
+      };
+    },
+  });
+
+  registerToolWithLifecycle({
+    name: "inspect_timeline",
+    description:
+      "Detailed inspector of all clips, timeline timestamps, transitions, speed, zooms, and overlays.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    execute: async () => {
+      const store = useProjectStore.getState();
+      const project = store.project;
+      if (!project) return { error: "No project loaded." };
+      return {
+        totalDuration: projectDuration(project),
+        clips: project.segments.map((seg, idx) => ({
+          clipIndex: idx,
+          id: seg.id,
+          duration: segmentDuration(seg),
+          speed: seg.speed,
+          transition: seg.transition ?? "cut",
+          transitionDuration: seg.transitionDuration ?? 0.45,
+          zoomCount: (seg.zoomPoints ?? []).length,
+          overlayCount: (seg.textOverlays ?? []).length,
+        })),
       };
     },
   });

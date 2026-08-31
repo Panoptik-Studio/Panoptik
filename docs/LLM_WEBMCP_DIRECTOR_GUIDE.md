@@ -601,4 +601,179 @@ const silences = await window.__panoptik_call_tool("get_silence_intervals", {
 console.log("Silence intervals:", silences);
 ```
 
+---
+
+## 8. Workflow: Splitting, Deleting Unwanted Parts & Joining with Transitions
+
+This workflow outlines how the AI Director identifies dead-air / unwanted sections, cuts and deletes them, and joins the remaining clips with cinematic transitions.
+
+### 1. How the LLM Detects Unwanted Regions
+1. **Dead-Air Silences**: Long pauses $> 1.5$s where the speaker stopped talking and no key action is being performed (`get_silence_intervals` or `get_video_summary.silences`).
+2. **False Starts & Flubs**: Repetitive sentences or retakes in `get_video_summary.transcript` (e.g. *"Uh, wait, let me start over..."*).
+3. **Incidental Loading / Window Fiddling**: Long pauses with cursor idling or window resizing.
+
+### 2. Decision Logic for Transitions
+* **Fast/Direct Cuts (`"cut"`)**: Default for seamless voice continuity when trimming brief micro-pauses ($< 1.0$s).
+* **Smooth Crossfade (`"fade"`)**: Recommended for jump cuts between distinct talking points or after trimming larger chunks ($> 2.0$s) to make speech cuts feel natural.
+* **Dip to Black (`"dipToBlack"`)**: Used for major topic changes or chapter milestones.
+* **Dynamic Slides & Wipes (`"slide-left"`, `"slide-right"`, `"wipe"`, `"zoom-in"`): Used when switching between entirely different browser tabs or applications.
+
+### 3. Step-by-Step Execution Snippet
+
+```js
+// ── Step 1: Detect silences & dead-air windows ──
+const silences = await window.__panoptik_call_tool("get_silence_intervals", { minDurationSec: 2.0 });
+console.log("Dead-air intervals:", silences);
+
+// Suppose we want to remove dead air between t = 18.0s and t = 24.0s:
+const tStart = 18.0;
+const tEnd = 24.0;
+
+// ── Step 2: Split the start of the unwanted section ──
+await window.__panoptik_call_tool("split_clip", { timestamp: tStart });
+
+// ── Step 3: Split the end of the unwanted section ──
+await window.__panoptik_call_tool("split_clip", { timestamp: tEnd });
+
+// ── Step 4: Delete the unwanted middle segment (Index 1) ──
+// Deleting automatically ripple-joins Clip 0 and Clip 2 together!
+await window.__panoptik_call_tool("delete_clip", { clipIndex: 1 });
+
+// ── Step 5: Add a smooth crossfade transition on the join point ──
+await window.__panoptik_call_tool("set_clip_transition", {
+  clipIndex: 1, // The newly joined incoming clip
+  transition: "fade", // "fade", "dipToBlack", "slide-left", "slide-right", "zoom-in", "wipe"
+  duration: 0.45
+});
+
+// ── Step 6: Verify timeline integrity ──
+const updatedClips = await window.__panoptik_call_tool("list_clips");
+console.log("Timeline after ripple delete & transition:", updatedClips);
+```
+
+---
+
+## 9. Closed-Loop Post-Trim Re-Ingestion (The Re-Base Principle)
+
+When the AI Director performs cuts and ripple-deletions, **the project timeline mutates fundamentally**:
+* The total video duration shrinks (e.g. from `153.04s` down to `118.20s`).
+* Clip boundary offsets shift leftward.
+* Spoken speech timestamps on the composite timeline shift accordingly.
+
+```
+       ┌────────────────────────────────────────────────────────────┐
+       │ ⚠️ THE CARDINAL RULE OF AUTONOMOUS VIDEO DIRECTING:        │
+       │ NEVER reuse pre-trim / raw footage timestamps for zooms,   │
+       │ text overlays, frame probes, or cursor queries after       │
+       │ performing split & delete operations!                      │
+       └────────────────────────────────────────────────────────────┘
+```
+
+### The 5-Step Re-Ingestion Sequence:
+
+Every time the timeline is trimmed or clips are deleted, the LLM Director must **close the loop** by executing this exact sequence before staging zooms or text:
+
+```mermaid
+flowchart TD
+    A[1. Execute Splits & Ripple Deletions] --> B[2. Re-Ingest State: get_project_state + list_clips]
+    B --> C[3. Re-Ingest Transcript: get_transcript]
+    C --> D[4. Query Rebased Telemetry: get_click_log at new timestamps]
+    D --> E[5. Visually Probe New Frames: probe_frames with 3x3 Grid]
+    E --> F[6. Stage Grounded Zooms & Text: propose_edits]
+```
+
+#### Copy-Paste Closed-Loop Re-Ingestion Snippet:
+```js
+// ── 1. Discover updated duration and clip boundaries ──
+const state = await window.__panoptik_call_tool("get_project_state");
+const clips = await window.__panoptik_call_tool("list_clips");
+console.log("Rebased Duration:", state.durationSeconds, "Total Clips:", state.segmentCount);
+
+// ── 2. Discover rebased speech phrase timestamps ──
+const rebasedTranscript = await window.__panoptik_call_tool("get_transcript");
+console.log("Rebased Spoken Phrases:\n", rebasedTranscript.transcript);
+
+// ── 3. Query cursor coordinates on the rebased timeline (e.g. at 18s, 42s, 58s, 95s) ──
+const cursorFocal = await window.__panoptik_call_tool("get_click_log", { atTimestamp: 18.0 });
+console.log("Rebased Cursor at 18.0s:", cursorFocal);
+
+// ── 4. Visually probe frames on the rebased timeline ──
+const probe = await window.__panoptik_call_tool("probe_frames", {
+  timestamps: [18.0, 42.0, 58.0, 95.0],
+  includeSnapshot: true,
+  gridOverlay: true
+});
+console.log("Rebased Frame Snapshots (A1..C3):", probe.frames);
+```
+
+---
+
+## 10. Advanced Multimodal Reasoning & Pitfall Countermeasures
+
+### 1. The "Parked Mouse" vs. Active Attention Fallback
+* **The Trap**: When presenting, speakers often park their mouse at the extreme window edge (e.g. $x \le 0.05, y \le 0.05$ on browser tabs) while explaining on-screen content.
+* **The Disaster**: Blindly setting a zoom center at `(0.015, 0.015)` magnifies an empty browser header and clips 90% of the readable document off-screen!
+* **The Countermeasure**:
+  * Check telemetry: If $x < 0.10$ or $y < 0.10$ with `type === "interpolated"` or no recent click burst, classify the mouse as **Parked**.
+  * Fallback to **Safe Content Column Framing**: Center the camera over the primary document/code column ($c_x: 0.38 - 0.45, c_y: 0.40 - 0.55$) at $1.6\times - 1.8\times$.
+  * If the mouse is actively hovering/moving over content (e.g. `(0.50, 0.55)` over a contribution heatmap), lock directly onto the human focal point.
+
+---
+
+### 2. Longitudinal List Reading & Clipping (The Multi-Stage Pan)
+* **The Trap**: A creator reads through a vertical list, code diff, or multi-line table over $> 15$ seconds (e.g. from top problem statement down to bottom queue bucket counts).
+* **The Disaster**: A single static zoom centered at $c_y = 0.50$ at $1.8\times$ zoom has a visible vertical height of only $1/1.8 = 55.5\%$ ($y \in [0.223, 0.777]$). When the speaker reads down to lines at $y \ge 0.80$, **the bottom lines are clipped off the bottom canvas edge**.
+* **The Countermeasure**:
+  * Never place a single stationary zoom over long vertical reading sequences.
+  * Implement a **Sequential 2-Stage or 3-Stage Focal Pan**:
+    * **Stage 1 ($t_0 \rightarrow t_{\text{mid}}$)**: Upper lines $\rightarrow$ $c_x = 0.40, c_y = 0.45, \text{scale} = 1.7\times$.
+    * **Stage 2 ($t_{\text{mid}} \rightarrow t_1$)**: Smooth pan down to lower lines $\rightarrow$ $c_x = 0.40, c_y = 0.68, \text{scale} = 1.7\times$.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Stage 1 (Upper Lines): cy = 0.45, scale = 1.7x              │
+│ Visible window: y in [0.156, 0.744]                         │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ (Smooth cubic easing pan)
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Stage 2 (Lower Lines): cy = 0.68, scale = 1.7x              │
+│ Visible window: y in [0.386, 0.974] ◄── Preserves bottom!   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 3. Subtitle / Caption Non-Destruction Rule
+* Spoken subtitles generated via Whisper (`kind: "caption"`) and Graphic Titles (`kind: "text"`) share the timeline text track space.
+* **The Rule**: When proposing or replacing titles (`propose_edits` with `mode: "replace"`), the AI Director **must NEVER delete or overwrite Whisper captions**. Only graphic overlays / chapter markers are replaced.
+
+---
+
+## 11. The NLE Dual-Space Model: Source Space vs. Timeline Space
+
+Panoptik uses a professional Non-Linear Editing (NLE) architecture:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. Raw Source Space: [0.0s ────────────────────────────── 153.04s]          │
+│    (Underlying video file, raw sensor recordings, immutable source time)    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼ (Splits, Trims, Speed Ramps)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2. Composite Timeline Space: [0.0s ────────────────────────── 118.20s]      │
+│    Clip 1 [0.0-8.3s]  │  Clip 2 [8.3-37.0s]  │  Clip 3 [37.0-118.2s]        │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Mathematical Conversion Formula:
+For any timeline timestamp $t_{\text{timeline}}$ landing inside segment $S_i$ (where $T_i$ is the cumulative timeline start of $S_i$):
+
+$$t_{\text{src}} = S_i.\text{srcStart} + (t_{\text{timeline}} - T_i) \times S_i.\text{speed}$$
+
+`propose_edits` and WebMCP automatically handle this dual-space mapping, resolving which segment governs each operation and calculating the exact segment-relative source timecodes under the hood.
+
+
+
 

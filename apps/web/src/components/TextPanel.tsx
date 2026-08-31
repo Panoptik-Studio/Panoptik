@@ -186,10 +186,16 @@ export function TextPanel() {
   const setSelectedTextOverlay = useProjectStore((s) => s.setSelectedTextOverlay);
   const seek = useProjectStore((s) => s.seek);
 
-  const seg = useMemo(
-    () => project?.segments.find((s) => s.id === selectedSegmentId),
-    [project, selectedSegmentId],
-  );
+  const seg = useMemo(() => {
+    if (!project) return null;
+    if (selectedTextOverlayId) {
+      const foundSeg = project.segments.find((s) =>
+        [...s.textOverlays, ...s.stagedTextOverlays].some((t) => t.id === selectedTextOverlayId),
+      );
+      if (foundSeg) return foundSeg;
+    }
+    return project.segments.find((s) => s.id === selectedSegmentId) ?? project.segments[0] ?? null;
+  }, [project, selectedSegmentId, selectedTextOverlayId]);
 
   const overlays: TextOverlay[] = useMemo(() => {
     if (!seg) return [];

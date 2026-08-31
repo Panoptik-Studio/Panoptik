@@ -340,12 +340,40 @@ export function registerEditingTools(): void {
     },
   });
 
-  // ── 5. TIMELINE: SPLIT SEGMENT ──
+  // ── 5. TIMELINE: SPLIT SEGMENT & SPLIT CLIP ──
+
+  registerToolWithLifecycle({
+    name: "split_clip",
+    description:
+      "Splits a video clip into two separate segments at the specified timeline timestamp.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        timestamp: {
+          type: "number",
+          description: "Timeline second where the split cut should occur.",
+        },
+      },
+      required: ["timestamp"],
+    },
+    execute: async ({ timestamp }: { timestamp: number }) => {
+      const store = useProjectStore.getState();
+      if (!store.project) return { error: "No project loaded." };
+      store.splitAt(timestamp);
+      const segs = useProjectStore.getState().project?.segments ?? [];
+      return {
+        split: true,
+        timestamp,
+        segmentCount: segs.length,
+        message: `Clip split successfully at ${timestamp.toFixed(2)}s. Total clips: ${segs.length}.`,
+      };
+    },
+  });
 
   registerToolWithLifecycle({
     name: "split_segment",
     description:
-      "Splits the video clip at the given timeline timestamp. Prompts for user confirmation before modifying timeline geometry.",
+      "Splits the video clip at the given timeline timestamp.",
     inputSchema: {
       type: "object",
       properties: {
@@ -358,29 +386,187 @@ export function registerEditingTools(): void {
     },
     execute: async ({ timestamp }: { timestamp: number }) => {
       const store = useProjectStore.getState();
-      if (!store.project) {
-        return { error: "No project loaded." };
-      }
-
-      const confirmed = await showConfirmDialog({
-        message: `Split clip at ${timestamp.toFixed(2)}s?`,
-      });
-
-      if (!confirmed) {
-        return { split: false, reason: "user_declined" };
-      }
-
+      if (!store.project) return { error: "No project loaded." };
       store.splitAt(timestamp);
+      const segs = useProjectStore.getState().project?.segments ?? [];
       return {
         split: true,
         timestamp,
-        segmentCount: useProjectStore.getState().project?.segments.length ?? 0,
+        segmentCount: segs.length,
         message: `Clip split successfully at ${timestamp.toFixed(2)}s.`,
       };
     },
   });
 
-  // ── 6. TIMELINE: SET SPEED ──
+  // ── 6. TIMELINE: DELETE CLIP / DELETE SEGMENT ──
+
+  registerToolWithLifecycle({
+    name: "delete_clip",
+    description:
+      "Deletes an unwanted video clip segment from the timeline and ripple-joins adjacent clips. Cannot delete the only remaining clip.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clipIndex: {
+          type: "number",
+          description: "0-based index of the clip segment to delete.",
+        },
+        segmentId: {
+          type: "string",
+          description: "Optional direct segment ID.",
+        },
+      },
+    },
+    execute: async ({
+      clipIndex = 0,
+      segmentId,
+    }: {
+      clipIndex?: number;
+      segmentId?: string;
+    }) => {
+      const store = useProjectStore.getState();
+      if (!store.project) return { error: "No project loaded." };
+      const segments = store.project.segments;
+      if (segments.length <= 1) {
+        return {
+          error: "CANNOT_DELETE_ONLY_CLIP",
+          message: "Cannot delete the only clip on the timeline.",
+        };
+      }
+      const targetSeg = segmentId
+        ? segments.find((s) => s.id === segmentId)
+        : segments[clipIndex];
+      if (!targetSeg) {
+        return {
+          error: "CLIP_NOT_FOUND",
+          message: `Clip at index ${clipIndex} not found.`,
+        };
+      }
+      store.deleteSegment(targetSeg.id);
+      const remaining = useProjectStore.getState().project?.segments ?? [];
+      return {
+        deleted: true,
+        deletedSegmentId: targetSeg.id,
+        remainingClips: remaining.length,
+        message: `Clip deleted successfully. Timeline ripple-joined (${remaining.length} clips remaining).`,
+      };
+    },
+  });
+
+  // ── 7. TIMELINE: SET CLIP TRANSITION ──
+
+  registerToolWithLifecycle({
+    name: "set_clip_transition",
+    description:
+      "Sets the incoming transition effect (e.g. 'fade', 'wipe', 'slide-left', 'slide-right', 'zoom-in', 'dipToBlack', 'cut') and duration on a clip segment.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clipIndex: {
+          type: "number",
+          description: "0-based index of the clip segment.",
+        },
+        transition: {
+          type: "string",
+          enum: [
+            "cut",
+            "fade",
+            "dipToBlack",
+            "slide-left",
+            "slide-right",
+            "zoom-in",
+            "wipe",
+          ],
+          description: "Transition style effect.",
+        },
+        duration: {
+          type: "number",
+          description: "Transition duration in seconds (default 0.45).",
+        },
+      },
+      required: ["clipIndex", "transition"],
+    },
+    execute: async ({
+      clipIndex,
+      transition,
+      duration = 0.45,
+    }: {
+      clipIndex: number;
+      transition: string;
+      duration?: number;
+    }) => {
+      const store = useProjectStore.getState();
+      if (!store.project) return { error: "No project loaded." };
+      const segments = store.project.segments;
+      const targetSeg = segments[clipIndex];
+      if (!targetSeg) {
+        return {
+          error: "CLIP_NOT_FOUND",
+          message: `Clip at index ${clipIndex} does not exist.`,
+        };
+      }
+      store.updateSegment(targetSeg.id, {
+        transition: transition as any,
+        transitionDuration: Math.max(0.1, Math.min(2.0, duration)),
+      });
+      return {
+        updated: true,
+        clipIndex,
+        transition,
+        duration,
+        message: `Clip #${clipIndex} transition set to "${transition}" (${duration}s).`,
+      };
+    },
+  });
+
+  // ── 8. TIMELINE: SET CLIP SPEED ──
+
+  registerToolWithLifecycle({
+    name: "set_clip_speed",
+    description:
+      "Sets playback speed multiplier for a clip segment (0.5x, 1x, 1.5x, 2x, 3x with pitch-preserved WSOLA audio).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clipIndex: {
+          type: "number",
+          description: "0-based index of the clip.",
+        },
+        speed: {
+          type: "number",
+          enum: [0.5, 1, 1.5, 2, 3],
+          description: "Playback speed multiplier.",
+        },
+      },
+      required: ["clipIndex", "speed"],
+    },
+    execute: async ({
+      clipIndex = 0,
+      speed,
+    }: {
+      clipIndex?: number;
+      speed: number;
+    }) => {
+      const store = useProjectStore.getState();
+      if (!store.project) return { error: "No project loaded." };
+      const segments = store.project.segments;
+      const targetSeg = segments[clipIndex];
+      if (!targetSeg) {
+        return {
+          error: "CLIP_NOT_FOUND",
+          message: `Clip at index ${clipIndex} does not exist.`,
+        };
+      }
+      const safeSpeed = [0.5, 1, 1.5, 2, 3].includes(speed) ? speed : 1;
+      store.updateSegment(targetSeg.id, { speed: safeSpeed });
+      return {
+        updated: true,
+        clipIndex,
+        speed: safeSpeed,
+        message: `Clip #${clipIndex} speed updated to ${safeSpeed}x.`,
+      };
+    },
+  });
 
   registerToolWithLifecycle({
     name: "set_speed",
