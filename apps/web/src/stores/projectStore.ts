@@ -951,51 +951,48 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   getStagedDiff: () => {
     const state = get();
-    const seg = selectedSegment(state);
-    if (!seg)
-      return { added: [], removed: [], totalCount: 0 };
+    if (!state.project) return { added: [], removed: [], totalCount: 0 };
+    const allStagedZooms = state.project.segments.flatMap((s) => s.stagedZoomPoints ?? []);
+    const allStagedTexts = state.project.segments.flatMap((s) => s.stagedTextOverlays ?? []);
     return {
       added: [
-        ...seg.stagedZoomPoints.map(
-          (zp) => `Zoom at ${zp.t.toFixed(1)}s`,
-        ),
-        ...seg.stagedTextOverlays.map(
-          (t) => `"${t.text}" at ${t.timestamp.toFixed(1)}s`,
-        ),
-        ...(state.pendingBackgroundBadge
-          ? ["Background change"]
-          : []),
+        ...allStagedZooms.map((zp) => `Zoom at ${zp.t.toFixed(1)}s`),
+        ...allStagedTexts.map((t) => `"${t.text}" at ${t.timestamp.toFixed(1)}s`),
+        ...(state.pendingBackgroundBadge ? ["Background change"] : []),
       ],
       removed: [],
       totalCount:
-        seg.stagedZoomPoints.length +
-        seg.stagedTextOverlays.length +
+        allStagedZooms.length +
+        allStagedTexts.length +
         (state.pendingBackgroundBadge ? 1 : 0),
     };
   },
 
   commitAll: () => {
     const state = get();
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      zoomPoints: [
-        ...seg.zoomPoints,
-        ...seg.stagedZoomPoints.map((z) => ({
-          ...z,
-          staged: false,
-        })),
-      ],
-      stagedZoomPoints: [],
-      textOverlays: [
-        ...seg.textOverlays,
-        ...seg.stagedTextOverlays.map((t) => ({
-          ...t,
-          staged: false,
-        })),
-      ],
-      stagedTextOverlays: [],
-    }));
-    if (!project) return;
+    if (!state.project) return;
+    const project = {
+      ...state.project,
+      segments: state.project.segments.map((seg) => ({
+        ...seg,
+        zoomPoints: [
+          ...seg.zoomPoints,
+          ...(seg.stagedZoomPoints ?? []).map((z) => ({
+            ...z,
+            staged: false,
+          })),
+        ],
+        stagedZoomPoints: [],
+        textOverlays: [
+          ...seg.textOverlays,
+          ...(seg.stagedTextOverlays ?? []).map((t) => ({
+            ...t,
+            staged: false,
+          })),
+        ],
+        stagedTextOverlays: [],
+      })),
+    };
     // The staged theme is the committed one now, so it must reach history.
     pushHistoryAndSet(project, state, set, {
       pendingBackgroundBadge: false,
@@ -1005,19 +1002,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   clearStaged: () => {
     const state = get();
-    if (!state.project || !state.selectedSegmentId) return;
+    if (!state.project) return;
     const pre = state.preStageBackgrounds;
     const project = {
       ...state.project,
       segments: state.project.segments.map((seg) => {
-        // Every segment carrying a staged theme goes back, not only the one
-        // currently selected: a theme can be staged across a multi-clip
-        // selection, or staged on one clip and discarded from another, and
-        // both used to leave the unapproved theme applied for good.
         const background = seg.id in pre ? pre[seg.id]! : seg.background;
-        if (seg.id !== state.selectedSegmentId) {
-          return background === seg.background ? seg : { ...seg, background };
-        }
         return {
           ...seg,
           background,

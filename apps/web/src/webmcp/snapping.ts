@@ -94,6 +94,112 @@ export interface SnappedBatchResult {
 }
 
 /**
+ * Normalizes user / LLM input op objects with common aliases (e.g. kind vs op, x/y vs cx/cy, t/dur vs t0/t1).
+ */
+export function normalizeEditOp(raw: any): EditOp | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const opType = raw.op || raw.kind;
+  if (!opType || typeof opType !== "string") return null;
+
+  if (opType === "zoom") {
+    const t0 = typeof raw.t0 === "number" ? raw.t0 : typeof raw.t === "number" ? raw.t : 0;
+    const dur = typeof raw.dur === "number" ? raw.dur : typeof raw.duration === "number" ? raw.duration : 2.5;
+    const t1 = typeof raw.t1 === "number" ? raw.t1 : t0 + dur;
+    const cx = typeof raw.cx === "number" ? raw.cx : typeof raw.x === "number" ? raw.x : 0.5;
+    const cy = typeof raw.cy === "number" ? raw.cy : typeof raw.y === "number" ? raw.y : 0.5;
+    const scale = typeof raw.scale === "number" ? raw.scale : 2.2;
+    const ease = raw.ease === "out3" || raw.ease === "linear" ? raw.ease : "io3";
+    return { op: "zoom", t0, t1: Math.max(t0 + 0.5, t1), cx, cy, scale, ease };
+  }
+
+  if (opType === "cut") {
+    const t = typeof raw.t === "number" ? raw.t : typeof raw.start === "number" ? raw.start : 0;
+    return {
+      op: "cut",
+      t,
+      dropSilence: Boolean(raw.dropSilence),
+      padLeftMs: raw.padLeftMs,
+      padRightMs: raw.padRightMs,
+    };
+  }
+
+  if (opType === "cam" || opType === "facecam") {
+    let corner = raw.corner;
+    if (corner === "bottom-right" || corner === "bottomRight") corner = "br";
+    if (corner === "bottom-left" || corner === "bottomLeft") corner = "bl";
+    if (corner === "top-right" || corner === "topRight") corner = "tr";
+    if (corner === "top-left" || corner === "topLeft") corner = "tl";
+    if (!["tl", "tr", "bl", "br"].includes(corner)) corner = "br";
+    return {
+      op: "cam",
+      t0: typeof raw.t0 === "number" ? raw.t0 : typeof raw.t === "number" ? raw.t : 0,
+      t1: typeof raw.t1 === "number" ? raw.t1 : undefined,
+      corner: corner as "tl" | "tr" | "bl" | "br",
+      shape: raw.shape === "square" ? "square" : "circle",
+      size: typeof raw.size === "number" ? raw.size : 0.22,
+    };
+  }
+
+  if (opType === "bg" || opType === "background") {
+    const kind = raw.kind || raw.style?.kind || (raw.style?.stops || raw.stops || raw.c1 ? "gradient" : "solid");
+    let c0 = raw.c0 || raw.color || raw.style?.color || raw.style?.stops?.[0] || raw.stops?.[0] || "#0f172a";
+    let c1 = raw.c1 || raw.style?.stops?.[1] || raw.stops?.[1] || undefined;
+    return {
+      op: "bg",
+      t0: typeof raw.t0 === "number" ? raw.t0 : typeof raw.t === "number" ? raw.t : 0,
+      t1: typeof raw.t1 === "number" ? raw.t1 : undefined,
+      kind: kind === "gradient" ? "gradient" : "solid",
+      c0,
+      c1,
+    };
+  }
+
+  if (opType === "text" || opType === "title") {
+    let pos = raw.pos || raw.position;
+    if (pos === "top-center" || pos === "topCenter") pos = "top";
+    if (pos === "bottom-center" || pos === "bottomCenter") pos = "bottom";
+    if (!["top", "bottom", "center"].includes(pos)) pos = "top";
+    return {
+      op: "text",
+      t: typeof raw.t === "number" ? raw.t : typeof raw.timestamp === "number" ? raw.timestamp : 0,
+      text: String(raw.text ?? ""),
+      pos: pos as "top" | "bottom" | "center",
+      dur: typeof raw.dur === "number" ? raw.dur : typeof raw.duration === "number" ? raw.duration : 3.0,
+    };
+  }
+
+  if (opType === "trans" || opType === "transition") {
+    return {
+      op: "trans",
+      at: typeof raw.at === "number" ? raw.at : typeof raw.t === "number" ? raw.t : 0,
+      kind: raw.kind || "fade",
+      dur: typeof raw.dur === "number" ? raw.dur : 0.45,
+    };
+  }
+
+  if (opType === "speed") {
+    return {
+      op: "speed",
+      t0: typeof raw.t0 === "number" ? raw.t0 : 0,
+      t1: typeof raw.t1 === "number" ? raw.t1 : 1,
+      mult: raw.mult || raw.speed || 1.5,
+    };
+  }
+
+  if (opType === "music") {
+    return {
+      op: "music",
+      trackId: raw.trackId || "music-default",
+      startT: typeof raw.startT === "number" ? raw.startT : typeof raw.t === "number" ? raw.t : 0,
+      ducking: raw.ducking,
+    };
+  }
+
+  return raw as EditOp;
+}
+
+/**
  * Snaps, rebases, and resolves collisions for a batched list of EditOp operations.
  */
 export function snapAndRebaseEditOps(
@@ -104,10 +210,11 @@ export function snapAndRebaseEditOps(
   const rejectedOps: Array<{ op: EditOp; reason: string }> = [];
   const validOps: EditOp[] = [];
 
-  // 1. Validate parameter bounds and types
-  for (const op of ops) {
+  // 1. Validate and normalize parameter bounds and types
+  for (const raw of ops) {
+    const op = normalizeEditOp(raw);
     if (!op || typeof op.op !== "string") {
-      rejectedOps.push({ op, reason: "Malformed operation object" });
+      rejectedOps.push({ op: raw, reason: "Malformed operation object" });
       continue;
     }
 

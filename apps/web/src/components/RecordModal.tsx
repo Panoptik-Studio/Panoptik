@@ -9,7 +9,7 @@
  */
 "use client";
 
-import { primaryMedia } from "@panoptik/schema";
+import { primaryMedia, type ClickEvent } from "@panoptik/schema";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
@@ -218,6 +218,8 @@ export function RecordModal() {
   const [elapsed, setElapsed] = useState(0);
   const elapsedRef = useRef(0);
   const startTimeRef = useRef<number>(0);
+  const recordedClicksRef = useRef<ClickEvent[]>([]);
+  const lastMousePosRef = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.5 });
 
   // Teleprompter
   const [teleOpen, setTeleOpen] = useState(false);
@@ -445,6 +447,72 @@ export function RecordModal() {
     return () => clearInterval(id);
   }, [state]);
 
+  // Real-time cursor & pointer capture during recording
+  useEffect(() => {
+    if (state !== "recording") return;
+    let lastRecordedMoveT = -1;
+    let lastRecordedX = -1;
+    let lastRecordedY = -1;
+
+    const onPointerMove = (e: PointerEvent) => {
+      const w = window.innerWidth || 1920;
+      const h = window.innerHeight || 1080;
+      const nx = Math.max(0, Math.min(1, e.clientX / w));
+      const ny = Math.max(0, Math.min(1, e.clientY / h));
+      const t = elapsedRef.current;
+
+      lastMousePosRef.current = { x: nx, y: ny };
+
+      // Record continuous cursor coordinates every 100ms or on movement
+      const dist = Math.hypot(nx - lastRecordedX, ny - lastRecordedY);
+      if (t - lastRecordedMoveT >= 0.10 || dist >= 0.015) {
+        lastRecordedMoveT = t;
+        lastRecordedX = nx;
+        lastRecordedY = ny;
+        recordedClicksRef.current.push({
+          t: Number(t.toFixed(2)),
+          x: Number(nx.toFixed(3)),
+          y: Number(ny.toFixed(3)),
+          type: "move",
+        });
+      }
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      const w = window.innerWidth || 1920;
+      const h = window.innerHeight || 1080;
+      const t = elapsedRef.current;
+      recordedClicksRef.current.push({
+        t: Number(t.toFixed(2)),
+        x: Number((e.clientX / w).toFixed(3)),
+        y: Number((e.clientY / h).toFixed(3)),
+        type: "click",
+      });
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "m") {
+        const t = elapsedRef.current;
+        recordedClicksRef.current.push({
+          t: Number(t.toFixed(2)),
+          x: Number(lastMousePosRef.current.x.toFixed(3)),
+          y: Number(lastMousePosRef.current.y.toFixed(3)),
+          type: "manual",
+        });
+      }
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [state]);
+
   // Keep facecam/screen playing when tab loses focus or moves to desktop (fixes facecam removed)
   useEffect(() => {
     if (state !== "recording") return;
@@ -604,6 +672,9 @@ export function RecordModal() {
           ...facecamPlacement(corner, camSize, primaryMedia(project).width / primaryMedia(project).height),
           shape,
         };
+      }
+      if (recordedClicksRef.current.length > 0) {
+        project.clickLog = [...(project.clickLog ?? []), ...recordedClicksRef.current];
       }
       if (willAppend) {
         // Timeline "+" → append this take as a new clip instead of replacing.

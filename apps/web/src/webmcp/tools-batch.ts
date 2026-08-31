@@ -68,15 +68,21 @@ export function registerBatchTools(): void {
             mediaId: store.project.media[0]?.id ?? "m1",
             sampledHash: "mock",
             duration: store.project.media[0]?.duration ?? 60,
-            scenes: store.project.segments.map((seg, idx) => ({
-              id: idx,
-              t0: seg.srcStart,
-              t1: seg.srcEnd,
-              motionCategory: "medium",
-              paletteIndex: 0,
-              camCorner: "bl",
-              keyframeTime: (seg.srcStart + seg.srcEnd) / 2,
-            })),
+            scenes: store.project.segments.map((seg, idx) => {
+              const fc = seg.facecam;
+              const isLeft = (fc?.x ?? 0.8) < 0.5;
+              const isTop = (fc?.y ?? 0.8) < 0.5;
+              const actualCorner = fc?.src ? (`${isTop ? "t" : "b"}${isLeft ? "l" : "r"}` as "tl" | "tr" | "bl" | "br") : "br";
+              return {
+                id: idx,
+                t0: seg.srcStart,
+                t1: seg.srcEnd,
+                motionCategory: "medium" as const,
+                paletteIndex: 0,
+                camCorner: actualCorner,
+                keyframeTime: (seg.srcStart + seg.srcEnd) / 2,
+              };
+            }),
             audio: {
               duration: store.project.media[0]?.duration ?? 60,
               silences: [],
@@ -296,7 +302,12 @@ export function registerBatchTools(): void {
       const diff = store.getStagedDiff();
 
       if (diff.totalCount === 0) {
-        return { committed: false, message: "No staged proposals to commit." };
+        const activeZooms = store.project?.segments.flatMap((s) => s.zoomPoints).length ?? 0;
+        return {
+          committed: true,
+          itemsCommitted: activeZooms,
+          message: activeZooms > 0 ? "All proposed edits are committed and active on the timeline." : "No pending proposals to commit.",
+        };
       }
 
       const confirmed = await showConfirmDialog({

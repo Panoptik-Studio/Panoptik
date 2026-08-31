@@ -140,28 +140,67 @@ export function registerEngineTools(): void {
   registerToolWithLifecycle({
     name: "get_click_log",
     description:
-      "Returns mouse-click interaction timestamps recorded during the session. Useful for identifying UI interaction moments where zooming in will make the demo pop.",
+      "Returns the continuous cursor trajectory and click interaction timestamps recorded during the session. Can also interpolate the exact cursor (x, y) at a specific timestamp.",
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: {
+        atTimestamp: {
+          type: "number",
+          description: "Optional: interpolate and return the exact cursor (x, y) at this specific video timestamp",
+        },
+      },
     },
     annotations: { readOnlyHint: true },
-    execute: async () => {
+    execute: async ({ atTimestamp }: { atTimestamp?: number } = {}) => {
       const project = useProjectStore.getState().project;
       if (!project) {
         return { error: "No project loaded. Ask the user to import or record a clip first." };
       }
 
       const clicks = project.clickLog ?? [];
+
+      // If atTimestamp requested, find nearest cursor coordinate or interpolate
+      if (typeof atTimestamp === "number") {
+        if (clicks.length === 0) {
+          return { t: atTimestamp, x: 0.5, y: 0.5, interpolated: false, count: 0 };
+        }
+        const sorted = [...clicks].sort((a, b) => a.t - b.t);
+        const exact = sorted.find((c) => Math.abs(c.t - atTimestamp) < 0.05);
+        if (exact) {
+          return { t: exact.t, x: exact.x, y: exact.y, type: exact.type, count: clicks.length };
+        }
+        // Find surrounding points
+        let prev = sorted[0]!;
+        let next = sorted[sorted.length - 1]!;
+        for (let i = 0; i < sorted.length - 1; i++) {
+          if (sorted[i]!.t <= atTimestamp && sorted[i + 1]!.t >= atTimestamp) {
+            prev = sorted[i]!;
+            next = sorted[i + 1]!;
+            break;
+          }
+        }
+        const span = next.t - prev.t;
+        const alpha = span > 0.001 ? Math.max(0, Math.min(1, (atTimestamp - prev.t) / span)) : 0;
+        const interpX = Number((prev.x + alpha * (next.x - prev.x)).toFixed(3));
+        const interpY = Number((prev.y + alpha * (next.y - prev.y)).toFixed(3));
+        return { t: atTimestamp, x: interpX, y: interpY, type: "interpolated", count: clicks.length };
+      }
+
+      const clickOnly = clicks.filter((c) => c.type === "click" || c.type === "manual");
+
+      const formatted = clicks.slice(0, 300).map((c) => ({
+        t: Number(c.t.toFixed(2)),
+        x: Number(c.x.toFixed(3)),
+        y: Number(c.y.toFixed(3)),
+        type: c.type,
+      }));
+
       return {
         count: clicks.length,
-        clicks: clicks.map((c) => ({
-          t: Number(c.t.toFixed(2)),
-          x: Number(c.x.toFixed(3)),
-          y: Number(c.y.toFixed(3)),
-          type: c.type,
-        })),
-        suggestedZoomTimestamps: clicks.slice(0, 15).map((c) => Number(c.t.toFixed(2))),
+        clickCount: clickOnly.length,
+        clicks: formatted,
+        trajectory: formatted,
+        suggestedZoomTimestamps: clickOnly.slice(0, 15).map((c) => Number(c.t.toFixed(2))),
       };
     },
   });

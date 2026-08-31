@@ -110,6 +110,73 @@ export function classifyMotion(energy: number): MotionCategory {
 }
 
 /**
+ * Detects localized cursor movements / clicks from consecutive frame differences.
+ * Identifies high-contrast localized spatial clusters (e.g. 16px - 140px) vs global frame shifts.
+ */
+export function detectCursorInteractionFromFrames(
+  prevData: Uint8ClampedArray | Uint8Array,
+  currData: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  t: number,
+): { t: number; x: number; y: number; type: "click" } | null {
+  if (width < 32 || height < 32 || prevData.length !== currData.length) return null;
+
+  let sumDiff = 0;
+  let activePixels = 0;
+  let weightedX = 0;
+  let weightedY = 0;
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+
+  const threshold = 35; // RGB diff threshold
+
+  for (let y = 0; y < height; y += 2) {
+    for (let x = 0; x < width; x += 2) {
+      const idx = (y * width + x) * 4;
+      const dr = Math.abs((currData[idx] ?? 0) - (prevData[idx] ?? 0));
+      const dg = Math.abs((currData[idx + 1] ?? 0) - (prevData[idx + 1] ?? 0));
+      const db = Math.abs((currData[idx + 2] ?? 0) - (prevData[idx + 2] ?? 0));
+      const diff = (dr + dg + db) / 3;
+
+      if (diff > threshold) {
+        sumDiff += diff;
+        activePixels++;
+        weightedX += x * diff;
+        weightedY += y * diff;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  const totalSampled = (width * height) / 4;
+  const activeRatio = activePixels / totalSampled;
+
+  // Localized motion: active between 0.05% and 8% of the screen (cursor movement/click, not full-screen scroll)
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  const isLocalized = spanX < width * 0.35 && spanY < height * 0.35 && spanX > 4 && spanY > 4;
+
+  if (activeRatio > 0.0005 && activeRatio < 0.08 && isLocalized && sumDiff > 0) {
+    const cx = Number((weightedX / sumDiff / width).toFixed(3));
+    const cy = Number((weightedY / sumDiff / height).toFixed(3));
+    return {
+      t: Number(t.toFixed(2)),
+      x: Math.max(0.01, Math.min(0.99, cx)),
+      y: Math.max(0.01, Math.min(0.99, cy)),
+      type: "click",
+    };
+  }
+
+  return null;
+}
+
+/**
  * Quantizes dominant frame colors into a compact 16-hue index (0..15).
  */
 export function computePaletteIndex(
@@ -221,42 +288,72 @@ export function computeQuadrantEntropy(
 }
 
 /**
- * Resolves the optimal CamCorner by selecting the quadrant with lowest edge entropy,
- * while ensuring it does not collide with the click centroid bounding box [cx ± 0.12, cy ± 0.12].
+ * Resolves the optimal CamCorner by scoring 4 quadrants using:
+ * 1. Background Edge Entropy (lower is less cluttered)
+ * 2. Weighted Cursor Proximity Penalty (avoids placing camera near user mouse clicks/activity)
+ * 3. Bottom-Left Keepout Penalty (prevents obscuring video titles, closed captions, and player controls)
+ * 4. Current Corner Inertia (maintains current placement unless strongly occluded)
  */
 export function resolveBestCamCorner(
   entropyCorners: Record<CamCorner, number>,
   clickCentroid?: { x: number; y: number } | null,
+  options: {
+    clicks?: Array<{ x: number; y: number }>;
+    currentCorner?: CamCorner | "none";
+  } = {},
 ): CamCorner {
   const cornerPositions: Record<CamCorner, { x: number; y: number }> = {
-    tl: { x: 0.11, y: 0.11 },
-    tr: { x: 0.89, y: 0.11 },
-    bl: { x: 0.11, y: 0.89 },
-    br: { x: 0.89, y: 0.89 },
+    tl: { x: 0.12, y: 0.12 },
+    tr: { x: 0.88, y: 0.12 },
+    bl: { x: 0.12, y: 0.88 },
+    br: { x: 0.88, y: 0.88 },
   };
 
-  const sorted = (Object.keys(entropyCorners) as CamCorner[]).sort(
-    (a, b) => (entropyCorners[a] ?? 0) - (entropyCorners[b] ?? 0),
-  );
+  const corners: CamCorner[] = ["br", "tr", "bl", "tl"];
+  const maxEntropy = Math.max(1, ...Object.values(entropyCorners));
 
-  const fallback = sorted[0] ?? "bl";
+  let bestCorner: CamCorner = options.currentCorner && options.currentCorner !== "none" ? options.currentCorner : "br";
+  let minScore = Infinity;
 
-  if (!clickCentroid) {
-    return fallback;
-  }
-
-  for (const corner of sorted) {
+  for (const corner of corners) {
     const pos = cornerPositions[corner];
-    if (pos) {
-      const dx = Math.abs(pos.x - clickCentroid.x);
-      const dy = Math.abs(pos.y - clickCentroid.y);
-      if (dx > 0.16 || dy > 0.16) {
-        return corner;
+    const normEntropy = (entropyCorners[corner] ?? 0) / maxEntropy;
+    let score = normEntropy;
+
+    // 1. Cursor Collision Penalty
+    if (clickCentroid) {
+      const dist = Math.hypot(pos.x - clickCentroid.x, pos.y - clickCentroid.y);
+      if (dist < 0.30) {
+        score += Math.max(0, 1.6 * (1 - dist / 0.30));
       }
+    }
+
+    if (options.clicks && options.clicks.length > 0) {
+      for (const c of options.clicks) {
+        const dist = Math.hypot(pos.x - c.x, pos.y - c.y);
+        if (dist < 0.26) {
+          score += Math.max(0, 0.9 * (1 - dist / 0.26));
+        }
+      }
+    }
+
+    // 2. Bottom-Left Keepout Penalty (Video Titles, Closed Captions, Player Controls)
+    if (corner === "bl") {
+      score += 0.40;
+    }
+
+    // 3. Current Corner Continuity Bonus
+    if (options.currentCorner && options.currentCorner === corner) {
+      score -= 0.25;
+    }
+
+    if (score < minScore) {
+      minScore = score;
+      bestCorner = corner;
     }
   }
 
-  return fallback;
+  return bestCorner;
 }
 
 /**

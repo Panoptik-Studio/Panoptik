@@ -106,16 +106,16 @@ export function executeBatchOps(
         bl: { x: 0.1, y: 0.9 },
         br: { x: 0.9, y: 0.9 },
       };
-      const pos = cornerCoords[op.corner] ?? { x: 0.1, y: 0.9 };
-      store.updateSelectedSegments({
-        facecam: {
-          src: null,
-          x: pos.x,
-          y: pos.y,
-          size: op.size ?? 0.22,
-          shape: op.shape ?? "circle",
-        },
-      });
+      const pos = cornerCoords[op.corner] ?? { x: 0.9, y: 0.9 };
+      const currentSegments = store.project?.segments ?? [];
+      for (const seg of currentSegments) {
+        if (seg.facecam) {
+          seg.facecam.x = pos.x;
+          seg.facecam.y = pos.y;
+          if (op.size) seg.facecam.size = op.size;
+          if (op.shape) seg.facecam.shape = op.shape;
+        }
+      }
       facecamCount++;
     } else if (op.op === "trans") {
       store.updateSelectedSegments({
