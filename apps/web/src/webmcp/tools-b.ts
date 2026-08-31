@@ -8,7 +8,7 @@
 import { registerToolWithLifecycle } from "./lifecycle";
 import { useProjectStore } from "../stores/projectStore";
 import { showConfirmDialog } from "./confirm";
-import type { AspectPreset, Background, TextAnimation, ZoomPoint } from "@panoptik/schema";
+import type { AspectPreset, Background, TextAnimation, TextOverlay, ZoomPoint } from "@panoptik/schema";
 
 const MAX_PROPOSALS = 200;
 const MAX_TEXT_LENGTH = 200;
@@ -326,7 +326,7 @@ export function registerEditingTools(): void {
 
       try {
         const { transcribeAudioStream } = await import("../lib/ai/providers");
-        const { decodeViaAudioContext, encodeWavBlob } = await import("@panoptik/engine");
+        const { decodeViaAudioContext, encodeWavBlob, resampleMonoPcm } = await import("@panoptik/engine");
 
         const audioSource = project.segments[0]?.facecam?.src || project.audioSrc || project.media[0]?.src;
         if (!audioSource) {
@@ -340,7 +340,9 @@ export function registerEditingTools(): void {
         if (!blob.type.includes("wav")) {
           const buf = await decodeViaAudioContext(blob);
           if (buf) {
-            wavBlob = await encodeWavBlob(buf);
+            const rawData = buf.getChannelData(0);
+            const pcm = resampleMonoPcm(rawData, buf.sampleRate, 16000);
+            wavBlob = await encodeWavBlob(pcm, 16000);
           }
         }
 
@@ -392,7 +394,7 @@ export function registerEditingTools(): void {
           setAnalysisCache({
             ...prev,
             words: words.map((w) => ({
-              text: w.word,
+              word: w.word,
               start: w.start,
               end: w.end,
               speaker: w.speaker ?? 0,
