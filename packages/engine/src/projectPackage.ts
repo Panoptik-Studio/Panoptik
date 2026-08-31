@@ -243,7 +243,7 @@ export async function downloadProjectPackage(
  */
 export async function importProjectBundle(
   fileOrText: File | string,
-): Promise<{ project: Project; projectId: string; filename?: string }> {
+): Promise<{ project: Project; projectId: string; filename?: string; history?: Project[]; historyIndex?: number }> {
   let text: string;
   let inputFileName: string | undefined;
 
@@ -346,5 +346,11 @@ export async function importProjectBundle(
     console.warn("[ProjectPackage] OPFS save skipped (environment restricted)", err);
   }
 
-  return { project, projectId: project.id, filename: inputFileName };
+  return {
+    project,
+    projectId: project.id,
+    filename: inputFileName,
+    history: bundle.history,
+    historyIndex: bundle.historyIndex,
+  };
 }

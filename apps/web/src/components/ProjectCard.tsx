@@ -307,9 +307,15 @@ export function ProjectCard({
               onClick={async (e) => {
                 e.stopPropagation();
                 try {
-                  const { loadProject, downloadProjectPackage } = await import("@panoptik/engine");
+                  const { loadProject, loadProjectRecord, downloadProjectPackage } = await import("@panoptik/engine");
+                  const rec = await loadProjectRecord(summary.id);
                   const proj = await loadProject(summary.id);
-                  if (proj) await downloadProjectPackage(proj);
+                  if (proj) {
+                    await downloadProjectPackage(proj, {
+                      history: rec?.history,
+                      historyIndex: rec?.historyIndex,
+                    });
+                  }
                 } catch (err) {
                   console.error("Export project failed", err);
                 }

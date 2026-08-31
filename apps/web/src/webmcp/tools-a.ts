@@ -18,7 +18,7 @@ export function registerEngineTools(): void {
   registerToolWithLifecycle({
     name: "get_project_state",
     description:
-      "Returns the complete project state: duration, dimensions, segments, committed & staged zoom keyframes, text overlays, audio tracks, facecam PiP, aspect ratio, background, and user interaction click log. Use this first to understand the existing project before proposing changes.",
+      "MANDATORY FIRST STEP for any video editing, review, or enhancement request in Panoptik. Call this immediately to discover the project timeline, clips, durations, and to load the Director Playbook heuristics into your context.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -94,6 +94,25 @@ export function registerEngineTools(): void {
         aspectPreset: project.segments[0]?.aspectPreset ?? "source",
         background: project.segments[0]?.background ?? { kind: "solid", color: "#000000" },
         clickLogCount: project.clickLog?.length ?? 0,
+        directorPlaybook: {
+          coreRules: [
+            "NO EMOJIS: Do NOT use emojis in titles, badges, or overlays. Use clean typographic hierarchy (e.g. FEATURE:, ARCHITECTURE:, SECTION:).",
+            "MULTI-STAGE PANS: When tracking longitudinal content or reading down comments, create sequential focal transitions (Stage 1 cy=0.45, Stage 2 cy=0.68 at 1.6x-1.8x) rather than a single static zoom that clips the bottom.",
+            "PARKED CURSOR HEURISTIC: If cursor was stationary >3s, it is parked. Verify active target via probe_frames 3x3 grid snapshots.",
+            "CLOSED-LOOP POST-TRIM RE-INGESTION: Any trim or split rebases timeline time and durations. Always re-fetch get_project_state and get_transcript after trimming before placing zoom keyframes.",
+            "SAFE VIEWPORT FORMULA: Visible vertical height is 1/scale (e.g. 1.8x scale shows 55.5% vertical height from cy-0.277 to cy+0.277). Keep content within [0.05, 0.95].",
+            "OVERLAY INVERSION: If an active zoom targets the top half (cy <= 0.45), place overlays at pos: 'bottom' (and vice versa).",
+            "FACECAM KEEPOUT: Check actualCamCorner ('br') to prevent zoom centers and overlays from colliding with facecam."
+          ],
+          standardProtocol: [
+            "1. get_project_state & get_transcript (Ingest timeline state & speech)",
+            "2. probe_frames (Sample 3x3 grid frames at target timestamps to ground visual coordinates)",
+            "3. get_click_log (Inspect human click telemetry for active cursor grounding)",
+            "4. propose_edits (Stage batched atomic edits with zooms, text overlays, speed)",
+            "5. inspect_timeline (Verify staged diff on rebased timeline)",
+            "6. commit_staged_changes (Bake approved edits into timeline)"
+          ]
+        },
       };
     },
   });
@@ -239,6 +258,16 @@ export function registerEngineTools(): void {
                 speaker: c.speaker === "Screen" ? 1 : 0,
               }));
 
+      if (phrases.length === 0) {
+        return {
+          totalDuration: Number(totalDur.toFixed(2)),
+          count: 0,
+          silences: [],
+          status: "PENDING_TRANSCRIPTION",
+          guidance: "Speech transcription has not run yet. Call `generate_captions` to transcribe audio before detecting silence intervals.",
+        };
+      }
+
       const silences: Array<{ start: number; end: number; duration: number }> = [];
       const sorted = [...phrases].sort((a, b) => a.start - b.start);
 
@@ -271,7 +300,7 @@ export function registerEngineTools(): void {
 
   registerToolWithLifecycle({
     name: "get_transcript",
-    description: "Returns the spoken transcript with timestamps and speaker tags.",
+    description: "Returns the spoken transcript with timestamps and speaker tags. If empty, call generate_captions to transcribe.",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true },
     execute: async () => {
@@ -294,6 +323,16 @@ export function registerEngineTools(): void {
                 text: c.text,
                 speaker: c.speaker === "Screen" ? 1 : 0,
               }));
+
+      if (phrases.length === 0) {
+        return {
+          phraseCount: 0,
+          transcript: "",
+          phrases: [],
+          status: "TRANSCRIPT_NOT_YET_GENERATED",
+          guidance: "Transcript has not been generated for this video yet. Call `generate_captions` to transcribe audio and produce timestamped speech phrases.",
+        };
+      }
 
       const formatted = phrases
         .map((p) => {

@@ -50,20 +50,21 @@ export function registerBatchTools(): void {
         corePhilosophy: "Multimodal spatial-temporal reasoning (Spoken intent + Human cursor telemetry + Frame probing)",
         rules: [
           "1. NO EMOJIS: Do NOT use emojis in titles, badges, or overlays. Use clean typographic hierarchy (e.g. FEATURE:, ARCHITECTURE:, SECTION:).",
-          "2. SEQUENTIAL TRACKING: When reading multiple comments or sequential items, create sequential focal transitions (1.6x - 1.8x) rather than a single tight static zoom.",
-          "3. SAFE VIEWPORT: Use 1.6x - 1.8x for text/comment cards to preserve safe margins; reserve 2.0x - 2.5x for compact UI controls.",
-          "4. TEXT OVERLAY INVERSION: If an active zoom targets the top half (cy <= 0.45), place overlays at pos: 'bottom' to avoid obscuring the magnified area (and vice versa).",
-          "5. FACECAM KEEPOUT: Verify actualCamCorner ('br') to ensure zoom centers and bottom overlays never collide with the facecam bubble.",
-          "6. SILENCE & SETTINGS KEEPOUT: Do not zoom into incidental settings adjustments (e.g. subtitle gear icons) or silent pauses."
+          "2. SEQUENTIAL TRACKING & MULTI-STAGE PANS: When reading multiple comments or scrolling lists, create sequential focal transitions (e.g. Stage 1 at cy=0.45, Stage 2 at cy=0.68 at 1.6x-1.8x) rather than a single static zoom that clips the bottom.",
+          "3. PARKED MOUSE VS ACTIVE ATTENTION: If mouse cursor is stationary for >3s, it is parked. Do NOT blindly center zoom on parked coordinates; always verify active visual target via probe_frames 3x3 grid snapshots.",
+          "4. CLOSED-LOOP POST-TRIM RE-INGESTION: Any trim or split operation rebases timeline time and durations. Always re-fetch get_project_state and get_transcript after trimming before placing zoom keyframes.",
+          "5. SAFE VIEWPORT FORMULA: Visible vertical height is 1/scale (e.g. 1.8x scale shows 55.5% vertical height from cy-0.277 to cy+0.277). Target cy must ensure content stays inside [0.05, 0.95].",
+          "6. TEXT OVERLAY INVERSION: If an active zoom targets the top half (cy <= 0.45), place overlays at pos: 'bottom' to avoid obscuring the magnified area (and vice versa).",
+          "7. FACECAM KEEPOUT: Verify actualCamCorner ('br') to ensure zoom centers and bottom overlays never collide with the facecam bubble.",
+          "8. SILENCE & SETTINGS KEEPOUT: Do not zoom into incidental settings adjustments (e.g. subtitle gear icons) or silent pauses."
         ],
         standardProtocol: [
-          "Step 1: get_video_summary (Ingest transcript & metadata)",
-          "Step 2: generate_captions (If transcript is missing/empty)",
-          "Step 3: get_click_log (Query human cursor coordinates atTimestamp)",
-          "Step 4: probe_frames (Sample 3x3 grid frames at key timestamps)",
-          "Step 5: locate_visual_target (Ground normalized center coordinates)",
-          "Step 6: propose_edits (Stage batched atomic edits with zooms, text, cam, bg)",
-          "Step 7: commit_staged_changes & export_clip (Apply to timeline & render)"
+          "Step 1: get_project_state & get_transcript (Ingest timeline state & speech)",
+          "Step 2: probe_frames (Sample 3x3 grid frames at target timestamps to ground visual coordinates)",
+          "Step 3: get_click_log (Inspect human click telemetry for active cursor grounding)",
+          "Step 4: propose_edits (Stage batched atomic edits with zooms, text overlays, speed)",
+          "Step 5: inspect_timeline (Verify staged diff on rebased timeline)",
+          "Step 6: commit_staged_changes (Bake approved edits into timeline)"
         ],
         textOverlayStyles: {
           fonts: ["Inter", "Outfit", "Montserrat", "Playfair Display", "Fira Code"],
@@ -77,7 +78,7 @@ export function registerBatchTools(): void {
   // ── 1. get_video_summary (Read-Only Free) ──
   registerToolWithLifecycle({
     name: "get_video_summary",
-    description: "Returns the compact semantic digest (scene dataframe, silence intervals, packed transcript, metadata) for single-turn editing decisions.",
+    description: "Returns the complete semantic summary of the loaded video: transcript phrases, scene breakdown, silence intervals, and the Director Playbook. Call this to understand the video content before editing.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -140,7 +141,28 @@ export function registerBatchTools(): void {
           };
 
       const digest = generateVideoDigest(store.project, dummyAnalysis);
-      return digest;
+      return {
+        ...digest,
+        directorPlaybook: {
+          coreRules: [
+            "NO EMOJIS: Do NOT use emojis in titles, badges, or overlays. Use clean typographic hierarchy (e.g. FEATURE:, ARCHITECTURE:, SECTION:).",
+            "MULTI-STAGE PANS: When tracking longitudinal content or reading down comments, create sequential focal transitions (Stage 1 cy=0.45, Stage 2 cy=0.68 at 1.6x-1.8x) rather than a single static zoom that clips the bottom.",
+            "PARKED CURSOR HEURISTIC: If cursor was stationary >3s, it is parked. Verify active target via probe_frames 3x3 grid snapshots.",
+            "CLOSED-LOOP POST-TRIM RE-INGESTION: Any trim or split rebases timeline time and durations. Always re-fetch get_project_state and get_transcript after trimming before placing zoom keyframes.",
+            "SAFE VIEWPORT FORMULA: Visible vertical height is 1/scale (e.g. 1.8x scale shows 55.5% vertical height from cy-0.277 to cy+0.277). Keep content within [0.05, 0.95].",
+            "OVERLAY INVERSION: If an active zoom targets the top half (cy <= 0.45), place overlays at pos: 'bottom' (and vice versa).",
+            "FACECAM KEEPOUT: Check actualCamCorner ('br') to prevent zoom centers and overlays from colliding with facecam."
+          ],
+          standardProtocol: [
+            "1. get_project_state & get_transcript (Ingest timeline state & speech)",
+            "2. probe_frames (Sample 3x3 grid frames at target timestamps to ground visual coordinates)",
+            "3. get_click_log (Inspect human click telemetry for active cursor grounding)",
+            "4. propose_edits (Stage batched atomic edits with zooms, text overlays, speed)",
+            "5. inspect_timeline (Verify staged diff on rebased timeline)",
+            "6. commit_staged_changes (Bake approved edits into timeline)"
+          ]
+        },
+      };
     },
   });
 
@@ -187,17 +209,17 @@ export function registerBatchTools(): void {
         },
         includeSnapshot: {
           type: "boolean",
-          description: "Whether to generate base64 image snapshots for VLM inspection",
+          description: "Whether to generate base64 image snapshots for visual inspection (default: true)",
         },
         gridOverlay: {
           type: "boolean",
-          description: "Whether to overlay a 3x3 alphanumeric grid (A1..C3) on the snapshot",
+          description: "Whether to overlay a 3x3 alphanumeric grid (A1..C3) on the snapshot (default: true)",
         },
       },
       required: ["timestamps"],
     },
     annotations: { readOnlyHint: true },
-    execute: async ({ timestamps, includeSnapshot, gridOverlay }) => {
+    execute: async ({ timestamps, includeSnapshot = true, gridOverlay = true }) => {
       const store = useProjectStore.getState();
       const times = Array.isArray(timestamps) ? timestamps : [];
       const { captureProbeSnapshot } = await import("@panoptik/engine");
@@ -267,35 +289,34 @@ export function registerBatchTools(): void {
         };
       }
 
-      // Tier 2: Grounded VLM Output Parser
-      const parsed = parseGroundingOutput(vlmOutput);
-      const tolerance = calculateZoomTolerance(scale, parsed.width);
-
-      if (!parsed.objectPresent || parsed.confidence < 0.2) {
-        return {
-          target: query,
-          t: timestamp,
-          objectPresent: false,
-          fallback: "USER_CLICK_REQUIRED",
-          message: `Target '${query}' could not be grounded in frame at ${timestamp}s. Prompt user to click on canvas.`,
-        };
+      // Tier 2: Parse VLM Grounding Output (BBox or Grid)
+      if (vlmOutput) {
+        const parsed = parseGroundingOutput(vlmOutput);
+        if (parsed) {
+          return {
+            target: query,
+            t: timestamp,
+            x: parsed.x,
+            y: parsed.y,
+            confidence: parsed.confidence,
+            verified: true,
+            source: "grounded_vlm",
+            tolerance: calculateZoomTolerance(scale),
+          };
+        }
       }
 
-      // Tier 3: High Zoom (>3.5x) verification check
-      const isDeepZoom = scale >= 3.5;
+      // Tier 3: Default center with prompt guidance
       return {
         target: query,
         t: timestamp,
-        x: parsed.x,
-        y: parsed.y,
-        width: parsed.width,
-        height: parsed.height,
-        gridCell: parsed.gridCell,
-        confidence: parsed.confidence,
-        verified: !isDeepZoom,
-        requiresCropVerification: isDeepZoom,
-        source: parsed.source,
-        tolerance,
+        x: 0.5,
+        y: 0.5,
+        confidence: 0.5,
+        verified: false,
+        source: "fallback_center",
+        tolerance: calculateZoomTolerance(scale),
+        guidance: "No high-confidence visual target found. Use probe_frames({ timestamps: [" + timestamp + "], gridOverlay: true }) to inspect visual cells.",
       };
     },
   });
@@ -303,7 +324,7 @@ export function registerBatchTools(): void {
   // ── 4. propose_edits (Staging Batch Free) ──
   registerToolWithLifecycle({
     name: "propose_edits",
-    description: "Stages a single atomic batch of edit operations (cut, zoom, cam, trans, bg, speed, text, music) with automatic cut-map rebasing and collision resolution.",
+    description: "Stages a single atomic batch of edit operations (cut, zoom, cam, trans, bg, speed, text, music). MANDATORY RULES: (1) NO emojis in text overlays. (2) Use multi-stage sequential pans (1.6x-1.8x) for long content to prevent bottom clipping. (3) Invert overlay position if zoom is in the top half. (4) Verify active target via probe_frames rather than blindly centering on parked mouse.",
     inputSchema: {
       type: "object",
       properties: {

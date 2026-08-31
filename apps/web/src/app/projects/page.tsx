@@ -85,9 +85,9 @@ export default function ProjectsPage() {
     setIsImporting(true);
     try {
       const { importProjectBundle } = await import("@panoptik/engine");
-      const { project, projectId } = await importProjectBundle(file);
+      const { project, projectId, history, historyIndex } = await importProjectBundle(file);
       safeSetLocalStorage(LAST_PROJECT_KEY, projectId);
-      useProjectStore.getState().setProject(project);
+      useProjectStore.getState().setProject(project, history, historyIndex);
       router.push("/editor");
     } catch (err) {
       console.error("Import project failed", err);
