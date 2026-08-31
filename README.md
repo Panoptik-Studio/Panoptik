@@ -43,7 +43,8 @@ Panoptik implements a complete suite of in-browser WebMCP tools that enable AI m
 ### How to Test WebMCP
 1. **Chrome WebMCP Testing**: Open Chrome and enable `chrome://flags/#enable-webmcp-testing`.
 2. **ChatGPT In-App Browser**: Open Panoptik inside the ChatGPT web browser to let the model invoke tools.
-3. **Browser Console**: Call tools directly from the DevTools console:
+3. **AI Video Director Guide**: Read the comprehensive [LLM AI Video Director Guide](docs/LLM_WEBMCP_DIRECTOR_GUIDE.md) for step-by-step reasoning protocols and examples.
+4. **Browser Console**: Call tools directly from the DevTools console:
    ```javascript
    await window.__panoptik_call_tool("get_project_state");
    await window.__panoptik_call_tool("propose_zoom_points", { timestamps: [2.5, 6.0], scale: 2.2 });

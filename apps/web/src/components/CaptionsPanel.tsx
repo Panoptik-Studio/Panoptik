@@ -47,12 +47,12 @@ export const CAPTION_PRESETS: CaptionStylePreset[] = [
     fontFamily: "Outfit",
     fontWeight: "900",
     color: "#facc15",
-    backgroundColor: "rgba(0, 0, 0, 0.82)",
+    backgroundColor: "rgba(0, 0, 0, 0.85)",
     backgroundPadding: 8,
     borderRadius: 8,
     borderWidth: 0,
     borderColor: "transparent",
-    shadowColor: "rgba(0, 0, 0, 0.7)",
+    shadowColor: "rgba(0, 0, 0, 0.8)",
     shadowBlur: 8,
     animation: "pop",
   },
@@ -64,11 +64,11 @@ export const CAPTION_PRESETS: CaptionStylePreset[] = [
     fontFamily: "Inter",
     fontWeight: "600",
     color: "#ffffff",
-    backgroundColor: "rgba(20, 20, 20, 0.72)",
+    backgroundColor: "rgba(24, 24, 27, 0.85)",
     backgroundPadding: 6,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderColor: "rgba(255, 255, 255, 0.25)",
     shadowColor: "rgba(0, 0, 0, 0.5)",
     shadowBlur: 4,
     animation: "fade",
@@ -84,9 +84,9 @@ export const CAPTION_PRESETS: CaptionStylePreset[] = [
     backgroundColor: "transparent",
     backgroundPadding: 4,
     borderRadius: 0,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: "#000000",
-    shadowColor: "rgba(0, 0, 0, 0.9)",
+    shadowColor: "rgba(0, 0, 0, 0.95)",
     shadowBlur: 6,
     animation: "slide-up",
   },
@@ -98,7 +98,7 @@ export const CAPTION_PRESETS: CaptionStylePreset[] = [
     fontFamily: "Roboto",
     fontWeight: "normal",
     color: "#ffffff",
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    backgroundColor: "rgba(0, 0, 0, 0.72)",
     backgroundPadding: 5,
     borderRadius: 4,
     borderWidth: 0,
@@ -114,13 +114,13 @@ export const CAPTION_PRESETS: CaptionStylePreset[] = [
     fontSize: 20,
     fontFamily: "Outfit",
     fontWeight: "800",
-    color: "#06b6d4",
-    backgroundColor: "rgba(10, 15, 30, 0.88)",
+    color: "#38bdf8",
+    backgroundColor: "rgba(15, 23, 42, 0.92)",
     backgroundPadding: 7,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(6, 182, 212, 0.4)",
-    shadowColor: "rgba(6, 182, 212, 0.6)",
+    borderColor: "rgba(56, 189, 248, 0.55)",
+    shadowColor: "rgba(56, 189, 248, 0.8)",
     shadowBlur: 10,
     animation: "bounce",
   },
@@ -129,9 +129,9 @@ export const CAPTION_PRESETS: CaptionStylePreset[] = [
     name: "Highlighter",
     badge: "Bright",
     fontSize: 19,
-    fontFamily: "Poppins",
-    fontWeight: "bold",
-    color: "#18181b",
+    fontFamily: "Outfit",
+    fontWeight: "800",
+    color: "#0f172a",
     backgroundColor: "#fde047",
     backgroundPadding: 7,
     borderRadius: 6,
@@ -670,43 +670,66 @@ export function CaptionsPanel() {
               <button
                 key={preset.id}
                 onClick={() => applyPreset(preset)}
-                className={`group relative flex flex-col justify-between rounded-[12px] border p-2.5 text-left transition-all cursor-pointer ${
+                className={`group relative flex flex-col justify-between rounded-[13px] border p-2.5 text-left transition-all cursor-pointer ${
                   isSelected
-                    ? "border-[#0070f3] bg-[#0070f3]/5 shadow-xs ring-1 ring-[#0070f3]"
+                    ? "border-[#0070f3] bg-[#0070f3]/5 shadow-sm ring-1.5 ring-[#0070f3]"
                     : "border-pk-hairline bg-white hover:border-[#0070f3]/60 hover:bg-pk-surface-soft/60"
                 }`}
               >
-                <div className="flex w-full items-center justify-between">
-                  <span className="text-[12px] font-semibold text-pk-ink">
+                <div className="flex w-full items-center justify-between gap-1.5">
+                  <span className="text-[12px] font-semibold text-pk-ink truncate">
                     {preset.name}
                   </span>
                   {isSelected ? (
-                    <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#0070f3] text-white">
-                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                    <div className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#0070f3] text-white shadow-xs">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     </div>
                   ) : (
-                    <span className="text-[10px] text-pk-faint group-hover:text-pk-muted">
+                    <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[9px] font-medium tracking-wide text-zinc-500 uppercase">
                       {preset.badge}
                     </span>
                   )}
                 </div>
 
                 {/* Visual Typography & Pill Preview */}
-                <div className="mt-2 flex w-full items-center justify-center overflow-hidden rounded-md py-1 px-1.5" style={{ background: "#0a0a0c" }}>
+                <div
+                  className="mt-2.5 flex h-9 w-full items-center justify-center overflow-hidden rounded-[8px] px-2 relative"
+                  style={{
+                    background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
+                    boxShadow: "inset 0 1px 2px rgba(0,0,0,0.35)",
+                  }}
+                >
                   <div
                     style={{
                       fontFamily: preset.fontFamily,
                       color: preset.color,
                       backgroundColor: preset.backgroundColor === "transparent" ? "transparent" : preset.backgroundColor,
-                      padding: preset.backgroundColor === "transparent" ? "0px" : "2px 6px",
-                      borderRadius: `${preset.borderRadius ? Math.min(preset.borderRadius, 4) : 0}px`,
-                      WebkitTextStroke: preset.borderWidth ? `${preset.borderWidth * 0.4}px ${preset.borderColor}` : undefined,
-                      fontSize: "11px",
-                      fontWeight: preset.fontWeight === "normal" ? 400 : 700,
+                      padding: preset.backgroundColor === "transparent" ? "0px" : "3px 8px",
+                      borderRadius: `${preset.borderRadius ? Math.min(preset.borderRadius, 6) : 0}px`,
+                      border:
+                        preset.borderWidth && preset.borderColor && preset.backgroundColor !== "transparent"
+                          ? `${preset.borderWidth}px solid ${preset.borderColor}`
+                          : undefined,
+                      textShadow:
+                        preset.id === "outline"
+                          ? "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 4px rgba(0,0,0,0.8)"
+                          : preset.id === "electric"
+                          ? "0 0 8px rgba(56, 189, 248, 0.9)"
+                          : preset.shadowColor
+                          ? `0 1px ${preset.shadowBlur ? preset.shadowBlur / 2 : 2}px ${preset.shadowColor}`
+                          : undefined,
+                      fontSize: preset.id === "outline" ? "14px" : "12px",
+                      fontWeight:
+                        preset.fontWeight === "normal"
+                          ? 400
+                          : preset.fontWeight === "900" || preset.fontWeight === "800"
+                          ? 800
+                          : 700,
+                      letterSpacing: preset.id === "outline" ? "0.04em" : "normal",
                     }}
-                    className="truncate max-w-full text-center leading-tight tracking-tight"
+                    className="truncate max-w-full text-center leading-none select-none"
                   >
                     Aa Subtitle
                   </div>

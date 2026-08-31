@@ -358,6 +358,20 @@ Morning: re-test deployed URL with fresh ChatGPT session. Re-record demo if any 
 
 ---
 
+## Future Planned Capabilities (Post v1.2)
+
+### 1. Synthetic Animated Vector Cursor & Click Ripple Overlay
+- **Problem**: When recording via `getDisplayMedia`, tab captures, window captures, and Linux Wayland compositors often suppress or drop the hardware mouse cursor from raw video frames.
+- **Solution**:
+  - Panoptik records continuous cursor trajectories `{ t, x, y, type: 'move' | 'click' }` in `project.clickLog`.
+  - Add a configurable vector cursor overlay layer in `packages/engine/src/render.ts`:
+    1. **Vector Cursor Pointer**: High-DPI macOS/Windows vector pointer arrow with smooth spring/cubic interpolation between trajectory points.
+    2. **Click Ripples & Highlights**: Expanding glowing ripple circles rendered on `type: 'click'` events.
+    3. **Custom Cursor Styling**: Configurable cursor scale ($1\times - 2.5\times$), color tint, and click glow color.
+    4. **Deterministic Export Rendering**: Burned cleanly into exported MP4/WebM videos regardless of OS or browser capture behavior.
+
+---
+
 ## What's still cut (post-hackathon)
 
 | Feature | Why cut |

@@ -8,7 +8,7 @@
 import { registerToolWithLifecycle } from "./lifecycle";
 import { useProjectStore } from "../stores/projectStore";
 import { showConfirmDialog } from "./confirm";
-import type { AspectPreset, Background, ZoomPoint } from "@panoptik/schema";
+import type { AspectPreset, Background, TextAnimation, ZoomPoint } from "@panoptik/schema";
 
 const MAX_PROPOSALS = 200;
 const MAX_TEXT_LENGTH = 200;
@@ -118,22 +118,61 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "add_text_overlay",
     description:
-      "Stages a text caption or annotation overlay at a specific timestamp and screen position. Staged overlays appear in amber for review until committed.",
+      "Stages a styled text caption or annotation overlay at a specific timestamp and screen position. Supports custom fonts, sizes, colors, backdrops, and entrance/exit animations. Staged overlays appear for review until committed.",
     inputSchema: {
       type: "object",
       properties: {
         text: {
           type: "string",
-          description: "The text content to display.",
+          description: "The text content to display (no emojis).",
         },
         timestamp: {
           type: "number",
           description: "When the text should appear (in seconds).",
         },
+        duration: {
+          type: "number",
+          description: "Duration in seconds (default 3.0).",
+        },
         position: {
           type: "string",
           enum: ["top", "bottom", "center"],
           description: "Vertical position on screen (default 'bottom').",
+        },
+        fontSize: {
+          type: "number",
+          description: "Font size in pixels (e.g. 24, 36, 48).",
+        },
+        fontFamily: {
+          type: "string",
+          description: "Font family (e.g. 'Inter', 'Outfit', 'Montserrat', 'Playfair Display', 'Fira Code').",
+        },
+        fontWeight: {
+          type: "string",
+          enum: ["normal", "bold", "600", "800", "900"],
+          description: "Font weight (e.g. 'bold', '600', '900').",
+        },
+        fontStyle: {
+          type: "string",
+          enum: ["normal", "italic"],
+          description: "Font style ('normal' or 'italic').",
+        },
+        color: {
+          type: "string",
+          description: "Text color hex or rgba (e.g. '#ffffff', '#facc15').",
+        },
+        backgroundColor: {
+          type: "string",
+          description: "Backdrop pill color (e.g. 'rgba(15,23,42,0.85)', '#1e293b').",
+        },
+        borderRadius: {
+          type: "number",
+          description: "Backdrop corner radius in pixels (e.g. 8, 12).",
+        },
+        animation: {
+          type: "string",
+          enum: ["none", "fade", "pop", "slide-up", "slide-down", "zoom-in", "typewriter", "bounce"],
+          description: "Entrance/exit animation (default 'fade').",
         },
       },
       required: ["text", "timestamp"],
@@ -141,11 +180,29 @@ export function registerEditingTools(): void {
     execute: async ({
       text,
       timestamp,
+      duration,
       position,
+      fontSize,
+      fontFamily,
+      fontWeight,
+      fontStyle,
+      color,
+      backgroundColor,
+      borderRadius,
+      animation,
     }: {
       text: string;
       timestamp: number;
+      duration?: number;
       position?: string;
+      fontSize?: number;
+      fontFamily?: string;
+      fontWeight?: "normal" | "bold" | "600" | "800" | "900";
+      fontStyle?: "normal" | "italic";
+      color?: string;
+      backgroundColor?: string;
+      borderRadius?: number;
+      animation?: TextAnimation;
     }) => {
       const store = useProjectStore.getState();
       if (!store.project) {
@@ -158,12 +215,22 @@ export function registerEditingTools(): void {
       const { lo, hi } = activeSourceWindow();
       const at = clampNumber(timestamp, lo, hi, lo);
       const where = position === "top" || position === "center" || position === "bottom" ? position : "bottom";
+      const dur = typeof duration === "number" && duration > 0 ? duration : 3.0;
 
       store.stageTextOverlay({
         id: generateId(),
         text: safeText,
         timestamp: at,
+        duration: dur,
         position: where,
+        fontSize,
+        fontFamily,
+        fontWeight,
+        fontStyle,
+        color,
+        backgroundColor,
+        borderRadius,
+        animation,
         staged: true,
       });
 
@@ -171,8 +238,9 @@ export function registerEditingTools(): void {
         staged: true,
         text: safeText,
         timestamp: at,
+        duration: dur,
         position: where,
-        message: `Text overlay "${safeText}" staged at ${at}s. Call commit_staged_changes to apply.`,
+        message: `Text overlay "${safeText}" staged at ${at}s (${dur}s duration). Call commit_staged_changes to apply.`,
       };
     },
   });

@@ -9,7 +9,7 @@
  */
 
 import type { FullMediaAnalysis } from "@panoptik/engine";
-import type { Project } from "@panoptik/schema";
+import type { Project, TextAnimation } from "@panoptik/schema";
 
 export type EditOp =
   | {
@@ -62,6 +62,21 @@ export type EditOp =
       text: string;
       pos?: "top" | "bottom" | "center";
       dur?: number;
+      fontSize?: number;
+      fontFamily?: string;
+      fontWeight?: "normal" | "bold" | "600" | "800" | "900";
+      fontStyle?: "normal" | "italic";
+      color?: string;
+      backgroundColor?: string;
+      backgroundPadding?: number;
+      borderRadius?: number;
+      borderWidth?: number;
+      borderColor?: string;
+      shadowColor?: string;
+      shadowBlur?: number;
+      textAlign?: "left" | "center" | "right";
+      animation?: TextAnimation;
+      animationDuration?: number;
     }
   | {
       op: "music";
