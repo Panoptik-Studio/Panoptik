@@ -222,12 +222,17 @@ describe("projectStore", () => {
     expect(useProjectStore.getState().currentTime).toBe(duration);
   });
 
-  it("seek sets time and pauses", () => {
+  it("seek sets time and preserves playback state", () => {
     useProjectStore.getState().play();
     useProjectStore.getState().seek(5.5);
     const s = useProjectStore.getState();
     expect(s.currentTime).toBe(5.5);
-    expect(s.isPlaying).toBe(false);
+    expect(s.isPlaying).toBe(true);
+
+    useProjectStore.getState().pause();
+    useProjectStore.getState().seek(2.0);
+    expect(useProjectStore.getState().currentTime).toBe(2.0);
+    expect(useProjectStore.getState().isPlaying).toBe(false);
   });
 
   it("selectedZoomId tracks correctly", () => {

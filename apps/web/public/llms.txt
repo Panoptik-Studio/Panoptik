@@ -1,0 +1,21 @@
+# Panoptik WebMCP AI Video Director Guide
+> Autonomous video director reasoning playbook and tool execution protocol for Large Language Models (LLMs).
+
+## Tool Protocol
+- **Step 1**: Ingest Video Digest (`get_video_summary`)
+- **Step 2**: Auto-Generate Captions if missing (`generate_captions({ language: "auto" })`)
+- **Step 3**: Query Human Focus & Cursor Telemetry (`get_click_log({ atTimestamp })`)
+- **Step 4**: Visually Probe Frames with 3x3 Grid (`probe_frames({ timestamps: [...] })`)
+- **Step 5**: Ground Visual Bounding Boxes (`locate_visual_target({ query, timestamp })`)
+- **Step 6**: Propose Batched Atomic Edits (`propose_edits({ plan, ops: [...] })`)
+- **Step 7**: Commit & Export (`commit_staged_changes()` & `export_clip()`)
+
+## Strict Editorial Rules
+1. **NO EMOJIS**: Never use emojis in titles, badges, or overlays. Use clean typographic hierarchy (e.g. `FEATURE:`, `ARCHITECTURE:`, `SECTION:`).
+2. **SEQUENTIAL TRACKING**: For multi-comment / multi-item reading, create sequential focal transitions (1.6x - 1.8x) rather than a single tight static zoom.
+3. **SAFE VIEWPORT**: Use 1.6x - 1.8x for text/comment cards to preserve safe margins; reserve 2.0x - 2.5x for compact UI controls.
+4. **TEXT OVERLAY INVERSION**: If an active zoom targets the top half (cy <= 0.45), place overlays at `pos: "bottom"` to avoid obscuring the magnified area (and vice versa).
+5. **FACECAM KEEPOUT**: Verify `actualCamCorner` ('br') to ensure zoom centers and bottom overlays never collide with the facecam bubble.
+
+## Guidelines WebMCP Tool
+Call `get_director_guidelines` directly from the browser console or WebMCP client to receive the full playbook dynamically.

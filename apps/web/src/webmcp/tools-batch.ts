@@ -31,6 +31,45 @@ export function setAnalysisCache(analysis: FullMediaAnalysis | null): void {
 }
 
 export function registerBatchTools(): void {
+  // ── 0. get_director_guidelines (Read-Only Free) ──
+  registerToolWithLifecycle({
+    name: "get_director_guidelines",
+    description: "Returns the authoritative Video Director reasoning playbook: multimodal heuristics, zoom scales, text overlay rules (no emojis), keepouts, and standard 7-step execution protocol.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    annotations: { readOnlyHint: true },
+    execute: async () => {
+      return {
+        guideTitle: "Panoptik AI Video Director Playbook",
+        corePhilosophy: "Multimodal spatial-temporal reasoning (Spoken intent + Human cursor telemetry + Frame probing)",
+        rules: [
+          "1. NO EMOJIS: Do NOT use emojis in titles, badges, or overlays. Use clean typographic hierarchy (e.g. FEATURE:, ARCHITECTURE:, SECTION:).",
+          "2. SEQUENTIAL TRACKING: When reading multiple comments or sequential items, create sequential focal transitions (1.6x - 1.8x) rather than a single tight static zoom.",
+          "3. SAFE VIEWPORT: Use 1.6x - 1.8x for text/comment cards to preserve safe margins; reserve 2.0x - 2.5x for compact UI controls.",
+          "4. TEXT OVERLAY INVERSION: If an active zoom targets the top half (cy <= 0.45), place overlays at pos: 'bottom' to avoid obscuring the magnified area (and vice versa).",
+          "5. FACECAM KEEPOUT: Verify actualCamCorner ('br') to ensure zoom centers and bottom overlays never collide with the facecam bubble.",
+          "6. SILENCE & SETTINGS KEEPOUT: Do not zoom into incidental settings adjustments (e.g. subtitle gear icons) or silent pauses."
+        ],
+        standardProtocol: [
+          "Step 1: get_video_summary (Ingest transcript & metadata)",
+          "Step 2: generate_captions (If transcript is missing/empty)",
+          "Step 3: get_click_log (Query human cursor coordinates atTimestamp)",
+          "Step 4: probe_frames (Sample 3x3 grid frames at key timestamps)",
+          "Step 5: locate_visual_target (Ground normalized center coordinates)",
+          "Step 6: propose_edits (Stage batched atomic edits with zooms, text, cam, bg)",
+          "Step 7: commit_staged_changes & export_clip (Apply to timeline & render)"
+        ],
+        textOverlayStyles: {
+          fonts: ["Inter", "Outfit", "Montserrat", "Playfair Display", "Fira Code"],
+          animations: ["fade", "pop", "slide-up", "slide-down", "zoom-in", "typewriter", "bounce"],
+          backdrops: ["rgba(15,23,42,0.85)", "#1e293b", "rgba(0,0,0,0.75)"]
+        }
+      };
+    },
+  });
+
   // ── 1. get_video_summary (Read-Only Free) ──
   registerToolWithLifecycle({
     name: "get_video_summary",

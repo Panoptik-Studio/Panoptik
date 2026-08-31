@@ -655,7 +655,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
             : [];
       return {
         currentTime: t,
-        isPlaying: false,
+        isPlaying: s.isPlaying,
         selectedSegmentId: segId,
         selectedSegmentIds: nextIds,
       };

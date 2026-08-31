@@ -273,6 +273,12 @@ export function Timeline({
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay);
   const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay);
   const exportProgress = useProjectStore((s) => s.exportProgress);
+  const undo = useProjectStore((s) => s.undo);
+  const redo = useProjectStore((s) => s.redo);
+  const historyIndex = useProjectStore((s) => s.historyIndex);
+  const historyLen = useProjectStore((s) => s.history.length);
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex >= 0 && historyIndex < historyLen - 1;
   const [showSpeed, setShowSpeed] = useState(false);
   const speedHideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -1390,7 +1396,6 @@ export function Timeline({
       {/* Controls bar — modern SVGs, no emoji */}
       <div className="timeline-bar flex h-[44px] shrink-0 items-center justify-between border-b bg-white px-3" style={{ borderColor: "#ebebeb" }}>
         <div className="controls-left flex items-center gap-1">
-          <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Video"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></button>
           <button
             className="pk-icon-btn ctrl-btn h-8 w-8"
             title="Adjust Facecam Mic Volume"
@@ -1410,7 +1415,6 @@ export function Timeline({
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 10a7 7 0 0 1-14 0"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           </button>
-          <div className="ctrl-divider mx-1 h-4 w-px bg-[#ebebeb]" />
           <button
             className="pk-icon-btn ctrl-btn h-8 w-8"
             title="Adjust Screen Audio Volume"
@@ -1430,30 +1434,8 @@ export function Timeline({
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
           </button>
-          <button
-            className="pk-icon-btn ctrl-btn h-8 w-8"
-            title="Adjust Voiceover Volume"
-            onClick={() => {
-              const tracks = project.audioTracks?.filter((t) => t.kind === "voiceover") ?? [];
-              if (tracks.length === 0) {
-                alert("No voiceover track yet. Record one in the Audio panel.");
-                return;
-              }
-              const track = tracks[tracks.length - 1]!;
-              setHoveredVolume({
-                type: "voiceover",
-                segmentId: track.id,
-                segmentIndex: 0,
-                x: Math.min(canvasW - 252, Math.max(10, timeToX(currentTime) - 120)),
-                y: AUDIO_TRACK_Y,
-                volume: track.volume,
-              });
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10a7 7 0 0 1-14 0"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-          </button>
+          <div className="ctrl-divider mx-1 h-4 w-px bg-[#ebebeb]" />
           <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Split at playhead" disabled={exportProgress !== null} onClick={() => splitAt(currentTime)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="6.5" height="14" rx="1.5" /><rect x="14.5" y="5" width="6.5" height="14" rx="1.5" /><line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2.5 2" strokeWidth="1.6" /></svg></button>
-          <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Mosaic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></button>
           <div
             className="relative"
             onMouseEnter={handleMouseEnterSpeed}
@@ -1561,16 +1543,83 @@ export function Timeline({
               <path d="M6 11l8-8"/>
             </svg>
           </button>
-          <button className="pk-icon-btn ctrl-btn h-8 w-8" title="Undo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5A2.5 2.5 0 0 1 17 11.5v7"/></svg></button>
+          <button
+            className="pk-icon-btn ctrl-btn h-8 w-8"
+            title="Undo (⌘Z)"
+            disabled={!canUndo || exportProgress !== null}
+            onClick={undo}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M9 14L4 9l5-5"/>
+              <path d="M4 9h10.5A2.5 2.5 0 0 1 17 11.5v7"/>
+            </svg>
+          </button>
+          <button
+            className="pk-icon-btn ctrl-btn h-8 w-8"
+            title="Redo (⌘⇧Z)"
+            disabled={!canRedo || exportProgress !== null}
+            onClick={redo}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M15 14l5-5-5-5"/>
+              <path d="M20 9H9.5A2.5 2.5 0 0 0 7 11.5v7"/>
+            </svg>
+          </button>
         </div>
 
         <div className="controls-center flex items-center gap-1.5">
-          <button className="pk-icon-btn ctrl-btn ctrl-btn--round h-8 w-8 rounded-full" disabled title="Stop"><span className="h-2.5 w-2.5 bg-[#171717] rounded-[1px]" /></button>
-          <button className="pk-icon-btn ctrl-btn h-8 w-8" disabled title="Prev"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
-          <button className="ctrl-btn ctrl-btn--play flex h-10 w-10 items-center justify-center rounded-full text-white transition-colors" style={{ background: "#1f1f1f" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#0070f3")} onMouseLeave={(e) => (e.currentTarget.style.background = "#1f1f1f")} onClick={() => isPlaying ? pause() : play()} title={isPlaying ? "Pause" : "Play"}>
-            {isPlaying ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>}
+          <button
+            className="pk-icon-btn ctrl-btn ctrl-btn--round h-8 w-8 rounded-full cursor-pointer hover:bg-[#f0f0f0]"
+            disabled={currentTime <= 0 || exportProgress !== null}
+            onClick={() => {
+              pause();
+              seek(0);
+            }}
+            title="Stop & Rewind to Start"
+          >
+            <span className="h-2.5 w-2.5 bg-[#171717] rounded-[1px]" />
           </button>
-          <button className="pk-icon-btn ctrl-btn h-8 w-8" disabled title="Next"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+          <button
+            className="pk-icon-btn ctrl-btn h-8 w-8 cursor-pointer hover:bg-[#f0f0f0] transition-colors"
+            disabled={currentTime <= 0 || exportProgress !== null}
+            onClick={() => seek(Math.max(0, currentTime - 10))}
+            title="Seek Backward 10s (← 10s)"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <polygon points="19 20 9 12 19 4 19 20"/>
+              <line x1="5" y1="19" x2="5" y2="5"/>
+            </svg>
+          </button>
+          <button
+            className="ctrl-btn ctrl-btn--play flex h-10 w-10 items-center justify-center rounded-full text-white transition-colors cursor-pointer"
+            style={{ background: "#1f1f1f" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#0070f3")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "#1f1f1f")}
+            onClick={() => (isPlaying ? pause() : play())}
+            title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+          >
+            {isPlaying ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16"/>
+                <rect x="14" y="4" width="4" height="16"/>
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+            )}
+          </button>
+          <button
+            className="pk-icon-btn ctrl-btn h-8 w-8 cursor-pointer hover:bg-[#f0f0f0] transition-colors"
+            disabled={currentTime >= duration || exportProgress !== null}
+            onClick={() => seek(Math.min(duration, currentTime + 10))}
+            title="Seek Forward 10s (10s →)"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <polygon points="5 4 15 12 5 20 5 4"/>
+              <line x1="19" y1="5" x2="19" y2="19"/>
+            </svg>
+          </button>
           <div className="time-display ml-3 flex items-center gap-1.5 font-mono text-[13px] tabular-nums">
             <span className="time-current font-medium" style={{ color: "#1a1a1a" }}>{fmtTime(currentTime)}</span>
             <span className="time-separator" style={{ color: "#888" }}>/</span>
