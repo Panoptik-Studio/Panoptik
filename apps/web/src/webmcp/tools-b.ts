@@ -307,36 +307,120 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "generate_captions",
     description:
-      "Stages captions or subtitles across the clip at key timestamps for review.",
+      "MANDATORY FOR SPEECH: Transcribes the video's audio using Whisper and generates timestamped subtitle phrases across the timeline. Always call this if transcript is empty.",
     inputSchema: {
       type: "object",
       properties: {
         language: {
           type: "string",
-          description: "Language code (e.g. 'en', 'es'). Default auto-detect.",
+          description: "Language code (e.g. 'en', 'es', 'hinglish'). Default auto-detect.",
         },
       },
     },
     execute: async ({ language }: { language?: string }) => {
       const store = useProjectStore.getState();
-      if (!store.project) {
+      const project = store.project;
+      if (!project) {
         return { error: "No project loaded. Ask the user to import a clip first." };
       }
 
-      // Stage an initial caption annotation
-      store.stageTextOverlay({
-        id: generateId(),
-        text: "Auto-captioned Demo",
-        timestamp: 0.5,
-        position: "bottom",
-        staged: true,
-      });
+      try {
+        const { transcribeAudioStream } = await import("../lib/ai/providers");
+        const { decodeViaAudioContext, encodeWavBlob } = await import("@panoptik/engine");
 
-      return {
-        staged: true,
-        language: language ?? "auto",
-        message: "Captions staged as text overlays. Call commit_staged_changes to burn them in.",
-      };
+        const audioSource = project.segments[0]?.facecam?.src || project.audioSrc || project.media[0]?.src;
+        if (!audioSource) {
+          return { error: "No audio source found in the project." };
+        }
+
+        const res = await fetch(audioSource);
+        const blob = await res.blob();
+        let wavBlob = blob;
+
+        if (!blob.type.includes("wav")) {
+          const buf = await decodeViaAudioContext(blob);
+          if (buf) {
+            wavBlob = await encodeWavBlob(buf);
+          }
+        }
+
+        const result = await transcribeAudioStream(wavBlob, { language: language || "en" });
+        const words = result.words ?? [];
+
+        if (words.length === 0) {
+          return {
+            transcribed: false,
+            message: "Transcription ran, but no spoken words were detected in the audio.",
+          };
+        }
+
+        // Pack words into caption overlays (~4-6 words per subtitle card)
+        const generatedOverlays: TextOverlay[] = [];
+        const wordsPerPhrase = 5;
+        for (let i = 0; i < words.length; i += wordsPerPhrase) {
+          const chunk = words.slice(i, i + wordsPerPhrase);
+          const start = chunk[0]!.start;
+          const end = chunk[chunk.length - 1]!.end;
+          const phraseText = chunk.map((w) => w.word).join(" ");
+          generatedOverlays.push({
+            id: generateId(),
+            kind: "caption",
+            text: phraseText,
+            timestamp: Number(start.toFixed(2)),
+            duration: Number(Math.max(1.2, end - start).toFixed(2)),
+            position: "bottom",
+            fontSize: 26,
+            fontFamily: "Inter",
+            fontWeight: "600",
+            color: "#ffffff",
+            backgroundColor: "rgba(24, 24, 27, 0.85)",
+            borderRadius: 6,
+            animation: "fade",
+            staged: true,
+          });
+        }
+
+        // Stage all generated captions
+        for (const cap of generatedOverlays) {
+          store.stageTextOverlay(cap);
+        }
+
+        // Update analysis cache phrases so get_transcript and get_video_summary immediately see them
+        const { setAnalysisCache, getAnalysisCache } = await import("./tools-batch");
+        const prev = getAnalysisCache();
+        if (prev) {
+          setAnalysisCache({
+            ...prev,
+            words: words.map((w) => ({
+              text: w.word,
+              start: w.start,
+              end: w.end,
+              speaker: w.speaker ?? 0,
+              confidence: 0.95,
+            })),
+            phrases: generatedOverlays.map((c) => ({
+              start: c.timestamp,
+              end: c.timestamp + (c.duration ?? 3),
+              text: c.text,
+              speaker: 0,
+            })),
+          });
+        }
+
+        return {
+          staged: true,
+          captionCount: generatedOverlays.length,
+          wordCount: words.length,
+          firstPhrase: generatedOverlays[0]?.text,
+          message: `Successfully generated and staged ${generatedOverlays.length} timestamped captions. Spoken transcript is now available.`,
+        };
+      } catch (err: any) {
+        console.warn("[WebMCP] generate_captions error:", err);
+        return {
+          staged: false,
+          error: err.message || "Transcription failed.",
+        };
+      }
     },
   });
 
