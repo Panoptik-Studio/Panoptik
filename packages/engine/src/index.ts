@@ -96,4 +96,14 @@ export {
 } from "./audioTracks";
 export { formatDefaultProjectName } from "./naming";
 
+// Analysis & Semantic Digest Module
+export * from "./analysis/videoFeatures";
+export * from "./analysis/audioFeatures";
+export * from "./analysis/audioPayload";
+export * from "./analysis/transcriptPacking";
+export * from "./analysis/interactionFeatures";
+export * from "./analysis/cache";
+export * from "./analysis/digest";
+export * from "./analysis/selfEval";
+
 // ── #endregion ──

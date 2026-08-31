@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ProjectCard } from "@/components/ProjectCard";
 import { LAST_PROJECT_KEY } from "@/lib/useProjectPersistence";
 import { useProjectStore } from "@/stores/projectStore";
+import { safeSetLocalStorage, cleanupLegacyLocalStorage } from "@/lib/storageUtils";
 import type { ProjectSummary } from "@panoptik/engine";
 
 type Filter = "all" | "drafts";
@@ -27,6 +28,7 @@ export default function ProjectsPage() {
   const [storage, setStorage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    cleanupLegacyLocalStorage();
     try {
       const { listProjectSummaries } = await import("@panoptik/engine");
       setProjects(await listProjectSummaries());
@@ -50,7 +52,7 @@ export default function ProjectsPage() {
   const open = useCallback(
     (id: string) => {
       // The editor restores whatever this key points at on mount.
-      localStorage.setItem(LAST_PROJECT_KEY, id);
+      safeSetLocalStorage(LAST_PROJECT_KEY, id);
       // Client-side navigation does not reload the app, so the store still
       // holds whatever was open before. Without clearing it the editor's
       // restore sees a project already loaded, skips, and shows the old clip

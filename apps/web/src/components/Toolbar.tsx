@@ -7,11 +7,12 @@
 
 import Link from "next/link";
 
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { formatDefaultProjectName } from "@panoptik/engine";
 import { useVideoExport } from "@/lib/useVideoExport";
 import { engine } from "@/lib/engineProvider";
+import { AISettingsModal } from "./AISettingsModal";
 
 export function Toolbar() {
   const project = useProjectStore((s) => s.project);
@@ -21,6 +22,17 @@ export function Toolbar() {
   const canRedo = useProjectStore((s) => s.historyIndex < s.history.length - 1);
   const quickExport = useVideoExport();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
+  const [isAirGapped, setIsAirGapped] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsAirGapped(localStorage.getItem("panoptik:air_gapped") === "true");
+      const handleOpen = () => setIsAiSettingsOpen(true);
+      window.addEventListener("open-ai-settings-modal", handleOpen);
+      return () => window.removeEventListener("open-ai-settings-modal", handleOpen);
+    }
+  }, [isAiSettingsOpen]);
 
   const onAddClip = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -124,10 +136,24 @@ export function Toolbar() {
           ⌘K
         </button>
 
+        <div className="mx-2 hidden h-5 w-px sm:block" style={{ background: "#ebebeb" }} />
+
+        <button
+          onClick={() => setIsAiSettingsOpen(true)}
+          className="pk-btn pk-btn-ghost pk-btn-sm hidden sm:inline-flex items-center gap-1.5"
+          style={{ height: 38 }}
+          title={isAirGapped ? "Air-Gapped Mode (Zero Network AI)" : "AI Settings & Pro Keys"}
+        >
+          <span className={`h-2 w-2 rounded-full ${isAirGapped ? "bg-emerald-500" : "bg-blue-500"}`} />
+          <span className="text-xs font-medium">{isAirGapped ? "Local Only" : "Cloud AI"}</span>
+        </button>
+
         <button onClick={() => quickExport.run({ format: "mp4", resolution: "720p" }, { download: true })} disabled={!project || quickExport.isExporting} title={project ? "Export 720p MP4 — use the Export panel for other options" : "Load a clip first"} className="pk-btn pk-btn-primary pk-btn-md" style={{ height: 38 }}>
           {quickExport.isExporting ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" /><span className="tabular-nums">{Math.round((quickExport.progress ?? 0) * 100)}%</span></> : <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg><span className="hidden sm:inline">Export Video</span><span className="sm:hidden">Export</span></>}
         </button>
       </div>
+
+      <AISettingsModal isOpen={isAiSettingsOpen} onClose={() => setIsAiSettingsOpen(false)} />
     </header>
   );
 }

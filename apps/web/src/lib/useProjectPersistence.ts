@@ -12,6 +12,8 @@ import { engine } from "@/lib/engineProvider";
 import { useProjectStore } from "@/stores/projectStore";
 import type { Project } from "@panoptik/schema";
 
+import { safeSetLocalStorage, cleanupLegacyLocalStorage } from "./storageUtils";
+
 export const LAST_PROJECT_KEY = "panoptik:lastProject";
 export const HISTORY_KEY_PREFIX = "panoptik:history:";
 /** Edits are frequent; rewriting the JSON on each one would thrash OPFS. */
@@ -173,22 +175,6 @@ export function useProjectPersistence() {
     const isNewProject = needsMediaCopy(project.id);
     const hasNewMedia = hasUnsavedMedia(project);
     const shouldSaveMedia = isNewProject || hasNewMedia;
-    const state = useProjectStore.getState();
-
-    // Persist history to localStorage immediately
-    if (state.history.length > 0 && typeof localStorage !== "undefined") {
-      try {
-        localStorage.setItem(
-          HISTORY_KEY_PREFIX + project.id,
-          JSON.stringify({
-            history: state.history,
-            historyIndex: state.historyIndex,
-          }),
-        );
-      } catch {
-        /* storage full or unavailable */
-      }
-    }
 
     const timer = setTimeout(
       async () => {
@@ -221,10 +207,10 @@ export function useProjectPersistence() {
               project.id,
               project.media.filter((m) => m.src.startsWith("blob:")).map((m) => m.id),
             );
-            localStorage.setItem(LAST_PROJECT_KEY, project.id);
+            safeSetLocalStorage(LAST_PROJECT_KEY, project.id);
           } else if (isNewProject) {
             markMediaSaved(project.id);
-            localStorage.setItem(LAST_PROJECT_KEY, project.id);
+            safeSetLocalStorage(LAST_PROJECT_KEY, project.id);
           }
           setPersistStatus("saved");
         } catch {
@@ -278,7 +264,7 @@ export function useProjectActions() {
             restored.media.map((m) => m.id),
           );
           await restoreAudioTracks(restored);
-          localStorage.setItem(LAST_PROJECT_KEY, restored.id);
+          safeSetLocalStorage(LAST_PROJECT_KEY, restored.id);
           const savedHistory = readSavedHistory(restored.id);
           if (savedHistory?.history && savedHistory.history.length > 0) {
             setProject(restored, savedHistory.history, savedHistory.historyIndex);

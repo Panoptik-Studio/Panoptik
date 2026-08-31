@@ -14,6 +14,7 @@ export default defineConfig({
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/web/src/**/*.test.ts",
+      "proxy/test/**/*.test.ts",
     ],
   },
 });

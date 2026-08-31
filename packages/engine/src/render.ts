@@ -1209,7 +1209,9 @@ function drawFacecam(
     ctx.shadowOffsetY = 3 * scale;
     ctx.fillStyle = "rgba(0,0,0,1)";
     buildPath();
-    ctx.fill();
+    if (typeof ctx.fill === "function") {
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -1217,7 +1219,9 @@ function drawFacecam(
   ctx.save();
   ctx.globalAlpha = opacity;
   buildPath();
-  ctx.clip();
+  if (typeof ctx.clip === "function") {
+    ctx.clip();
+  }
   try {
     ctx.drawImage(source, sx, sy, sCropW, sCropH, bX, bY, curW, curH);
   } catch {
@@ -1236,7 +1240,9 @@ function drawFacecam(
     ctx.strokeStyle = borderColor;
     ctx.lineWidth = effectiveBorderW;
     buildPath();
-    ctx.stroke();
+    if (typeof ctx.stroke === "function") {
+      ctx.stroke();
+    }
     ctx.restore();
   }
 }

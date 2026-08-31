@@ -51,6 +51,8 @@ export type TextOverlay = {
   animation?: TextAnimation; // default "fade"
   animationDuration?: number; // transition duration in seconds (default 0.35s)
   staged: boolean;
+  kind?: "caption" | "text"; // distinguishes subtitles/captions from regular text callouts
+  speaker?: "Speaker" | "Screen" | string; // speaker group tag for subtitles
 };
 
 export type Background =

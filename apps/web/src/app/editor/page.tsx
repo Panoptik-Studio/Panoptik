@@ -1,13 +1,14 @@
 /**
- * OWNER: DEV A — ROADMAP-A.md Task 1.5.
- * Structure is locked: renders one slot per component, import block never changes.
- * Layout matches ui-sample.html: left tool strip + workspace (canvas+timeline) + right inspector.
+ * Panoptik Video Editor.
+ * Layout: left tool strip (Media · Zoom · Text · Captions · Audio · Camera · Stage)
+ * + workspace (PreviewCanvas + Timeline) + right tabbed inspector.
  */
 "use client";
 
 import * as React from "react";
 import { AudioPanel } from "@/components/AudioPanel";
 import { CameraControls } from "@/components/CameraControls";
+import { CaptionsPanel } from "@/components/CaptionsPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ExportLock } from "@/components/ExportLock";
 import { ExportPanel } from "@/components/ExportPanel";
@@ -25,7 +26,8 @@ import { ZoomPanel } from "@/components/ZoomPanel";
 import { useProjectPersistence } from "@/lib/useProjectPersistence";
 import { registerAllTools, unregisterAllTools } from "@/webmcp";
 
-type LeftTab = "media" | "zoom" | "text" | "audio" | "camera" | "stage";
+type LeftTab = "media" | "zoom" | "text" | "captions" | "audio" | "camera" | "stage";
+
 export default function EditorPage() {
   const [activeTab, setActiveTab] = React.useState<LeftTab>("media");
   // Above the tabs: the clip must come back on reload regardless of which
@@ -36,16 +38,18 @@ export default function EditorPage() {
     registerAllTools();
     return () => unregisterAllTools();
   }, []);
+
   return (
     <div className="flex h-screen flex-col" style={{ background: "#f8f8f8" }}>
       <Toolbar />
 
       <div className="flex min-h-0 flex-1">
-        {/* Left — 5 tabs grouped by job: Media / Zoom / Text / Audio / Camera / Stage */}
+        {/* Left — tabs grouped by job: Media / Zoom / Text / Captions / Audio / Camera / Stage */}
         <aside className="flex w-[64px] shrink-0 flex-col items-center gap-2 border-r bg-white py-5" style={{ borderColor: "#ebebeb" }}>
           <ToolBtn icon="media" label="Media" active={activeTab === "media"} onClick={() => setActiveTab("media")} />
           <ToolBtn icon="zoom" label="Zoom" kbd="Z" active={activeTab === "zoom"} onClick={() => setActiveTab("zoom")} />
           <ToolBtn icon="text" label="Text" kbd="T" active={activeTab === "text"} onClick={() => setActiveTab("text")} />
+          <ToolBtn icon="captions" label="Captions" kbd="C" active={activeTab === "captions"} onClick={() => setActiveTab("captions")} />
           <ToolBtn icon="audio" label="Audio" active={activeTab === "audio"} onClick={() => setActiveTab("audio")} />
           <ToolBtn icon="camera" label="Camera" active={activeTab === "camera"} onClick={() => setActiveTab("camera")} />
           <ToolBtn icon="stage" label="Stage" active={activeTab === "stage"} onClick={() => setActiveTab("stage")} />
@@ -62,6 +66,7 @@ export default function EditorPage() {
           </div>
           <Timeline
             onSelectText={() => setActiveTab("text")}
+            onSelectCaptions={() => setActiveTab("captions")}
             onSelectAudio={() => setActiveTab("audio")}
           />
         </main>
@@ -76,6 +81,7 @@ export default function EditorPage() {
             </>
           )}
           {activeTab === "text" && <TextPanel />}
+          {activeTab === "captions" && <CaptionsPanel />}
           {activeTab === "audio" && <AudioPanel />}
           {activeTab === "camera" && <CameraControls />}
           {activeTab === "stage" && <StageControls />}
@@ -100,7 +106,7 @@ export default function EditorPage() {
   );
 }
 
-/* Left — 5 tabs: Media · Zoom · Text · Audio · Camera · Stage */
+/* Left toolbar button component */
 function ToolBtn({ icon, label, kbd, active, onClick }: { icon: string; label: string; kbd?: string; active?: boolean; onClick?: () => void }) {
   const icons: Record<string, React.ReactNode> = {
     media: (
@@ -116,6 +122,11 @@ function ToolBtn({ icon, label, kbd, active, onClick }: { icon: string; label: s
         <polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" />
       </svg>
     ),
+    captions: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+        <rect width="20" height="16" x="2" y="4" rx="2"/><path d="M7 15h3a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1Zm7 0h3a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1h-3a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1Z"/>
+      </svg>
+    ),
     audio: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
     ),
@@ -125,17 +136,8 @@ function ToolBtn({ icon, label, kbd, active, onClick }: { icon: string; label: s
     stage: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
     ),
-    canvas: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
-        <rect width="18" height="18" x="3" y="3" rx="2" /><path d="M7 3v18" /><path d="M3 7.5h4" /><path d="M3 12h18" /><path d="M3 16.5h4" /><path d="M17 3v18" /><path d="M17 7.5h4" /><path d="M17 16.5h4" />
-      </svg>
-    ),
-    settings: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
-        <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-      </svg>
-    ),
   };
+
   return (
     <div className="group relative">
       <button
@@ -148,7 +150,11 @@ function ToolBtn({ icon, label, kbd, active, onClick }: { icon: string; label: s
       </button>
       <div className="pk-ui pointer-events-none absolute left-[52px] top-1/2 z-50 hidden -translate-y-1/2 items-center gap-2 whitespace-nowrap rounded-[11px] border bg-white px-3 py-1.5 text-[12px] font-medium pk-shadow-md group-hover:flex" style={{ borderColor: "#ebebeb", color: "#1a1a1a" }}>
         {label}
-        {kbd && <span className="rounded-md border bg-[#f1f1f1] px-1.5 py-px font-mono text-[10px]" style={{ borderColor: "#ebebeb", color: "#666" }}>{kbd}</span>}
+        {kbd && (
+          <kbd className="rounded border bg-[#f8f8f8] px-1 py-0.5 font-mono text-[10px]" style={{ borderColor: "#ebebeb", color: "#888" }}>
+            {kbd}
+          </kbd>
+        )}
       </div>
     </div>
   );

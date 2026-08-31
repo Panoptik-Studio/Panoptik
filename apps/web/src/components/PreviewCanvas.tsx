@@ -298,6 +298,39 @@ function drawTextOverlayHandles(
     ctx.stroke();
   }
 
+  // Group indicator badge
+  if (to.kind === "caption") {
+    const speakerGroup =
+      to.speaker ||
+      (to.text?.startsWith("Speaker:")
+        ? "Speaker"
+        : to.text?.startsWith("Screen:")
+        ? "Screen"
+        : "Subtitles");
+    const badgeText = `${speakerGroup} Captions`;
+    const fontPx = Math.max(10, Math.round(11 * scale));
+    ctx.font = `600 ${fontPx}px Inter, system-ui, sans-serif`;
+    const textMetrics = ctx.measureText(badgeText);
+    const badgeW = textMetrics.width + 12 * scale;
+    const badgeH = 18 * scale;
+    const badgeX = boxX;
+    const badgeY = boxY - badgeH - 4 * scale;
+
+    ctx.fillStyle = to.staged ? "#f59e0b" : "#0070f3";
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4 * scale);
+    } else {
+      ctx.rect(badgeX, badgeY, badgeW, badgeH);
+    }
+    ctx.fill();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(badgeText, badgeX + 6 * scale, badgeY + badgeH / 2);
+  }
+
   ctx.restore();
 }
 

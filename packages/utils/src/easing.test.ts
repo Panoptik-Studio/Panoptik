@@ -20,7 +20,7 @@ describe("easeOutCubic", () => {
 
 describe("EASINGS registry", () => {
   it("has expected keys", () => {
-    expect(Object.keys(EASINGS).sort()).toEqual(["easeInOutCubic", "easeOutCubic", "linear"]);
+    expect(Object.keys(EASINGS).sort()).toEqual(["easeInCubic", "easeInOutCubic", "easeOutCubic", "linear"]);
   });
   it("linear is identity", () => expect(EASINGS.linear!(0.73)).toBe(0.73));
 });

@@ -67,8 +67,7 @@ export function ExportLock() {
           Exporting your <span className="pk-accent">video</span>
         </h3>
         <p className="pk-help mt-2 max-w-[32ch]">
-          Every frame is rendered through the preview pipeline. Editing is paused
-          until this finishes.
+          Editing is paused until this finishes.
         </p>
 
         <div className="mt-6 h-1.5 w-full overflow-hidden rounded-full" style={{ background: "#ebebeb" }}>

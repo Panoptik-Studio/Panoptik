@@ -193,9 +193,9 @@ export function TextPanel() {
 
   const overlays: TextOverlay[] = useMemo(() => {
     if (!seg) return [];
-    return [...seg.textOverlays, ...seg.stagedTextOverlays].sort(
-      (a, b) => a.timestamp - b.timestamp,
-    );
+    return [...seg.textOverlays, ...seg.stagedTextOverlays]
+      .filter((t) => t.kind !== "caption")
+      .sort((a, b) => a.timestamp - b.timestamp);
   }, [seg]);
 
   const activeOverlay = useMemo(
@@ -224,6 +224,7 @@ export function TextPanel() {
   const handleAddNew = () => {
     const startT = Math.max(0, currentTime);
     addTextOverlay({
+      kind: "text",
       text: "New Text",
       timestamp: Number(startT.toFixed(2)),
       duration: 3,
@@ -257,7 +258,7 @@ export function TextPanel() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="pk-panel-title">Text Overlays</h3>
-          <p className="pk-help">Captions & titles</p>
+          <p className="pk-help">Titles, lower thirds & callouts</p>
         </div>
         <button
           onClick={handleAddNew}

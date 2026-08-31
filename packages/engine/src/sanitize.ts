@@ -75,6 +75,7 @@ function overlay(v: unknown, lo: number, hi: number): TextOverlay | null {
   const body = text(o.text);
   if (!body) return null;
   return {
+    ...o,
     id: o.id.slice(0, 100),
     text: body,
     timestamp: num(o.timestamp, 0, lo, hi),
@@ -82,6 +83,8 @@ function overlay(v: unknown, lo: number, hi: number): TextOverlay | null {
       ? (o.position as TextOverlay["position"])
       : "bottom",
     staged: o.staged === true,
+    kind: o.kind === "caption" ? "caption" : "text",
+    speaker: typeof o.speaker === "string" ? o.speaker.slice(0, 50) : undefined,
   };
 }
 

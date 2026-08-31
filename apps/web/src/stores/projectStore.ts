@@ -201,6 +201,8 @@ interface ProjectStore {
 
   // Text — committed
   addTextOverlay: (overlay: Omit<TextOverlay, "id" | "staged">) => void;
+  batchAddTextOverlays: (overlays: Array<Omit<TextOverlay, "id" | "staged">>, segmentId?: string) => void;
+  setSegmentTextOverlays: (segmentId: string, overlays: TextOverlay[]) => void;
   removeTextOverlay: (id: string) => void;
   updateTextOverlay: (
     id: string,
@@ -796,6 +798,37 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     pushHistoryAndSet(project, state, set);
   },
 
+  batchAddTextOverlays: (overlays, targetSegmentId) => {
+    const state = get();
+    if (!state.project || state.project.segments.length === 0) return;
+    const segmentId = targetSegmentId ?? state.selectedSegmentId ?? state.project.segments[0]?.id;
+    if (!segmentId) return;
+    const newItems: TextOverlay[] = overlays.map((o) => ({
+      ...o,
+      id: crypto.randomUUID(),
+      staged: false,
+    }));
+    const project = {
+      ...state.project,
+      segments: state.project.segments.map((seg) =>
+        seg.id === segmentId ? { ...seg, textOverlays: [...seg.textOverlays, ...newItems] } : seg,
+      ),
+    };
+    pushHistoryAndSet(project, state, set);
+  },
+
+  setSegmentTextOverlays: (segmentId, overlays) => {
+    const state = get();
+    if (!state.project) return;
+    const project = {
+      ...state.project,
+      segments: state.project.segments.map((seg) =>
+        seg.id === segmentId ? { ...seg, textOverlays: overlays } : seg,
+      ),
+    };
+    pushHistoryAndSet(project, state, set);
+  },
+
   removeTextOverlay: (id) => {
     const state = get();
     if (!state.project || !state.selectedSegmentId) return;
@@ -813,12 +846,55 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   updateTextOverlay: (id, updates) => {
     const state = get();
     if (!state.project || !state.selectedSegmentId) return;
-    const project = mapSelectedSegment(state, (seg) => ({
-      ...seg,
-      textOverlays: seg.textOverlays.map((t) =>
-        t.id === id ? { ...t, ...updates } : t,
-      ),
-    }));
+    const project = mapSelectedSegment(state, (seg) => {
+      const target = seg.textOverlays.find((t) => t.id === id);
+      if (!target) return seg;
+
+      const isCaption = target.kind === "caption";
+      const isGroupUpdate =
+        updates.x !== undefined ||
+        updates.y !== undefined ||
+        updates.position !== undefined ||
+        updates.fontSize !== undefined;
+
+      // When moving/repositioning or resizing a caption on canvas, move/resize the whole speaker/screen group together
+      if (isCaption && isGroupUpdate) {
+        const targetSpeaker =
+          target.speaker ||
+          (target.text.startsWith("Speaker:")
+            ? "Speaker"
+            : target.text.startsWith("Screen:")
+            ? "Screen"
+            : "caption");
+
+        return {
+          ...seg,
+          textOverlays: seg.textOverlays.map((t) => {
+            if (t.kind !== "caption") return t;
+            const tSpeaker =
+              t.speaker ||
+              (t.text.startsWith("Speaker:")
+                ? "Speaker"
+                : t.text.startsWith("Screen:")
+                ? "Screen"
+                : "caption");
+
+            if (tSpeaker === targetSpeaker) {
+              return { ...t, ...updates };
+            }
+            return t;
+          }),
+        };
+      }
+
+      // Default single-overlay update
+      return {
+        ...seg,
+        textOverlays: seg.textOverlays.map((t) =>
+          t.id === id ? { ...t, ...updates } : t,
+        ),
+      };
+    });
     if (!project) return;
     set({ project });
   },

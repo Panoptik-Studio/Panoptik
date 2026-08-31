@@ -115,11 +115,15 @@ export function drawTextTracks(
     ctx.save();
     roundRectPath(ctx, left, top, width, height, 5);
 
+    const isCaption = overlay.kind === "caption";
+
     // Background fill
     if (isSelected) {
       ctx.fillStyle = "rgba(0, 112, 243, 0.22)";
     } else if (isStaged) {
       ctx.fillStyle = "rgba(245, 158, 11, 0.2)";
+    } else if (isCaption) {
+      ctx.fillStyle = "rgba(0, 112, 243, 0.14)"; // soft blue for captions
     } else {
       ctx.fillStyle = "rgba(139, 92, 246, 0.16)"; // soft purple for text
     }
@@ -132,6 +136,8 @@ export function drawTextTracks(
     } else if (isStaged) {
       ctx.strokeStyle = "#f59e0b";
       ctx.setLineDash([3, 2]);
+    } else if (isCaption) {
+      ctx.strokeStyle = "rgba(0, 112, 243, 0.5)";
     } else {
       ctx.strokeStyle = "#8b5cf6";
     }
@@ -144,12 +150,19 @@ export function drawTextTracks(
     ctx.rect(left + 3, top, Math.max(0, width - 6), height);
     ctx.clip();
 
-    ctx.fillStyle = isSelected ? "#0070f3" : isStaged ? "#d97706" : "#7c3aed";
+    ctx.fillStyle = isSelected
+      ? "#0070f3"
+      : isStaged
+      ? "#d97706"
+      : isCaption
+      ? "#0070f3"
+      : "#7c3aed";
     ctx.font = "bold 10px ui-sans-serif, system-ui, -apple-system, sans-serif";
     ctx.textBaseline = "middle";
 
-    const label = overlay.text ? overlay.text.replace(/\n/g, " ") : "Text";
-    ctx.fillText(`T  ${label}`, left + 6, top + height / 2);
+    const label = overlay.text ? overlay.text.replace(/\n/g, " ") : isCaption ? "Subtitle" : "Text";
+    const prefix = isCaption ? "CC" : "T";
+    ctx.fillText(`${prefix}  ${label}`, left + 6, top + height / 2);
 
     ctx.restore();
   }

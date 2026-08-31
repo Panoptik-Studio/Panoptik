@@ -199,9 +199,11 @@ function fmtTime(t: number): string {
 
 export function Timeline({
   onSelectText,
+  onSelectCaptions,
   onSelectAudio,
 }: {
   onSelectText?: () => void;
+  onSelectCaptions?: () => void;
   onSelectAudio?: () => void;
 } = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1198,7 +1200,11 @@ export function Timeline({
 
       setSelectedTextOverlay(item.overlay.id);
       selectSegment(segId);
-      onSelectText?.();
+      if (item.overlay.kind === "caption") {
+        onSelectCaptions?.();
+      } else {
+        onSelectText?.();
+      }
 
       setDraggingText({
         id: item.overlay.id,
@@ -1209,7 +1215,7 @@ export function Timeline({
         grabOffset: t - item.startT,
       });
     },
-    [onSelectText, selectSegment, setSelectedTextOverlay, xToTime],
+    [onSelectCaptions, onSelectText, selectSegment, setSelectedTextOverlay, xToTime],
   );
 
   const handleTextTrackDrag = useCallback(
