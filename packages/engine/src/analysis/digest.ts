@@ -24,7 +24,9 @@ export interface VideoDigest {
     id: string;
     duration: number;
     hasFacecam: boolean;
+    actualCamCorner: "tl" | "tr" | "bl" | "br" | "none";
     hasMic: boolean;
+    hasScreenAudio: boolean;
     hasMusic: boolean;
     silenceCount: number;
     deadAirSeconds: number;
@@ -46,7 +48,20 @@ export function generateVideoDigest(
 
   // Determine track presence
   const hasFacecam = project.segments.some((s) => Boolean(s.facecam?.src));
-  const hasMic = Boolean(project.audioSrc || project.audioTracks?.some((t) => t.id === "mic"));
+  const fc = project.segments[0]?.facecam;
+  let actualCamCorner: "tl" | "tr" | "bl" | "br" | "none" = "none";
+  if (hasFacecam && fc) {
+    const isLeft = (fc.x ?? 0.8) < 0.5;
+    const isTop = (fc.y ?? 0.8) < 0.5;
+    actualCamCorner = `${isTop ? "t" : "b"}${isLeft ? "l" : "r"}` as "tl" | "tr" | "bl" | "br";
+  }
+
+  const hasMic = Boolean(
+    project.audioSrc ||
+    hasFacecam ||
+    project.audioTracks?.some((t) => t.id === "mic" || t.kind === "voiceover")
+  );
+  const hasScreenAudio = Boolean(project.media?.[0]?.src || project.segments.some((s) => s.audioVolume !== 0));
   const hasMusic = Boolean(project.audioTracks?.some((t) => t.id === "music" || t.id.startsWith("music-")));
 
   // Calculate dead-air stats
@@ -96,7 +111,9 @@ export function generateVideoDigest(
       id: project.id,
       duration,
       hasFacecam,
+      actualCamCorner,
       hasMic,
+      hasScreenAudio,
       hasMusic,
       silenceCount: silences.length,
       deadAirSeconds,

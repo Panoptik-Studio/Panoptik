@@ -61,7 +61,9 @@ describe("digest", () => {
     expect(digest.project.id).toBe("proj_abc123");
     expect(digest.project.duration).toBe(72.5);
     expect(digest.project.hasFacecam).toBe(true);
+    expect(digest.project.actualCamCorner).toBe("tl");
     expect(digest.project.hasMic).toBe(true);
+    expect(digest.project.hasScreenAudio).toBe(true);
     expect(digest.project.hasMusic).toBe(false);
     expect(digest.project.silenceCount).toBe(1);
     expect(digest.project.deadAirSeconds).toBe(2.5);

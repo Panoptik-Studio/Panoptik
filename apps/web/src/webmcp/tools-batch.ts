@@ -46,31 +46,49 @@ export function registerBatchTools(): void {
         return { error: "NO_ACTIVE_PROJECT", message: "No active video project loaded." };
       }
 
-      const dummyAnalysis: FullMediaAnalysis = currentAnalysisCache ?? {
-        mediaId: store.project.media[0]?.id ?? "m1",
-        sampledHash: "mock",
-        duration: store.project.media[0]?.duration ?? 60,
-        scenes: store.project.segments.map((seg, idx) => ({
-          id: idx,
-          t0: seg.srcStart,
-          t1: seg.srcEnd,
-          motionCategory: "medium",
-          paletteIndex: 0,
-          camCorner: "bl",
-          keyframeTime: (seg.srcStart + seg.srcEnd) / 2,
-        })),
-        audio: {
-          duration: store.project.media[0]?.duration ?? 60,
-          silences: [],
-          minorPauses: [],
-          loudPeaks: [],
-          speechRatio: 0.8,
-        },
-        words: [],
-        phrases: [],
-        interactions: [],
-        createdAt: Date.now(),
-      };
+      const allTextOverlays = store.project.segments.flatMap((s) => [
+        ...(s.textOverlays ?? []),
+        ...(s.stagedTextOverlays ?? []),
+      ]);
+      const phrasesFromCaptions = allTextOverlays
+        .filter((o) => Boolean(o.text && o.text.trim()))
+        .map((c) => ({
+          start: c.timestamp,
+          end: c.timestamp + (c.duration ?? 3),
+          text: c.text,
+          speaker: c.speaker === "Screen" ? 1 : 0,
+        }));
+
+      const dummyAnalysis: FullMediaAnalysis = currentAnalysisCache
+        ? {
+            ...currentAnalysisCache,
+            phrases: currentAnalysisCache.phrases.length > 0 ? currentAnalysisCache.phrases : phrasesFromCaptions,
+          }
+        : {
+            mediaId: store.project.media[0]?.id ?? "m1",
+            sampledHash: "mock",
+            duration: store.project.media[0]?.duration ?? 60,
+            scenes: store.project.segments.map((seg, idx) => ({
+              id: idx,
+              t0: seg.srcStart,
+              t1: seg.srcEnd,
+              motionCategory: "medium",
+              paletteIndex: 0,
+              camCorner: "bl",
+              keyframeTime: (seg.srcStart + seg.srcEnd) / 2,
+            })),
+            audio: {
+              duration: store.project.media[0]?.duration ?? 60,
+              silences: [],
+              minorPauses: [],
+              loudPeaks: [],
+              speechRatio: 0.8,
+            },
+            words: [],
+            phrases: phrasesFromCaptions,
+            interactions: [],
+            createdAt: Date.now(),
+          };
 
       const digest = generateVideoDigest(store.project, dummyAnalysis);
       return digest;

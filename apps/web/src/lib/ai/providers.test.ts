@@ -57,7 +57,7 @@ describe("providers adapter", () => {
     } as any);
 
     const mockDigest: VideoDigest = {
-      project: { id: "p1", duration: 10, hasFacecam: false, hasMic: true, hasMusic: false, silenceCount: 0, deadAirSeconds: 0 },
+      project: { id: "p1", duration: 10, hasFacecam: false, actualCamCorner: "none", hasMic: true, hasScreenAudio: true, hasMusic: false, silenceCount: 0, deadAirSeconds: 0 },
       scenes: [],
       silences: [],
       transcript: "Hello world",
