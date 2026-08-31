@@ -15,6 +15,8 @@ import {
   encodeWavBlob,
   chunkAudioSamples,
   mergeOverlappedChunkWords,
+  denoiseAudioSamples,
+  computeChunkVoiceEnergy,
 } from "@panoptik/engine";
 import type { TextOverlay, TextAnimation } from "@panoptik/schema";
 
@@ -167,12 +169,14 @@ async function transcribeTrackAudio(
   onStatus?: (msg: string) => void,
 ): Promise<TrackWord[]> {
   const chan0 = buffer.getChannelData(0);
-  const resampled16k = resampleMonoPcm(chan0, buffer.sampleRate, 16000);
+  const raw16k = resampleMonoPcm(chan0, buffer.sampleRate, 16000);
+  // Apply DSP Denoising (80Hz highpass filter + adaptive noise gate)
+  const resampled16k = denoiseAudioSamples(raw16k, 16000);
   const totalSec = resampled16k.length / 16000;
   if (totalSec < 0.2) return [];
 
   const shouldChunk = totalSec > 22 || language === "hinglish" || language === "auto";
-  const chunks = shouldChunk
+  const rawChunks = shouldChunk
     ? chunkAudioSamples(resampled16k, 16000, 22, 1.5)
     : [
         {
@@ -184,13 +188,21 @@ async function transcribeTrackAudio(
         },
       ];
 
+  // Filter out silence chunks to prevent Whisper hallucinations on dead air
+  const chunks = rawChunks.filter((chunk) => {
+    const energy = computeChunkVoiceEnergy(chunk.samples);
+    return energy > 0.003;
+  });
+
+  if (chunks.length === 0) return [];
+
   const hinglishPrompt =
     "Mixed Hinglish & English conversation. Contains Hindi (हिन्दी) and English speech, e.g. Starting September 14th, नमस्ते, thank you so much, dhanyawaad, limit.";
 
   let diarizedWords: TrackWord[] = [];
 
   if (chunks.length > 1) {
-    onStatus?.(`Transcribing ${speakerLabel} (${chunks.length} slices in parallel)...`);
+    onStatus?.(`Transcribing ${speakerLabel} (${chunks.length} active voice slices)...`);
     const chunkResults = await Promise.all(
       chunks.map(async (chunk) => {
         const chunkWav = encodeWavBlob(chunk.samples, 16000);

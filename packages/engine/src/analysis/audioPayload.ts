@@ -253,3 +253,94 @@ function isValidWordConcat(w1: string, w2: string): boolean {
   // Only merge if w2 is a single character letter fragment (e.g. "t", "s", "d")
   return w2.length === 1 && /^[a-zA-Z]+$/.test(w1) && /^[a-zA-Z]+$/.test(w2);
 }
+
+/**
+ * Denoises 16kHz mono Float32 audio samples:
+ * 1. High-Pass Filter (80Hz) to remove room rumble, AC hum, and microphone pops.
+ * 2. Adaptive Noise Gate with soft-knee envelope to suppress background hiss/silence below noise floor.
+ */
+export function denoiseAudioSamples(
+  samples: Float32Array,
+  sampleRate = 16000,
+  opts: {
+    highPassCutoff?: number; // default 80Hz
+    noiseGateThreshold?: number; // RMS threshold
+  } = {},
+): Float32Array {
+  if (samples.length === 0) return new Float32Array(0);
+  const out = new Float32Array(samples.length);
+
+  // 1. High-Pass Filter at ~80Hz (Single-pole RC high-pass filter)
+  const cutoff = opts.highPassCutoff ?? 80;
+  const rc = 1.0 / (2.0 * Math.PI * cutoff);
+  const dt = 1.0 / sampleRate;
+  const alpha = rc / (rc + dt);
+
+  let prevInput = samples[0] ?? 0;
+  let prevOutput = samples[0] ?? 0;
+
+  for (let i = 0; i < samples.length; i++) {
+    const curr = samples[i] ?? 0;
+    const filtered = alpha * (prevOutput + curr - prevInput);
+    out[i] = filtered;
+    prevInput = curr;
+    prevOutput = filtered;
+  }
+
+  // 2. Estimate Noise Floor (lower 15th percentile energy)
+  const windowSize = Math.floor(sampleRate * 0.05); // 50ms windows
+  const numWindows = Math.floor(out.length / windowSize);
+  const windowEnergies: number[] = [];
+
+  for (let w = 0; w < numWindows; w++) {
+    let sumSq = 0;
+    const start = w * windowSize;
+    for (let i = start; i < start + windowSize; i++) {
+      const s = out[i] ?? 0;
+      sumSq += s * s;
+    }
+    windowEnergies.push(Math.sqrt(sumSq / windowSize));
+  }
+
+  windowEnergies.sort((a, b) => a - b);
+  const noiseFloor = windowEnergies[Math.floor(windowEnergies.length * 0.15)] ?? 0.002;
+  const gateThreshold = opts.noiseGateThreshold ?? Math.max(noiseFloor * 2.2, 0.0035);
+
+  // 3. Apply Adaptive Noise Gate with soft envelope
+  let envelope = 1.0;
+  const attack = 0.95; // Fast attack for voice transients
+  const release = 0.992; // Smooth release for word tails
+
+  for (let w = 0; w < numWindows; w++) {
+    const start = w * windowSize;
+    let sumSq = 0;
+    for (let i = start; i < start + windowSize; i++) {
+      const s = out[i] ?? 0;
+      sumSq += s * s;
+    }
+    const rms = Math.sqrt(sumSq / windowSize);
+    const targetGain = rms < gateThreshold ? 0.0 : 1.0;
+
+    for (let i = start; i < start + windowSize; i++) {
+      envelope = targetGain > envelope
+        ? attack * envelope + (1 - attack) * targetGain
+        : release * envelope + (1 - release) * targetGain;
+      out[i] = (out[i] ?? 0) * envelope;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Computes root-mean-square voice activity energy for a chunk of audio samples.
+ */
+export function computeChunkVoiceEnergy(samples: Float32Array): number {
+  if (samples.length === 0) return 0;
+  let sumSq = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i] ?? 0;
+    sumSq += s * s;
+  }
+  return Math.sqrt(sumSq / samples.length);
+}

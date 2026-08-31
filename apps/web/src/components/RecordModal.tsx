@@ -447,13 +447,14 @@ export function RecordModal() {
     return () => clearInterval(id);
   }, [state]);
 
-  // Real-time cursor & pointer capture during recording
+  // Real-time cursor & pointer capture during recording (supports full screen & other tabs)
   useEffect(() => {
     if (state !== "recording") return;
     let lastRecordedMoveT = -1;
     let lastRecordedX = -1;
     let lastRecordedY = -1;
 
+    // ── 1. DOM pointer events (when Panoptik is in foreground) ──
     const onPointerMove = (e: PointerEvent) => {
       const w = window.innerWidth || 1920;
       const h = window.innerHeight || 1080;
@@ -463,7 +464,6 @@ export function RecordModal() {
 
       lastMousePosRef.current = { x: nx, y: ny };
 
-      // Record continuous cursor coordinates every 100ms or on movement
       const dist = Math.hypot(nx - lastRecordedX, ny - lastRecordedY);
       if (t - lastRecordedMoveT >= 0.10 || dist >= 0.015) {
         lastRecordedMoveT = t;
@@ -506,10 +506,110 @@ export function RecordModal() {
     window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("keydown", onKeyDown);
 
+    // ── 2. Live Video-Frame Cursor Tracker (Tracks OS mouse across any tab, window, or desktop app) ──
+    const screenStream = handlesRef.current?.screenStream;
+    let frameInterval: number | null = null;
+    let prevFrameData: Uint8ClampedArray | null = null;
+
+    const sampleW = 240;
+    const sampleH = 135;
+    const canvas = document.createElement("canvas");
+    canvas.width = sampleW;
+    canvas.height = sampleH;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    const hiddenVideo = document.createElement("video");
+    hiddenVideo.muted = true;
+    hiddenVideo.playsInline = true;
+    hiddenVideo.autoplay = true;
+    if (screenStream) {
+      hiddenVideo.srcObject = screenStream;
+      hiddenVideo.play().catch(() => {});
+    }
+
+    const sampleScreenFrame = () => {
+      if (state !== "recording" || !ctx) return;
+      try {
+        if (hiddenVideo.readyState >= 2) {
+          ctx.drawImage(hiddenVideo, 0, 0, sampleW, sampleH);
+          const imgData = ctx.getImageData(0, 0, sampleW, sampleH);
+          const currData = imgData.data;
+
+          if (prevFrameData && prevFrameData.length === currData.length) {
+            let activePixels = 0;
+            let sumDiff = 0;
+            let weightedX = 0;
+            let weightedY = 0;
+            let minX = sampleW;
+            let minY = sampleH;
+            let maxX = 0;
+            let maxY = 0;
+
+            const threshold = 28;
+
+            for (let y = 0; y < sampleH; y += 2) {
+              for (let x = 0; x < sampleW; x += 2) {
+                const idx = (y * sampleW + x) * 4;
+                const dr = Math.abs((currData[idx] ?? 0) - (prevFrameData[idx] ?? 0));
+                const dg = Math.abs((currData[idx + 1] ?? 0) - (prevFrameData[idx + 1] ?? 0));
+                const db = Math.abs((currData[idx + 2] ?? 0) - (prevFrameData[idx + 2] ?? 0));
+                const diff = (dr + dg + db) / 3;
+
+                if (diff > threshold) {
+                  sumDiff += diff;
+                  activePixels++;
+                  weightedX += x * diff;
+                  weightedY += y * diff;
+                  if (x < minX) minX = x;
+                  if (x > maxX) maxX = x;
+                  if (y < minY) minY = y;
+                  if (y > maxY) maxY = y;
+                }
+              }
+            }
+
+            const totalSampled = (sampleW * sampleH) / 4;
+            const activeRatio = activePixels / totalSampled;
+            const spanX = maxX - minX;
+            const spanY = maxY - minY;
+
+            // Localized cursor motion cluster: between 0.02% and 6% of the screen
+            if (activeRatio > 0.0002 && activeRatio < 0.06 && spanX < sampleW * 0.35 && spanY < sampleH * 0.35 && sumDiff > 0) {
+              const cx = Number((weightedX / sumDiff / sampleW).toFixed(3));
+              const cy = Number((weightedY / sumDiff / sampleH).toFixed(3));
+              const t = Number(elapsedRef.current.toFixed(2));
+
+              const dist = Math.hypot(cx - lastRecordedX, cy - lastRecordedY);
+              if (dist >= 0.015 || t - lastRecordedMoveT >= 0.15) {
+                lastRecordedX = cx;
+                lastRecordedY = cy;
+                lastRecordedMoveT = t;
+                lastMousePosRef.current = { x: cx, y: cy };
+                recordedClicksRef.current.push({
+                  t,
+                  x: cx,
+                  y: cy,
+                  type: "move",
+                });
+              }
+            }
+          }
+
+          prevFrameData = new Uint8ClampedArray(currData);
+        }
+      } catch {
+        // frame sample error ignored
+      }
+    };
+
+    frameInterval = window.setInterval(sampleScreenFrame, 100);
+
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
+      if (frameInterval) clearInterval(frameInterval);
+      hiddenVideo.srcObject = null;
     };
   }, [state]);
 

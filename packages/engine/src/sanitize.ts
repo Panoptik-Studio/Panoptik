@@ -63,6 +63,7 @@ function zoomPoint(v: unknown, lo: number, hi: number): ZoomPoint | null {
       y: num(to.y, 0.5, 0, 1),
     },
     dur: num(z.dur, 0.7, 0.01, 30),
+    hold: typeof z.hold === "number" && Number.isFinite(z.hold) ? num(z.hold, 2.0, 0.01, 3600) : undefined,
     ease: typeof z.ease === "string" ? z.ease.slice(0, 40) : "easeInOutCubic",
     staged: z.staged === true,
   };

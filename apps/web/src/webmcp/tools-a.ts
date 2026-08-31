@@ -61,6 +61,8 @@ export function registerEngineTools(): void {
           speed: seg.speed,
           aspect: seg.aspectPreset,
           transition: seg.transition ?? "cut",
+          background: seg.background,
+          facecam: seg.facecam,
           zoomPoints: (seg.zoomPoints ?? []).map((z) => ({
             id: z.id,
             t: Number(z.t.toFixed(2)),

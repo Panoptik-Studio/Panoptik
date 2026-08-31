@@ -362,4 +362,33 @@ describe("mergeSavedProject", () => {
     expect(out.segments[0]!.facecam.shadowBlur).toBe(16);
     expect(out.segments[0]!.facecam.shadowColor).toBe("rgba(0,112,243,0.5)");
   });
+
+  it("preserves zoomPoint hold (duration) field on merge and restore", () => {
+    const base = fresh();
+    const out = mergeSavedProject(base, {
+      segments: [
+        {
+          id: "s1",
+          mediaId: "m1",
+          srcStart: 0,
+          srcEnd: 10,
+          zoomPoints: [
+            {
+              id: "z-custom-dur",
+              t: 2.5,
+              to: { scale: 2.4, x: 0.3, y: 0.7 },
+              dur: 0.5,
+              hold: 14.8,
+              ease: "easeInOutCubic",
+              staged: false,
+            },
+          ],
+        },
+      ],
+    } as unknown as Partial<Project>);
+
+    expect(out.segments[0]!.zoomPoints).toHaveLength(1);
+    expect(out.segments[0]!.zoomPoints[0]!.hold).toBe(14.8);
+    expect(out.segments[0]!.zoomPoints[0]!.dur).toBe(0.5);
+  });
 });
