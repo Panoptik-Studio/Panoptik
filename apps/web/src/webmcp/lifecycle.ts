@@ -90,16 +90,26 @@ export function registerToolWithLifecycle(cfg: ToolConfig): AbortController {
     signal: controller.signal,
   };
 
-  // Register on document.modelContext or window.modelContext if available
-  if (typeof document !== "undefined" && document.modelContext?.registerTool) {
+  // Register on document.modelContext or window.modelContext if available (e.g. ChatGPT / WebMCP host environments)
+  if (typeof document !== "undefined" && typeof document.modelContext?.registerTool === "function") {
     try {
-      document.modelContext.registerTool(toolWithLifecycle);
+      const ret = document.modelContext.registerTool(toolWithLifecycle) as unknown;
+      if (ret && typeof (ret as Promise<unknown>).then === "function") {
+        (ret as Promise<unknown>).catch((e) => {
+          console.warn(`[WebMCP] document.modelContext.registerTool rejected for "${cfg.name}":`, e);
+        });
+      }
     } catch (e) {
       console.warn(`[WebMCP] Failed to register tool "${cfg.name}" on document.modelContext:`, e);
     }
-  } else if (typeof window !== "undefined" && window.modelContext?.registerTool) {
+  } else if (typeof window !== "undefined" && typeof window.modelContext?.registerTool === "function") {
     try {
-      window.modelContext.registerTool(toolWithLifecycle);
+      const ret = window.modelContext.registerTool(toolWithLifecycle) as unknown;
+      if (ret && typeof (ret as Promise<unknown>).then === "function") {
+        (ret as Promise<unknown>).catch((e) => {
+          console.warn(`[WebMCP] window.modelContext.registerTool rejected for "${cfg.name}":`, e);
+        });
+      }
     } catch (e) {
       console.warn(`[WebMCP] Failed to register tool "${cfg.name}" on window.modelContext:`, e);
     }

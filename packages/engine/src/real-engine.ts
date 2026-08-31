@@ -82,71 +82,76 @@ export function createRealEngine(): MediaEngine {
       return proj;
     },
     async restoreProject(id: string): Promise<Project | null> {
-      const saved = await loadProjectRecord(id);
-      if (!saved?.media) return null;
-      // Run the media back through the normal ingest so the decoder, audio sink
-      // and facecam pipeline are all opened — loading only the JSON would give
-      // a project whose blob URLs point at nothing decodable.
-      const proj = await this.loadRecording(saved.media, saved.facecam, saved.audio);
+      try {
+        const saved = await loadProjectRecord(id);
+        if (!saved?.media) return null;
+        // Run the media back through the normal ingest so the decoder, audio sink
+        // and facecam pipeline are all opened — loading only the JSON would give
+        // a project whose blob URLs point at nothing decodable.
+        const proj = await this.loadRecording(saved.media, saved.facecam, saved.audio);
 
-      // Multiclip: mint blob URLs for every additional clip and join them to the
-      // demuxed project so mergeSavedProject restores the full media array (its
-      // per-clip merge maps over fresh.media). Decode opens them lazily when a
-      // segment from them becomes active.
-      if (saved.project.media && saved.project.media.length > 1) {
-        const additional: (Media & { src: string })[] = [];
-        for (let i = 1; i < saved.project.media.length; i++) {
-          const blob = saved.mediaFiles?.[i];
-          const stored = saved.project.media[i];
-          if (blob && stored) {
-            additional.push({
-              ...(stored as Media),
-              id: stored.id ?? `m${i + 1}`,
-              src: mintUrl(blob) });
+        // Multiclip: mint blob URLs for every additional clip and join them to the
+        // demuxed project so mergeSavedProject restores the full media array (its
+        // per-clip merge maps over fresh.media). Decode opens them lazily when a
+        // segment from them becomes active.
+        if (saved.project.media && saved.project.media.length > 1) {
+          const additional: (Media & { src: string })[] = [];
+          for (let i = 1; i < saved.project.media.length; i++) {
+            const blob = saved.mediaFiles?.[i];
+            const stored = saved.project.media[i];
+            if (blob && stored) {
+              additional.push({
+                ...(stored as Media),
+                id: stored.id ?? `m${i + 1}`,
+                src: mintUrl(blob) });
+            }
+          }
+          if (additional.length > 0) {
+            proj.media = [...proj.media, ...additional];
           }
         }
-        if (additional.length > 0) {
-          proj.media = [...proj.media, ...additional];
+
+        // Mint blob URLs for all loaded facecam takes
+        const mintedTakes = new Map<string, string>();
+        if (saved.facecamTakes) {
+          for (const [filename, blob] of saved.facecamTakes.entries()) {
+            mintedTakes.set(filename, mintUrl(blob));
+          }
         }
+
+        // Map each saved segment to its specific minted take URL
+        const savedSegs = saved.project.segments ?? [];
+        const segmentFacecamSrcs: (string | null)[] = savedSegs.map((seg, i) => {
+          const filename = saved.segmentFacecamTakes?.[i];
+          if (filename && mintedTakes.has(filename)) {
+            return mintedTakes.get(filename)!;
+          }
+          if (!seg.facecam || seg.facecam.src === null) {
+            return null;
+          }
+          return proj.segments[0]?.facecam.src ?? null;
+        });
+
+        // Background images come back as blobs and get fresh object URLs here.
+        // sanitize rejects the src stored in JSON, so this is the only way one
+        // reaches the renderer.
+        // One URL per distinct blob: segments that shared an image on save come
+        // back sharing the same Blob, and should share its URL too.
+        const urlForBlob = new Map<Blob, string>();
+        const backgroundImageUrls = (saved.backgroundImages ?? []).map((blob) => {
+          if (!blob) return null;
+          let url = urlForBlob.get(blob);
+          if (!url) {
+            url = URL.createObjectURL(blob);
+            urlForBlob.set(blob, url);
+          }
+          return url;
+        });
+        return mergeSavedProject(proj, saved.project, segmentFacecamSrcs, backgroundImageUrls);
+      } catch (err) {
+        console.warn("[Engine] restoreProject failed gracefully", err);
+        return null;
       }
-
-      // Mint blob URLs for all loaded facecam takes
-      const mintedTakes = new Map<string, string>();
-      if (saved.facecamTakes) {
-        for (const [filename, blob] of saved.facecamTakes.entries()) {
-          mintedTakes.set(filename, mintUrl(blob));
-        }
-      }
-
-      // Map each saved segment to its specific minted take URL
-      const savedSegs = saved.project.segments ?? [];
-      const segmentFacecamSrcs: (string | null)[] = savedSegs.map((seg, i) => {
-        const filename = saved.segmentFacecamTakes?.[i];
-        if (filename && mintedTakes.has(filename)) {
-          return mintedTakes.get(filename)!;
-        }
-        if (!seg.facecam || seg.facecam.src === null) {
-          return null;
-        }
-        return proj.segments[0]?.facecam.src ?? null;
-      });
-
-      // Background images come back as blobs and get fresh object URLs here.
-      // sanitize rejects the src stored in JSON, so this is the only way one
-      // reaches the renderer.
-      // One URL per distinct blob: segments that shared an image on save come
-      // back sharing the same Blob, and should share its URL too.
-      const urlForBlob = new Map<Blob, string>();
-      const backgroundImageUrls = (saved.backgroundImages ?? []).map((blob) => {
-        if (!blob) return null;
-        let url = urlForBlob.get(blob);
-        if (!url) {
-          url = URL.createObjectURL(blob);
-          urlForBlob.set(blob, url);
-        }
-        return url;
-      });
-      return mergeSavedProject(proj, saved.project, segmentFacecamSrcs, backgroundImageUrls);
     },
     async getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
       return audioGetBuffer(project);
