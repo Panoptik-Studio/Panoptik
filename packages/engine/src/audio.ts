@@ -40,22 +40,50 @@ export function getAudioSinkTrackId(): string | null {
 }
 
 export async function decodeViaAudioContext(blob: Blob): Promise<AudioBuffer | null> {
+  if (!blob || blob.size === 0) return null;
   try {
     const arrayBuf = await blob.arrayBuffer();
-    // Prefer AudioContext.decodeAudioData (uses browser's media stack, same as <audio>)
-    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    if (!arrayBuf || arrayBuf.byteLength === 0) return null;
+    const AudioCtx =
+      typeof window !== "undefined"
+        ? window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        : null;
+    if (!AudioCtx) return null;
+    const ctx = new AudioCtx();
     try {
-      const buf = await ctx.decodeAudioData(arrayBuf.slice(0));
-      // Close context to free
-      try { await ctx.close(); } catch { /* ignore */ }
+      const copy = arrayBuf.slice(0);
+      const buf = await new Promise<AudioBuffer | null>((resolve) => {
+        let settled = false;
+        const done = (res: AudioBuffer | null) => {
+          if (!settled) {
+            settled = true;
+            resolve(res);
+          }
+        };
+        try {
+          const ret = ctx.decodeAudioData(
+            copy,
+            (decoded) => done(decoded),
+            () => done(null),
+          );
+          if (ret && typeof ret.then === "function") {
+            ret.then((decoded) => done(decoded)).catch(() => done(null));
+          }
+        } catch {
+          done(null);
+        }
+      });
       return buf;
-    } catch (e) {
-      console.warn("[Audio] decodeViaAudioContext failed", e);
-      try { await ctx.close(); } catch { /* ignore */ }
+    } catch {
       return null;
+    } finally {
+      try {
+        await ctx.close();
+      } catch {
+        /* ignore close errors */
+      }
     }
-  } catch (e) {
-    console.warn("[Audio] decodeViaAudioContext: arrayBuffer failed", e);
+  } catch {
     return null;
   }
 }
@@ -63,8 +91,8 @@ export async function decodeViaAudioContext(blob: Blob): Promise<AudioBuffer | n
 export async function getAudioBuffer(project: Project): Promise<AudioBuffer | null> {
   // Try WebCodecs path first (fast, single-pass demux)
   if (audioSink) {
-    const chunks: AudioBuffer[] = [];
     try {
+      const chunks: AudioBuffer[] = [];
       for await (const wrapped of audioSink.buffers()) {
         chunks.push(wrapped.buffer);
       }
@@ -122,23 +150,22 @@ export async function getAudioBuffer(project: Project): Promise<AudioBuffer | nu
         }
         return dest;
       }
-      console.warn("[Audio] getAudioBuffer: sink yielded 0 chunks -> trying fallback");
-    } catch (e) {
-      console.warn("[Audio] getAudioBuffer: sink buffers() failed -> trying fallback", e);
+    } catch {
+      /* sink buffers failed */
     }
-  } else {
-    console.warn("[Audio] getAudioBuffer: no sink -> trying fallback");
   }
 
   // Fallback: decode the blob via Web Audio (same decoder as <audio> preview)
-  // This handles opus-in-mp4 on Linux where WebCodecs AudioDecoder canDecode==false
-  // but MediaElement can still play.
   const fallbackBlob = audioFallbackBlob;
   if (fallbackBlob && fallbackBlob.size > 0) {
-    const decoded = await decodeViaAudioContext(fallbackBlob);
-    if (decoded) return decoded;
+    try {
+      const decoded = await decodeViaAudioContext(fallbackBlob);
+      if (decoded) return decoded;
+    } catch {
+      /* ignore */
+    }
   }
-  // Also try project.audioSrc blob URL if available (e.g., screen-only case where fallback not set)
+  // Also try project.audioSrc blob URL if available
   const src = (project as unknown as { audioSrc?: string | null })?.audioSrc ?? (project as unknown as { clip?: { src?: string } })?.clip?.src;
   if (src && src.startsWith("blob:")) {
     try {
@@ -148,11 +175,10 @@ export async function getAudioBuffer(project: Project): Promise<AudioBuffer | nu
         const decoded = await decodeViaAudioContext(blob);
         if (decoded) return decoded;
       }
-    } catch (e) {
-      console.warn("[Audio] getAudioBuffer: fetch fallback failed", e);
+    } catch {
+      /* ignore fetch error */
     }
   }
 
-  console.warn("[Audio] getAudioBuffer: all paths failed -> silent");
   return null;
 }

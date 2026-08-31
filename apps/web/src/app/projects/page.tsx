@@ -12,7 +12,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ProjectCard } from "@/components/ProjectCard";
 import { LAST_PROJECT_KEY } from "@/lib/useProjectPersistence";
 import { useProjectStore } from "@/stores/projectStore";
@@ -26,6 +26,8 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [storage, setStorage] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     cleanupLegacyLocalStorage();
@@ -76,6 +78,25 @@ export default function ProjectsPage() {
     router.push("/editor");
   }, [router]);
 
+  const onImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      const { importProjectBundle } = await import("@panoptik/engine");
+      const { project, projectId } = await importProjectBundle(file);
+      safeSetLocalStorage(LAST_PROJECT_KEY, projectId);
+      useProjectStore.getState().setProject(project);
+      router.push("/editor");
+    } catch (err) {
+      console.error("Import project failed", err);
+      alert("Failed to import project. Please make sure the file is a valid .panoptik bundle.");
+      setIsImporting(false);
+      refresh();
+    }
+  };
+
   const rename = useCallback(
     async (id: string, newName: string) => {
       const trimmed = newName.trim();
@@ -119,6 +140,15 @@ export default function ProjectsPage() {
 
   return (
     <div className="min-h-screen" style={{ background: "var(--color-pk-canvas)" }}>
+      {/* Hidden file picker for importing .panoptik project files */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".panoptik,.json"
+        className="hidden"
+        onChange={onImportFile}
+      />
+
       {/* Header */}
       <header className="border-b border-pk-hairline bg-pk-surface">
         <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-3 px-6 py-3.5 sm:px-10">
@@ -130,6 +160,28 @@ export default function ProjectsPage() {
           </Link>
           <div className="flex items-center gap-2">
             <Link href="/" className="pk-btn pk-btn-ghost pk-btn-sm">Home</Link>
+            <button
+              onClick={() => importInputRef.current?.click()}
+              disabled={isImporting}
+              className="pk-btn pk-btn-ghost pk-btn-sm"
+              title="Import a saved .panoptik project file"
+            >
+              {isImporting ? (
+                <>
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  <span>Importing...</span>
+                </>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  <span>Import project</span>
+                </>
+              )}
+            </button>
             <button onClick={startNew} className="pk-btn pk-btn-ghost pk-btn-sm">New project</button>
             {/* Reopens whatever was last edited — the editor restores from the
                 same pointer the cards write, so the name matches what happens. */}
@@ -201,9 +253,18 @@ export default function ProjectsPage() {
                 Show all clips
               </button>
             ) : (
-              <Link href="/editor" className="pk-btn pk-btn-primary pk-btn-md">
-                Record or import
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link href="/editor" className="pk-btn pk-btn-primary pk-btn-md">
+                  Record or import
+                </Link>
+                <button
+                  onClick={() => importInputRef.current?.click()}
+                  className="pk-btn pk-btn-ghost pk-btn-md"
+                  title="Import a saved .panoptik project file"
+                >
+                  Import .panoptik file
+                </button>
+              </div>
             )}
           </div>
         ) : (

@@ -50,17 +50,18 @@ async function grabPoster(blob: Blob, duration: number): Promise<Blob | null> {
   video.src = url;
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timeout")), 8000);
+    await new Promise<void>((resolve) => {
+      let settled = false;
       const done = () => {
-        clearTimeout(timer);
-        resolve();
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve();
+        }
       };
+      const timer = setTimeout(done, 5000);
       video.addEventListener("seeked", done, { once: true });
-      video.addEventListener("error", () => {
-        clearTimeout(timer);
-        reject(new Error("decode failed"));
-      }, { once: true });
+      video.addEventListener("error", done, { once: true });
       video.addEventListener(
         "loadedmetadata",
         () => {
@@ -83,7 +84,9 @@ async function grabPoster(blob: Blob, duration: number): Promise<Blob | null> {
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.72));
+    return await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.72);
+    });
   } catch {
     return null;
   } finally {
@@ -299,6 +302,27 @@ export function ProjectCard({
           </div>
         ) : !isRenaming ? (
           <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+            <button
+              className="pk-icon-btn h-7 w-7 text-pk-faint hover:text-[#0070f3]"
+              onClick={async (e) => {
+                e.stopPropagation();
+                try {
+                  const { loadProject, downloadProjectPackage } = await import("@panoptik/engine");
+                  const proj = await loadProject(summary.id);
+                  if (proj) await downloadProjectPackage(proj);
+                } catch (err) {
+                  console.error("Export project failed", err);
+                }
+              }}
+              title={`Export ${summary.name} (.panoptik)`}
+              aria-label={`Export ${summary.name}`}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </button>
             <button
               className="pk-icon-btn h-7 w-7 text-pk-faint hover:text-[#0070f3]"
               onClick={() => {

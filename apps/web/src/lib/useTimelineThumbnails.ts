@@ -138,92 +138,100 @@ export function useTimelineThumbnails(project: Project | null): ThumbnailCache {
       };
 
       const runExtraction = async () => {
-        await new Promise<void>((resolve) => {
-          if (video.readyState >= 1) {
-            resolve();
-            return;
-          }
-          const onLoaded = () => {
-            video.removeEventListener("loadedmetadata", onLoaded);
-            video.removeEventListener("error", onError);
-            resolve();
-          };
-          const onError = () => {
-            video.removeEventListener("loadedmetadata", onLoaded);
-            video.removeEventListener("error", onError);
-            resolve();
-          };
-          video.addEventListener("loadedmetadata", onLoaded);
-          video.addEventListener("error", onError);
-        });
-
-        if (destroyed || abort.signal.aborted) return;
-
-        const dur = m.duration;
-        const aspect = (video.videoWidth && video.videoHeight)
-          ? video.videoWidth / video.videoHeight
-          : 16 / 9;
-
-        const thumbHeight = 72;
-        const thumbWidth = Math.max(36, Math.round(thumbHeight * aspect));
-        const timestamps = generateThumbnailTimestamps(dur);
-
-        for (const t of timestamps) {
-          if (destroyed || abort.signal.aborted) break;
-
+        try {
           await new Promise<void>((resolve) => {
-            let timeoutId: ReturnType<typeof setTimeout> | null = null;
-            const onSeeked = () => {
-              if (timeoutId) clearTimeout(timeoutId);
-              video.removeEventListener("seeked", onSeeked);
-              video.removeEventListener("error", onErr);
+            if (video.readyState >= 1) {
+              resolve();
+              return;
+            }
+            const onLoaded = () => {
+              video.removeEventListener("loadedmetadata", onLoaded);
+              video.removeEventListener("error", onError);
               resolve();
             };
-            const onErr = () => {
-              if (timeoutId) clearTimeout(timeoutId);
-              video.removeEventListener("seeked", onSeeked);
-              video.removeEventListener("error", onErr);
+            const onError = () => {
+              video.removeEventListener("loadedmetadata", onLoaded);
+              video.removeEventListener("error", onError);
               resolve();
             };
-            timeoutId = setTimeout(() => {
-              video.removeEventListener("seeked", onSeeked);
-              video.removeEventListener("error", onErr);
-              resolve();
-            }, 350);
-
-            video.addEventListener("seeked", onSeeked, { once: true });
-            video.addEventListener("error", onErr, { once: true });
-            video.currentTime = Math.max(0, Math.min(dur, t));
+            video.addEventListener("loadedmetadata", onLoaded);
+            video.addEventListener("error", onError);
           });
 
-          if (destroyed || abort.signal.aborted) break;
+          if (destroyed || abort.signal.aborted) return;
 
-          try {
-            const canvas = document.createElement("canvas");
-            canvas.width = thumbWidth;
-            canvas.height = thumbHeight;
-            const ctx = canvas.getContext("2d");
-            if (ctx) {
-              ctx.drawImage(video, 0, 0, thumbWidth, thumbHeight);
-              const entry = cachesRef.current.get(m.id);
-              if (entry) {
-                entry.cache.set(t, canvas);
-                entry.sorted.push(t);
-                entry.sorted.sort((a, b) => a - b);
-                bump();
+          const dur = m.duration;
+          const aspect = (video.videoWidth && video.videoHeight)
+            ? video.videoWidth / video.videoHeight
+            : 16 / 9;
+
+          const thumbHeight = 72;
+          const thumbWidth = Math.max(36, Math.round(thumbHeight * aspect));
+          const timestamps = generateThumbnailTimestamps(dur);
+
+          for (const t of timestamps) {
+            if (destroyed || abort.signal.aborted) break;
+
+            await new Promise<void>((resolve) => {
+              let timeoutId: ReturnType<typeof setTimeout> | null = null;
+              const onSeeked = () => {
+                if (timeoutId) clearTimeout(timeoutId);
+                video.removeEventListener("seeked", onSeeked);
+                video.removeEventListener("error", onErr);
+                resolve();
+              };
+              const onErr = () => {
+                if (timeoutId) clearTimeout(timeoutId);
+                video.removeEventListener("seeked", onSeeked);
+                video.removeEventListener("error", onErr);
+                resolve();
+              };
+              timeoutId = setTimeout(() => {
+                video.removeEventListener("seeked", onSeeked);
+                video.removeEventListener("error", onErr);
+                resolve();
+              }, 350);
+
+              video.addEventListener("seeked", onSeeked, { once: true });
+              video.addEventListener("error", onErr, { once: true });
+              try {
+                video.currentTime = Math.max(0, Math.min(dur, t));
+              } catch {
+                resolve();
               }
-            }
-          } catch {
-            // If canvas draw fails (e.g. tainted canvas or decode error), continue
-          }
-        }
+            });
 
-        if (!destroyed && !abort.signal.aborted) {
-          setVersion((v) => v + 1);
+            if (destroyed || abort.signal.aborted) break;
+
+            try {
+              const canvas = document.createElement("canvas");
+              canvas.width = thumbWidth;
+              canvas.height = thumbHeight;
+              const ctx = canvas.getContext("2d");
+              if (ctx) {
+                ctx.drawImage(video, 0, 0, thumbWidth, thumbHeight);
+                const entry = cachesRef.current.get(m.id);
+                if (entry) {
+                  entry.cache.set(t, canvas);
+                  entry.sorted.push(t);
+                  entry.sorted.sort((a, b) => a - b);
+                  bump();
+                }
+              }
+            } catch {
+              // If canvas draw fails (e.g. tainted canvas or decode error), continue
+            }
+          }
+
+          if (!destroyed && !abort.signal.aborted) {
+            setVersion((v) => v + 1);
+          }
+        } catch {
+          // Ignore any extraction failures
         }
       };
 
-      runExtraction();
+      runExtraction().catch(() => {});
     }
 
     // No generic cleanup — the first loop already aborts/deletes vanished

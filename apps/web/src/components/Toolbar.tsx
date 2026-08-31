@@ -10,7 +10,6 @@ import Link from "next/link";
 import { useRef, useState, useEffect } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { formatDefaultProjectName } from "@panoptik/engine";
-import { useVideoExport } from "@/lib/useVideoExport";
 import { engine } from "@/lib/engineProvider";
 import { AISettingsModal } from "./AISettingsModal";
 
@@ -20,10 +19,27 @@ export function Toolbar() {
   const redo = useProjectStore((s) => s.redo);
   const canUndo = useProjectStore((s) => s.historyIndex > 0);
   const canRedo = useProjectStore((s) => s.historyIndex < s.history.length - 1);
-  const quickExport = useVideoExport();
   const fileRef = useRef<HTMLInputElement>(null);
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
   const [isAirGapped, setIsAirGapped] = useState(false);
+  const [isExportingProject, setIsExportingProject] = useState(false);
+
+  const handleExportProject = async () => {
+    const state = useProjectStore.getState();
+    if (!state.project || isExportingProject) return;
+    setIsExportingProject(true);
+    try {
+      const { downloadProjectPackage } = await import("@panoptik/engine");
+      await downloadProjectPackage(state.project, {
+        history: state.history,
+        historyIndex: state.historyIndex,
+      });
+    } catch (err) {
+      console.error("Export project failed", err);
+    } finally {
+      setIsExportingProject(false);
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -148,8 +164,29 @@ export function Toolbar() {
           <span className="text-xs font-medium">{isAirGapped ? "Local Only" : "Cloud AI"}</span>
         </button>
 
-        <button onClick={() => quickExport.run({ format: "mp4", resolution: "720p" }, { download: true })} disabled={!project || quickExport.isExporting} title={project ? "Export 720p MP4 — use the Export panel for other options" : "Load a clip first"} className="pk-btn pk-btn-primary pk-btn-md" style={{ height: 38 }}>
-          {quickExport.isExporting ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" /><span className="tabular-nums">{Math.round((quickExport.progress ?? 0) * 100)}%</span></> : <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg><span className="hidden sm:inline">Export Video</span><span className="sm:hidden">Export</span></>}
+        <button
+          onClick={handleExportProject}
+          disabled={!project || isExportingProject}
+          title={project ? "Export full project state as a portable .panoptik file" : "Load a clip first"}
+          className="pk-btn pk-btn-primary pk-btn-md"
+          style={{ height: 38 }}
+        >
+          {isExportingProject ? (
+            <>
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              <span>Packaging...</span>
+            </>
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span className="hidden sm:inline">Export Project</span>
+              <span className="sm:hidden">Export</span>
+            </>
+          )}
         </button>
       </div>
 

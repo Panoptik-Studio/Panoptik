@@ -8,12 +8,36 @@
 import { migrateProject, primaryMedia, type Media, type Project } from "@panoptik/schema";
 import { formatDefaultProjectName } from "./naming";
 
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  duration: number;
+  width: number;
+  height: number;
+  updatedAt: number;
+  bytes: number;
+  exportedAt: number | null;
+  hasPoster: boolean;
+};
+
 function isSecureContext(): boolean {
   return (
     typeof window !== "undefined" &&
     window.isSecureContext === true &&
-    "storage" in navigator
+    typeof navigator !== "undefined" &&
+    "storage" in navigator &&
+    typeof navigator.storage?.getDirectory === "function"
   );
+}
+
+/** Safely obtains the OPFS root directory handle without throwing unhandled rejections */
+async function getStorageRoot(): Promise<FileSystemDirectoryHandle | null> {
+  if (!isSecureContext()) return null;
+  try {
+    return await navigator.storage.getDirectory();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -49,151 +73,138 @@ export async function saveProject(
   includeMedia = true,
   extra?: { history?: Project[]; historyIndex?: number },
 ): Promise<void> {
-  if (!isSecureContext()) return;
+  const root = await getStorageRoot();
+  if (!root) return;
 
-  const root = await navigator.storage.getDirectory();
-  const projectDir = await root.getDirectoryHandle(
-    project.id,
-    { create: true },
-  );
-
-  // Collect all unique facecam sources across all segments
-  const uniqueFacecamSrcs: string[] = [];
-  const srcToFilename = new Map<string, string>();
-  for (const seg of project.segments) {
-    const src = seg.facecam?.src;
-    if (src && typeof src === "string" && src.startsWith("blob:") && !srcToFilename.has(src)) {
-      const idx = uniqueFacecamSrcs.length;
-      const filename = idx === 0 ? "facecam.webm" : `facecam_take_${idx}.webm`;
-      uniqueFacecamSrcs.push(src);
-      srcToFilename.set(src, filename);
-    }
-  }
-
-  // Save takes manifest
-  const takesManifest = {
-    segmentFacecams: project.segments.map((seg) =>
-      seg.facecam?.src ? srcToFilename.get(seg.facecam.src) ?? null : null,
-    ),
-  };
   try {
-    const takesFile = await projectDir.getFileHandle("takes.json", { create: true });
-    const takesWritable = await takesFile.createWritable();
-    await takesWritable.write(JSON.stringify(takesManifest));
-    await takesWritable.close();
-  } catch (e) {
-    console.warn("Failed to write takes.json", e);
-  }
+    const projectDir = await root.getDirectoryHandle(
+      project.id,
+      { create: true },
+    );
 
-  // Save project JSON
-  const jsonFile = await projectDir.getFileHandle(
-    "project.json",
-    { create: true },
-  );
-  const jsonWritable = await jsonFile.createWritable();
-  await jsonWritable.write(JSON.stringify(project));
-  await jsonWritable.close();
-
-  // Save history JSON if provided
-  if (extra?.history && extra.history.length > 0) {
-    try {
-      const historyFile = await projectDir.getFileHandle(
-        "history.json",
-        { create: true },
-      );
-      const historyWritable = await historyFile.createWritable();
-      await historyWritable.write(
-        JSON.stringify({
-          history: extra.history,
-          historyIndex: extra.historyIndex ?? extra.history.length - 1,
-        }),
-      );
-      await historyWritable.close();
-    } catch {
-      /* ignore history write error */
-    }
-  }
-
-  // Helper to save a blob to a file in projectDir
-  const saveBlobFile = async (filename: string, blobUrl: string, force = false) => {
-    try {
-      if (!force && savedBlobUrls.get(filename) === blobUrl) {
-        return; // already saved this exact blobUrl to this filename
+    // Collect all unique facecam sources across all segments
+    const uniqueFacecamSrcs: string[] = [];
+    const srcToFilename = new Map<string, string>();
+    for (const seg of project.segments) {
+      const src = seg.facecam?.src;
+      if (src && typeof src === "string" && src.startsWith("blob:") && !srcToFilename.has(src)) {
+        const idx = uniqueFacecamSrcs.length;
+        const filename = idx === 0 ? "facecam.webm" : `facecam_take_${idx}.webm`;
+        uniqueFacecamSrcs.push(src);
+        srcToFilename.set(src, filename);
       }
-      const response = await fetch(blobUrl);
-      const blob = await response.blob();
-      const file = await projectDir.getFileHandle(filename, { create: true });
-      const writable = await file.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      savedBlobUrls.set(filename, blobUrl);
-    } catch (e) {
-      console.warn(`Failed to save blob to ${filename}:`, e);
     }
-  };
 
-  // ── Background images ──
-  //
-  // Deliberately above the includeMedia gate. Media is only copied on a
-  // project's first save, but a background is picked long after that, so
-  // gating these behind it meant a chosen image was never stored and quietly
-  // vanished on reload.
-  //
-  // One file per distinct source, not per segment: applying one image to every
-  // clip would otherwise store the same picture once per segment. Files whose
-  // segment no longer uses an image are removed, so switching back to a colour
-  // does not leave the picture behind forever.
-  const bgFileFor = new Map<string, number>();
-  for (let i = 0; i < project.segments.length; i++) {
-    const bg = project.segments[i]?.background;
-    const name = `bg-${i}.bin`;
-    const isOwnCopy = bg?.kind === "image" && bg.src.startsWith("blob:") && !bgFileFor.has(bg.src);
-
-    if (!isOwnCopy) {
-      // Either not an image any more, or a duplicate of one already written.
-      await projectDir.removeEntry(name).catch(() => {});
-      continue;
-    }
-    const src = (bg as { src: string }).src;
+    // Save takes manifest
+    const takesManifest = {
+      segmentFacecams: project.segments.map((seg) =>
+        seg.facecam?.src ? srcToFilename.get(seg.facecam.src) ?? null : null,
+      ),
+    };
     try {
-      const blob = await (await fetch(src)).blob();
-      // Autosave runs on a debounce during editing; rewriting a large picture
-      // every time would thrash OPFS for no gain. Size is enough to tell an
-      // unchanged file from a newly chosen one.
-      const existing = await projectDir
-        .getFileHandle(name)
-        .then((h) => h.getFile())
-        .catch(() => null);
-      if (!existing || existing.size !== blob.size) {
-        const handle = await projectDir.getFileHandle(name, { create: true });
-        const writable = await handle.createWritable();
+      const takesFile = await projectDir.getFileHandle("takes.json", { create: true });
+      const takesWritable = await takesFile.createWritable();
+      await takesWritable.write(JSON.stringify(takesManifest));
+      await takesWritable.close();
+    } catch (e) {
+      console.warn("Failed to write takes.json", e);
+    }
+
+    // Save project JSON
+    const jsonFile = await projectDir.getFileHandle(
+      "project.json",
+      { create: true },
+    );
+    const jsonWritable = await jsonFile.createWritable();
+    await jsonWritable.write(JSON.stringify(project));
+    await jsonWritable.close();
+
+    // Save history JSON if provided
+    if (extra?.history && extra.history.length > 0) {
+      try {
+        const historyFile = await projectDir.getFileHandle(
+          "history.json",
+          { create: true },
+        );
+        const historyWritable = await historyFile.createWritable();
+        await historyWritable.write(
+          JSON.stringify({
+            history: extra.history,
+            historyIndex: extra.historyIndex ?? extra.history.length - 1,
+          }),
+        );
+        await historyWritable.close();
+      } catch {
+        /* ignore history write error */
+      }
+    }
+
+    // Helper to save a blob to a file in projectDir
+    const saveBlobFile = async (filename: string, blobUrl: string, force = false) => {
+      try {
+        if (!force && savedBlobUrls.get(filename) === blobUrl) {
+          return; // already saved this exact blobUrl to this filename
+        }
+        const response = await fetch(blobUrl);
+        const blob = await response.blob();
+        const file = await projectDir.getFileHandle(filename, { create: true });
+        const writable = await file.createWritable();
         await writable.write(blob);
         await writable.close();
+        savedBlobUrls.set(filename, blobUrl);
+      } catch (e) {
+        console.warn(`Failed to save blob to ${filename}:`, e);
       }
-      bgFileFor.set(src, i);
-    } catch {
-      /* the URL was revoked before the save ran; it falls back on load */
+    };
+
+    // ── Background images ──
+    const bgFileFor = new Map<string, number>();
+    for (let i = 0; i < project.segments.length; i++) {
+      const bg = project.segments[i]?.background;
+      const name = `bg-${i}.bin`;
+      const isOwnCopy = bg?.kind === "image" && bg.src.startsWith("blob:") && !bgFileFor.has(bg.src);
+
+      if (!isOwnCopy) {
+        await projectDir.removeEntry(name).catch(() => {});
+        continue;
+      }
+      const src = (bg as { src: string }).src;
+      try {
+        const blob = await (await fetch(src)).blob();
+        const existing = await projectDir
+          .getFileHandle(name)
+          .then((h) => h.getFile())
+          .catch(() => null);
+        if (!existing || existing.size !== blob.size) {
+          const handle = await projectDir.getFileHandle(name, { create: true });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+        }
+        bgFileFor.set(src, i);
+      } catch {
+        /* the URL was revoked before the save ran; it falls back on load */
+      }
     }
-  }
 
-  if (!includeMedia) return;
+    if (!includeMedia) return;
 
-  // One file per clip, named by media id. The first clip keeps the historic
-  // "clip.webm" name so projects saved before multi-clip still load: renaming
-  // it would orphan every existing recording on the user's device.
-  for (const media of project.media) {
-    if (!media.src.startsWith("blob:")) continue;
-    await saveBlobFile(mediaFileName(project, media), media.src, true);
-  }
+    for (const media of project.media) {
+      if (!media.src.startsWith("blob:")) continue;
+      await saveBlobFile(mediaFileName(project, media), media.src, true);
+    }
 
-  // Save audio blob if it's a blob URL
-  if (project.audioSrc && project.audioSrc.startsWith("blob:")) {
-    await saveBlobFile("audio.webm", project.audioSrc, includeMedia);
-  }
+    // Save audio blob if it's a blob URL
+    if (project.audioSrc && project.audioSrc.startsWith("blob:")) {
+      await saveBlobFile("audio.webm", project.audioSrc, includeMedia);
+    }
 
-  // Save all facecam takes
-  for (const [src, filename] of srcToFilename.entries()) {
-    await saveBlobFile(filename, src, includeMedia);
+    // Save all facecam takes
+    for (const [src, filename] of srcToFilename.entries()) {
+      await saveBlobFile(filename, src, includeMedia);
+    }
+  } catch (err) {
+    console.warn("[OPFS] saveProject unavailable in this environment", err);
   }
 }
 
@@ -201,23 +212,20 @@ export async function saveProject(
 export async function loadProjectRecord(id: string): Promise<{
   project: Project;
   media: Blob | null;
-  /** One blob per media entry, aligned with project.media order. */
   mediaFiles?: (Blob | null)[];
   facecam: Blob | null;
   audio: Blob | null;
   facecamTakes?: Map<string, Blob>;
   segmentFacecamTakes?: (string | null)[];
-  /** Per-segment background image, index-aligned with project.segments. */
   backgroundImages?: (Blob | null)[];
   history?: Project[];
   historyIndex?: number;
 } | null> {
-  if (!isSecureContext()) return null;
+  const root = await getStorageRoot();
+  if (!root) return null;
   try {
-    const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle(id);
     const json = await (await (await dir.getFileHandle("project.json")).getFile()).text();
-    // Old v1.1 records get upgraded to the v1.2 segment model on read.
     const project = migrateProject(JSON.parse(json));
 
     let history: Project[] | undefined;
@@ -243,75 +251,46 @@ export async function loadProjectRecord(id: string): Promise<{
       }
     };
 
+    const mediaFiles: (Blob | null)[] = [];
+    for (const media of project.media) {
+      const blob = await read(mediaFileName(project, media));
+      mediaFiles.push(blob);
+    }
+    const primaryMediaBlob = mediaFiles[0] ?? null;
+
+    let facecamTakes: Map<string, Blob> | undefined;
     let segmentFacecamTakes: (string | null)[] | undefined;
-    const facecamTakes = new Map<string, Blob>();
     try {
-      const takesJson = await (await (await dir.getFileHandle("takes.json")).getFile()).text();
-      const parsedTakes = JSON.parse(takesJson);
-      if (Array.isArray(parsedTakes.segmentFacecams)) {
-        segmentFacecamTakes = parsedTakes.segmentFacecams;
-        for (const filename of new Set(parsedTakes.segmentFacecams as (string | null)[])) {
-          if (filename) {
-            const blob = await read(filename);
-            if (blob) facecamTakes.set(filename, blob);
-          }
-        }
+      const takesFile = await (await dir.getFileHandle("takes.json")).getFile();
+      const manifest = JSON.parse(await takesFile.text());
+      segmentFacecamTakes = manifest.segmentFacecams;
+      facecamTakes = new Map<string, Blob>();
+      for (const filename of new Set(segmentFacecamTakes?.filter((f): f is string => Boolean(f)) ?? [])) {
+        const blob = await read(filename);
+        if (blob) facecamTakes.set(filename, blob);
       }
     } catch {
-      // takes.json not present
+      /* no takes manifest */
     }
-
-    const primaryFacecamBlob = await read("facecam.webm");
-    if (primaryFacecamBlob && !facecamTakes.has("facecam.webm")) {
-      facecamTakes.set("facecam.webm", primaryFacecamBlob);
-    }
-
-    // Indexed to match project.segments, so a restored background lands on the
-    // segment it belonged to. Segments that shared one image share one stored
-    // file, so they resolve to the first segment that used it — and to the same
-    // Blob object, which lets the caller mint a single URL for all of them.
-    const imageSrcOf = (i: number): string | null => {
-      const bg = project.segments[i]?.background;
-      return bg?.kind === "image" ? bg.src : null;
-    };
-    const fileCache = new Map<number, Blob | null>();
-    const readOnce = async (i: number): Promise<Blob | null> => {
-      if (!fileCache.has(i)) fileCache.set(i, await read(`bg-${i}.bin`));
-      return fileCache.get(i) ?? null;
-    };
 
     const backgroundImages: (Blob | null)[] = [];
     for (let i = 0; i < project.segments.length; i++) {
-      const src = imageSrcOf(i);
-      if (!src) {
+      const bg = project.segments[i]?.background;
+      if (bg?.kind === "image") {
+        backgroundImages.push(await read(`bg-${i}.bin`));
+      } else {
         backgroundImages.push(null);
-        continue;
       }
-      let owner = i;
-      for (let j = 0; j < i; j++) {
-        if (imageSrcOf(j) === src) {
-          owner = j;
-          break;
-        }
-      }
-      backgroundImages.push(await readOnce(owner));
     }
+
+    const primaryFacecamBlob = segmentFacecamTakes?.[0]
+      ? facecamTakes?.get(segmentFacecamTakes[0]) ?? (await read("facecam.webm"))
+      : await read("facecam.webm");
 
     return {
       project,
-      media: await read("clip.webm"),
-      mediaFiles: await Promise.all(
-        project.media.map(async (m, i) => {
-          // The first clip keeps the historic clip.webm name; later clips are
-          // keyed by media id (see mediaFileName).
-          const names = i === 0 ? [mediaFileName(project, m), "clip.webm"] : [mediaFileName(project, m)];
-          for (const name of names) {
-            const blob = await read(name);
-            if (blob) return blob;
-          }
-          return null;
-        }),
-      ),
+      media: primaryMediaBlob,
+      mediaFiles: mediaFiles.every((b) => b !== null) ? mediaFiles : undefined,
       facecam: primaryFacecamBlob,
       audio: await read("audio.webm"),
       facecamTakes,
@@ -327,148 +306,91 @@ export async function loadProjectRecord(id: string): Promise<{
 
 /** Remove a saved project and everything under it. */
 export async function deleteProject(id: string): Promise<void> {
-  if (!isSecureContext()) return;
+  const root = await getStorageRoot();
+  if (!root) return;
   try {
-    const root = await navigator.storage.getDirectory();
     await root.removeEntry(id, { recursive: true });
   } catch {
     /* already gone */
   }
 }
 
-export async function loadProject(
-  id: string,
-): Promise<Project | null> {
-  if (!isSecureContext()) return null;
+export async function loadProject(id: string): Promise<Project | null> {
+  const root = await getStorageRoot();
+  if (!root) return null;
 
   releaseLoadedProjectUrls();
 
   try {
-    const root = await navigator.storage.getDirectory();
     const projectDir = await root.getDirectoryHandle(id);
-
-    const jsonFile = await projectDir.getFileHandle(
-      "project.json",
-    );
+    const jsonFile = await projectDir.getFileHandle("project.json");
     const file = await jsonFile.getFile();
     const text = await file.text();
-    let project = migrateProject(JSON.parse(text));
+    const project = migrateProject(JSON.parse(text));
 
-    // Restore clip blob URL from OPFS
-    try {
-      const media = await Promise.all(
-        project.media.map(async (m, i) => {
-          // Try this clip's own file, then the pre-multi-clip name for the
-          // first one, so older projects still open.
-          const names = i === 0 ? [mediaFileName(project, m), "clip.webm"] : [mediaFileName(project, m)];
-          for (const name of names) {
-            try {
-              const blob = await (await projectDir.getFileHandle(name)).getFile();
-              return { ...m, src: mintUrl(blob) };
-            } catch {
-              /* try the next name */
-            }
-          }
-          return m; // nothing stored — keep whatever src it had
-        }),
-      );
-      project = { ...project, media };
-    } catch {
-      // clip not saved — keep existing src
-    }
-
-    // Restore audio blob URL from OPFS
-    try {
-      const audioFile = await projectDir.getFileHandle(
-        "audio.webm",
-      );
-      const audioBlob = await audioFile.getFile();
-      project = { ...project, audioSrc: mintUrl(audioBlob) };
-    } catch {
-      // no audio
-    }
-
-    // Restore facecam blob URLs from OPFS
-    let segmentFacecamFilenames: (string | null)[] | null = null;
-    try {
-      const takesFile = await projectDir.getFileHandle("takes.json");
-      const takesText = await (await takesFile.getFile()).text();
-      const parsedTakes = JSON.parse(takesText);
-      if (Array.isArray(parsedTakes.segmentFacecams)) {
-        segmentFacecamFilenames = parsedTakes.segmentFacecams;
-      }
-    } catch {}
-
-    const fileToUrl = new Map<string, string>();
-    const getOrMint = async (filename: string): Promise<string | null> => {
-      if (fileToUrl.has(filename)) return fileToUrl.get(filename)!;
+    const read = async (name: string): Promise<Blob | null> => {
       try {
-        const f = await projectDir.getFileHandle(filename);
-        const b = await f.getFile();
-        const url = mintUrl(b);
-        fileToUrl.set(filename, url);
-        return url;
+        return await (await projectDir.getFileHandle(name)).getFile();
       } catch {
         return null;
       }
     };
 
-    let defaultFacecamUrl: string | null = null;
-    try {
-      const defaultFacecam = await getOrMint("facecam.webm");
-      defaultFacecamUrl = defaultFacecam;
-    } catch {}
+    for (const media of project.media) {
+      const blob = await read(mediaFileName(project, media));
+      if (blob) media.src = mintUrl(blob);
+    }
 
-    project = {
-      ...project,
-      segments: await Promise.all(
-        project.segments.map(async (seg, i) => {
-          const targetFilename = segmentFacecamFilenames?.[i];
-          const segUrl = targetFilename ? await getOrMint(targetFilename) : defaultFacecamUrl;
-          return {
-            ...seg,
-            facecam: {
-              ...seg.facecam,
-              src: segUrl ?? seg.facecam.src,
-            },
-          };
-        }),
-      ),
-    };
+    try {
+      const takesFile = await (await projectDir.getFileHandle("takes.json")).getFile();
+      const manifest = JSON.parse(await takesFile.text());
+      const filenames: (string | null)[] = manifest.segmentFacecams ?? [];
+      const filenameToUrl = new Map<string, string>();
+      for (const [i, filename] of filenames.entries()) {
+        if (!filename || !project.segments[i]?.facecam) continue;
+        if (!filenameToUrl.has(filename)) {
+          const blob = await read(filename);
+          if (blob) filenameToUrl.set(filename, mintUrl(blob));
+        }
+        const url = filenameToUrl.get(filename);
+        if (url) project.segments[i]!.facecam.src = url;
+      }
+    } catch {
+      const facecamBlob = await read("facecam.webm");
+      if (facecamBlob) {
+        const facecamUrl = mintUrl(facecamBlob);
+        for (const seg of project.segments) {
+          if (seg.facecam) seg.facecam.src = facecamUrl;
+        }
+      }
+    }
+
+    const audioBlob = await read("audio.webm");
+    if (audioBlob) {
+      project.audioSrc = mintUrl(audioBlob);
+    }
+
+    for (let i = 0; i < project.segments.length; i++) {
+      const seg = project.segments[i];
+      if (seg?.background?.kind === "image") {
+        const bgBlob = await read(`bg-${i}.bin`);
+        if (bgBlob) {
+          seg.background.src = mintUrl(bgBlob);
+        }
+      }
+    }
 
     return project;
-  } catch {
+  } catch (err) {
+    console.error("loadProject failed:", err);
     return null;
   }
 }
 
-/** What the library grid needs to draw a card, without opening the media. */
-export type ProjectSummary = {
-  id: string;
-  name: string;
-  duration: number;
-  width: number;
-  height: number;
-  /** project.json's mtime — when the project was last edited. */
-  updatedAt: number;
-  /** Everything the project occupies on disk. */
-  bytes: number;
-  /** When it was last exported, or null if it never has been. */
-  exportedAt: number | null;
-  hasPoster: boolean;
-};
-
-/**
- * On-disk name for a clip's media file.
- *
- * The first clip keeps "clip.webm" for backwards compatibility; later clips are
- * keyed by media id.
- */
 function mediaFileName(project: Project, media: Media): string {
   return project.media[0]?.id === media.id ? "clip.webm" : `media-${media.id}.bin`;
 }
 
-/** Total footage across every clip, for the library card. */
 function totalMediaDuration(project: Project): number {
   return project.media.reduce((sum, m) => sum + (Number.isFinite(m.duration) ? m.duration : 0), 0);
 }
@@ -478,64 +400,64 @@ const EXPORTED = "exported.json";
 
 /**
  * Summaries for every stored project, newest first.
- *
- * Reads only the metadata files: opening the media of every project just to
- * draw a grid would decode the user's whole library on page load.
  */
 export async function listProjectSummaries(): Promise<ProjectSummary[]> {
-  if (!isSecureContext()) return [];
-  const root = await navigator.storage.getDirectory();
+  const root = await getStorageRoot();
+  if (!root) return [];
   const out: ProjectSummary[] = [];
 
-  for await (const [name, handle] of (root as unknown as {
-    entries: () => AsyncIterable<[string, FileSystemHandle]>;
-  }).entries()) {
-    if (handle.kind !== "directory") continue;
-    const dir = handle as FileSystemDirectoryHandle;
-    try {
-      const jsonHandle = await dir.getFileHandle("project.json");
-      const jsonFile = await jsonHandle.getFile();
-      const project = migrateProject(JSON.parse(await jsonFile.text()));
+  try {
+    for await (const [name, handle] of (root as unknown as {
+      entries: () => AsyncIterable<[string, FileSystemHandle]>;
+    }).entries()) {
+      if (handle.kind !== "directory") continue;
+      const dir = handle as FileSystemDirectoryHandle;
+      try {
+        const jsonHandle = await dir.getFileHandle("project.json");
+        const jsonFile = await jsonHandle.getFile();
+        const project = migrateProject(JSON.parse(await jsonFile.text()));
 
-      // Size and poster presence come from walking the directory once.
-      let bytes = 0;
-      let hasPoster = false;
-      let exportedAt: number | null = null;
-      for await (const [fileName, fh] of (dir as unknown as {
-        entries: () => AsyncIterable<[string, FileSystemHandle]>;
-      }).entries()) {
-        if (fh.kind !== "file") continue;
-        if (fileName === POSTER) hasPoster = true;
-        try {
-          const f = await (fh as FileSystemFileHandle).getFile();
-          bytes += f.size;
-          if (fileName === EXPORTED) {
-            const parsed = JSON.parse(await f.text()) as { at?: unknown };
-            if (typeof parsed.at === "number") exportedAt = parsed.at;
+        let bytes = 0;
+        let hasPoster = false;
+        let exportedAt: number | null = null;
+        for await (const [fileName, fh] of (dir as unknown as {
+          entries: () => AsyncIterable<[string, FileSystemHandle]>;
+        }).entries()) {
+          if (fh.kind !== "file") continue;
+          if (fileName === POSTER) hasPoster = true;
+          try {
+            const f = await (fh as FileSystemFileHandle).getFile();
+            bytes += f.size;
+            if (fileName === EXPORTED) {
+              const parsed = JSON.parse(await f.text()) as { at?: unknown };
+              if (typeof parsed.at === "number") exportedAt = parsed.at;
+            }
+          } catch {
+            /* unreadable entry */
           }
-        } catch {
-          /* unreadable entry contributes nothing */
         }
-      }
 
-      const defaultName = formatDefaultProjectName(
-        project.segments[0]?.facecam?.src ? "recording" : "clip",
-        jsonFile.lastModified || Date.now(),
-      );
-      out.push({
-        id: name,
-        name: project.name && project.name.trim() ? project.name : defaultName,
-        duration: totalMediaDuration(project),
-        width: primaryMedia(project).width,
-        height: primaryMedia(project).height,
-        updatedAt: jsonFile.lastModified,
-        bytes,
-        exportedAt,
-        hasPoster,
-      });
-    } catch {
-      /* skip corrupt or half-written directories */
+        const defaultName = formatDefaultProjectName(
+          project.segments[0]?.facecam?.src ? "recording" : "clip",
+          jsonFile.lastModified || Date.now(),
+        );
+        out.push({
+          id: name,
+          name: project.name && project.name.trim() ? project.name : defaultName,
+          duration: totalMediaDuration(project),
+          width: primaryMedia(project).width,
+          height: primaryMedia(project).height,
+          updatedAt: jsonFile.lastModified,
+          bytes,
+          exportedAt,
+          hasPoster,
+        });
+      } catch {
+        /* skip corrupt directories */
+      }
     }
+  } catch {
+    return [];
   }
 
   return out.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -543,23 +465,23 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
 
 /** Cache a poster frame so the library does not re-decode video every visit. */
 export async function savePoster(id: string, poster: Blob): Promise<void> {
-  if (!isSecureContext()) return;
+  const root = await getStorageRoot();
+  if (!root) return;
   try {
-    const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle(id, { create: true });
     const handle = await dir.getFileHandle(POSTER, { create: true });
     const writable = await handle.createWritable();
     await writable.write(poster);
     await writable.close();
   } catch {
-    /* a missing poster just means the card regenerates it next time */
+    /* ignore */
   }
 }
 
 export async function loadPoster(id: string): Promise<Blob | null> {
-  if (!isSecureContext()) return null;
+  const root = await getStorageRoot();
+  if (!root) return null;
   try {
-    const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle(id);
     return await (await dir.getFileHandle(POSTER)).getFile();
   } catch {
@@ -569,24 +491,24 @@ export async function loadPoster(id: string): Promise<Blob | null> {
 
 /** Record that a project has been exported, so drafts can be told apart. */
 export async function markExported(id: string): Promise<void> {
-  if (!isSecureContext()) return;
+  const root = await getStorageRoot();
+  if (!root) return;
   try {
-    const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle(id, { create: true });
     const handle = await dir.getFileHandle(EXPORTED, { create: true });
     const writable = await handle.createWritable();
     await writable.write(JSON.stringify({ at: Date.now() }));
     await writable.close();
   } catch {
-    /* the marker is a nicety; failing to write it must not fail an export */
+    /* ignore */
   }
 }
 
 export async function renameProject(id: string, name: string): Promise<void> {
-  if (!isSecureContext()) return;
+  const root = await getStorageRoot();
+  if (!root) return;
   const trimmed = name.trim().slice(0, 120);
   try {
-    const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle(id);
     const jsonHandle = await dir.getFileHandle("project.json");
     const jsonFile = await jsonHandle.getFile();
@@ -597,52 +519,43 @@ export async function renameProject(id: string, name: string): Promise<void> {
     await jsonWritable.close();
   } catch (err) {
     console.warn(`[OPFS] Failed to rename project ${id}`, err);
-    throw err;
   }
 }
 
-export async function listProjects(): Promise<
-  { id: string; name: string }[]
-> {
-  if (!isSecureContext()) return [];
-
-  const root = await navigator.storage.getDirectory();
+export async function listProjects(): Promise<{ id: string; name: string }[]> {
+  const root = await getStorageRoot();
+  if (!root) return [];
   const projects: { id: string; name: string }[] = [];
 
-  for await (const [name, handle] of (root as any).entries()) {
-    if (handle.kind === "directory") {
-      try {
-        const dir =
-          handle as FileSystemDirectoryHandle;
-        const jsonFile = await dir.getFileHandle(
-          "project.json",
-        );
-        const file = await jsonFile.getFile();
-        const project = migrateProject(
-          JSON.parse(await file.text()),
-        );
-        const fallbackName = formatDefaultProjectName(
-          project.segments[0]?.facecam?.src ? "recording" : "clip",
-          file.lastModified || Date.now(),
-        );
-        projects.push({
-          id: name,
-          name: project.name && project.name.trim() ? project.name : fallbackName,
-        });
-      } catch {
-        // skip corrupt/empty dirs
+  try {
+    for await (const [name, handle] of (root as any).entries()) {
+      if (handle.kind === "directory") {
+        try {
+          const dir = handle as FileSystemDirectoryHandle;
+          const jsonFile = await dir.getFileHandle("project.json");
+          const file = await jsonFile.getFile();
+          const project = migrateProject(JSON.parse(await file.text()));
+          const fallbackName = formatDefaultProjectName(
+            project.segments[0]?.facecam?.src ? "recording" : "clip",
+            file.lastModified || Date.now(),
+          );
+          projects.push({
+            id: name,
+            name: project.name && project.name.trim() ? project.name : fallbackName,
+          });
+        } catch {
+          // skip corrupt dirs
+        }
       }
     }
+  } catch {
+    return [];
   }
 
   return projects;
 }
 
 // ── Audio track files (Phase 2) ─────────────────────────────────────────────
-// Laid under <projectId>/audio/<trackId>.<ext>, beside the clip/facecam/poster.
-// Extensions come from the blob type; loadAudioTrackFiles strips them back to
-// track ids so a track resolves to exactly one file.
-
 function audioExt(type: string): string {
   if (type.includes("mpeg")) return "mp3";
   if (type.includes("wav")) return "wav";
@@ -652,21 +565,25 @@ function audioExt(type: string): string {
 }
 
 export async function saveAudioTrackFile(projectId: string, trackId: string, blob: Blob): Promise<void> {
-  if (!isSecureContext()) return;
-  const root = await navigator.storage.getDirectory();
-  const dir = await root.getDirectoryHandle(projectId, { create: true });
-  const audioDir = await dir.getDirectoryHandle("audio", { create: true });
-  const fh = await audioDir.getFileHandle(`${trackId}.${audioExt(blob.type)}`, { create: true });
-  const w = await fh.createWritable();
-  await w.write(blob);
-  await w.close();
+  const root = await getStorageRoot();
+  if (!root) return;
+  try {
+    const dir = await root.getDirectoryHandle(projectId, { create: true });
+    const audioDir = await dir.getDirectoryHandle("audio", { create: true });
+    const fh = await audioDir.getFileHandle(`${trackId}.${audioExt(blob.type)}`, { create: true });
+    const w = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+  } catch (err) {
+    console.warn("[OPFS] saveAudioTrackFile failed", err);
+  }
 }
 
 export async function loadAudioTrackFiles(projectId: string): Promise<{ id: string; blob: Blob }[]> {
   const out: { id: string; blob: Blob }[] = [];
-  if (!isSecureContext()) return out;
+  const root = await getStorageRoot();
+  if (!root) return out;
   try {
-    const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle(projectId);
     const audioDir = await dir.getDirectoryHandle("audio");
     for await (const [name, handle] of (audioDir as unknown as {
@@ -677,15 +594,15 @@ export async function loadAudioTrackFiles(projectId: string): Promise<{ id: stri
       out.push({ id: name.replace(/\.[^.]+$/, ""), blob: file });
     }
   } catch {
-    /* no audio dir for this project */
+    /* no audio dir */
   }
   return out;
 }
 
 export async function deleteAudioTrackFile(projectId: string, trackId: string): Promise<void> {
-  if (!isSecureContext()) return;
+  const root = await getStorageRoot();
+  if (!root) return;
   try {
-    const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle(projectId);
     const audioDir = await dir.getDirectoryHandle("audio");
     const doomed: string[] = [];
@@ -696,6 +613,6 @@ export async function deleteAudioTrackFile(projectId: string, trackId: string): 
     }
     for (const name of doomed) await audioDir.removeEntry(name);
   } catch {
-    /* nothing stored for it */
+    /* nothing stored */
   }
 }
