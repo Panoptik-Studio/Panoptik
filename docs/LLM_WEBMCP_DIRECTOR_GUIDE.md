@@ -316,3 +316,289 @@ const stagedEdits = await window.__panoptik_call_tool("propose_edits", {
 });
 ```
 
+---
+
+## 7. Complete Tool Parameter & Call Reference
+
+Here is the exhaustive reference of all available WebMCP tools, their parameter schemas, and ready-to-run copy-paste JavaScript snippets:
+
+### A. Autonomous Director & Batch Editing Tools
+
+#### 1. `get_director_guidelines`
+Returns the core director playbook, heuristics, and execution sequence.
+```js
+const guide = await window.__panoptik_call_tool("get_director_guidelines");
+console.log(guide);
+```
+
+#### 2. `get_video_summary`
+Returns the compact video digest (scenes dataframe, transcript, silences, facecam corner, token estimate).
+```js
+const summary = await window.__panoptik_call_tool("get_video_summary");
+console.log("Transcript:", summary.transcript);
+console.log("Scenes:", summary.scenes);
+```
+
+#### 3. `generate_captions`
+Transcribes spoken audio into word-level timestamps and phrases using local in-browser Whisper.
+* **Parameters**:
+  * `language` *(string, optional)*: ISO language code (e.g. `"auto"`, `"en"`, `"es"`).
+```js
+const captions = await window.__panoptik_call_tool("generate_captions", {
+  language: "auto"
+});
+```
+
+#### 4. `get_click_log`
+Retrieves mouse cursor coordinates $(x, y)$ and click events around a specific speech timestamp.
+* **Parameters**:
+  * `atTimestamp` *(number, optional)*: Specific timeline second to query (e.g. `87.5`).
+  * `windowSec` *(number, optional)*: Time window in seconds around `atTimestamp` (default: `3.0`).
+```js
+const clicks = await window.__panoptik_call_tool("get_click_log", {
+  atTimestamp: 45.0,
+  windowSec: 2.0
+});
+console.log("Cursor Position:", clicks.cursor); // { x: 0.35, y: 0.42 }
+```
+
+#### 5. `probe_frames`
+Samples video frames at specified timestamps with an optional 3×3 grid overlay for visual inspection.
+* **Parameters**:
+  * `timestamps` *(array of numbers)*: List of timeline timestamps to capture (e.g. `[12.0, 45.5, 90.0]`).
+  * `includeSnapshot` *(boolean, optional)*: Whether to return base64/data URLs (default: `true`).
+  * `gridOverlay` *(boolean, optional)*: Whether to render labeled 3×3 grid markers A1..C3 (default: `true`).
+```js
+const probe = await window.__panoptik_call_tool("probe_frames", {
+  timestamps: [33.0, 54.5, 106.0],
+  includeSnapshot: true,
+  gridOverlay: true
+});
+```
+
+#### 6. `locate_visual_target`
+Grounds visual bounding boxes into safe normalized zoom centers $(c_x, c_y)$.
+* **Parameters**:
+  * `query` *(string)*: Description of the visual element (e.g. `"Merged PR badge"`).
+  * `timestamp` *(number)*: Video timestamp to ground against.
+  * `scale` *(number, optional)*: Desired zoom magnification (default: `1.8`).
+  * `vlmOutput` *(string, optional)*: Serialized VLM output JSON with `grid_cell` or `bbox_2d`.
+```js
+const target = await window.__panoptik_call_tool("locate_visual_target", {
+  query: "Search bar input",
+  timestamp: 15.0,
+  scale: 2.0,
+  vlmOutput: JSON.stringify({
+    object_present: true,
+    grid_cell: "B1",
+    bbox_2d: [120, 200, 160, 500],
+    confidence: 0.98
+  })
+});
+```
+
+#### 7. `propose_edits`
+Stages batched atomic edits on the timeline as ghost proposals for review.
+* **Parameters**:
+  * `plan` *(string)*: Concise human-readable explanation of the editing strategy.
+  * `mode` *(string, optional)*: `"replace"` (default) or `"append"`.
+  * `ops` *(array of objects)*: List of atomic edit operations:
+    * **`zoom`**: `{ op: "zoom", t0: number, t1: number, scale: number, cx: number, cy: number, hold?: number, ease?: "linear" | "io2" | "io3" | "spring" }`
+    * **`text`**: `{ op: "text", t: number, dur: number, text: string, pos?: "top" | "bottom" | "center" | "custom", fontSize?: number, fontFamily?: string, fontWeight?: string, color?: string, backgroundColor?: string, borderRadius?: number, animation?: "pop" | "fade" | "slide-up" | "typewriter" | "bounce" }`
+    * **`cam`**: `{ op: "cam", corner: "tl" | "tr" | "bl" | "br" | "hide" }`
+    * **`bg`**: `{ op: "bg", kind: "solid" | "gradient", c0: string, c1?: string }`
+    * **`cut`**: `{ op: "cut", t: number }`
+    * **`speed`**: `{ op: "speed", segIdx: number, speed: number }`
+```js
+const proposal = await window.__panoptik_call_tool("propose_edits", {
+  plan: "Stage intro title and first focal zoom",
+  mode: "replace",
+  ops: [
+    {
+      op: "text",
+      t: 0.5,
+      dur: 3.5,
+      text: "PRODUCT DEMO",
+      pos: "top",
+      fontFamily: "Outfit",
+      fontWeight: "800",
+      color: "#ffffff",
+      backgroundColor: "rgba(15,23,42,0.9)",
+      animation: "pop"
+    },
+    {
+      op: "zoom",
+      t0: 4.0,
+      t1: 12.0,
+      scale: 1.8,
+      cx: 0.40,
+      cy: 0.45,
+      ease: "io3"
+    }
+  ]
+});
+```
+
+#### 8. `commit_staged_changes` & `discard_staged_changes`
+Applies or removes staged proposals:
+```js
+// Commit staged edits to master timeline:
+const commit = await window.__panoptik_call_tool("commit_staged_changes");
+
+// Or discard pending proposals:
+const discard = await window.__panoptik_call_tool("discard_staged_changes");
+```
+
+#### 9. `export_clip`
+Renders and encodes the final project into 4K/1080p MP4 via local in-browser WebCodecs.
+* **Parameters**:
+  * `resolution` *(string, optional)*: `"720p"`, `"1080p"` (default), or `"4k"`.
+  * `format` *(string, optional)*: `"mp4"` (default) or `"webm"`.
+```js
+const exportJob = await window.__panoptik_call_tool("export_clip", {
+  resolution: "1080p",
+  format: "mp4"
+});
+```
+
+---
+
+### B. Granular Timeline & Direct Editing Tools
+
+#### 10. `add_zoom_point`
+Directly creates a zoom keyframe on a specific clip.
+* **Parameters**:
+  * `clipIndex` *(number)*: 0-based index of the clip (default: `0`).
+  * `timestamp` *(number)*: Start time in seconds on clip.
+  * `scale` *(number)*: Magnification factor ($1.0\times - 3.5\times$).
+  * `cx` *(number)*: Normalized focal X ($0.0 - 1.0$).
+  * `cy` *(number)*: Normalized focal Y ($0.0 - 1.0$).
+  * `hold` *(number, optional)*: Duration in seconds to stay zoomed in.
+  * `ease` *(string, optional)*: `"linear"`, `"io2"`, `"io3"`, or `"spring"`.
+```js
+const zoom = await window.__panoptik_call_tool("add_zoom_point", {
+  clipIndex: 0,
+  timestamp: 10.5,
+  scale: 1.8,
+  cx: 0.35,
+  cy: 0.40,
+  hold: 5.0,
+  ease: "io3"
+});
+```
+
+#### 11. `add_text_overlay`
+Directly creates a styled text overlay banner or context pill.
+* **Parameters**:
+  * `clipIndex` *(number)*: 0-based index of the clip (default: `0`).
+  * `text` *(string)*: Text content (**NO emojis**).
+  * `timestamp` *(number)*: Start time in seconds on clip.
+  * `duration` *(number, optional)*: Visible duration in seconds (default: `3.0`).
+  * `position` *(string, optional)*: `"top"`, `"bottom"`, `"center"`, or `"custom"`.
+  * `fontFamily` *(string, optional)*: Font family (e.g. `"Inter"`, `"Outfit"`, `"Montserrat"`).
+  * `fontSize` *(number, optional)*: Font size in pixels (default: `22`).
+  * `fontWeight` *(string, optional)*: `"normal"`, `"600"`, `"700"`, `"800"`, `"900"`.
+  * `color` *(string, optional)*: Hex or RGBA text color (e.g. `"#ffffff"`).
+  * `backgroundColor` *(string, optional)*: Background color (e.g. `"rgba(15,23,42,0.85)"`).
+  * `borderRadius` *(number, optional)*: Border radius in pixels (default: `8`).
+  * `borderWidth` *(number, optional)*: Border width in pixels (e.g. `1`).
+  * `borderColor` *(string, optional)*: Border color (e.g. `"rgba(255,255,255,0.2)"`).
+  * `animation` *(string, optional)*: `"pop"`, `"fade"`, `"slide-up"`, `"slide-down"`, `"typewriter"`, `"bounce"`.
+```js
+const text = await window.__panoptik_call_tool("add_text_overlay", {
+  clipIndex: 0,
+  text: "ARCHITECTURE: Worker Queue Pipeline",
+  timestamp: 25.0,
+  duration: 4.0,
+  position: "top",
+  fontFamily: "Outfit",
+  fontSize: 22,
+  fontWeight: "800",
+  color: "#ffffff",
+  backgroundColor: "rgba(15,23,42,0.92)",
+  borderRadius: 8,
+  animation: "pop"
+});
+```
+
+#### 12. `set_facecam_position` & `set_facecam_shape`
+Positions and styles the facecam video bubble.
+* **Parameters**:
+  * `clipIndex` *(number)*: 0-based index of the clip.
+  * `corner` *(string, optional)*: `"tl"`, `"tr"`, `"bl"`, `"br"`, or `"hide"`.
+  * `shape` *(string, optional)*: `"circle"`, `"squircle"`, or `"rect"`.
+```js
+// Position in bottom-right corner:
+await window.__panoptik_call_tool("set_facecam_position", {
+  clipIndex: 0,
+  corner: "br"
+});
+
+// Set facecam shape:
+await window.__panoptik_call_tool("set_facecam_shape", {
+  clipIndex: 0,
+  shape: "circle"
+});
+```
+
+#### 13. `set_backdrop_background`
+Configures the stage canvas backdrop behind video clips.
+* **Parameters**:
+  * `clipIndex` *(number)*: 0-based index of the clip.
+  * `kind` *(string)*: `"solid"`, `"gradient"`, or `"blur"`.
+  * `color` *(string, optional)*: Solid color hex.
+  * `c0` *(string, optional)*: Gradient start color hex.
+  * `c1` *(string, optional)*: Gradient end color hex.
+  * `angle` *(number, optional)*: Gradient angle in degrees (e.g. `135`).
+```js
+await window.__panoptik_call_tool("set_backdrop_background", {
+  clipIndex: 0,
+  kind: "gradient",
+  c0: "#0f172a",
+  c1: "#1e293b",
+  angle: 135
+});
+```
+
+#### 14. `split_clip` & `set_clip_speed`
+Cuts or speed-ramps clips:
+```js
+// Split clip at 45.0s:
+await window.__panoptik_call_tool("split_clip", {
+  timestamp: 45.0
+});
+
+// Set playback speed on clip index 1 to 1.5x (WSOLA pitch-preserved):
+await window.__panoptik_call_tool("set_clip_speed", {
+  clipIndex: 1,
+  speed: 1.5
+});
+```
+
+---
+
+### C. Inspection & Query Tools
+
+#### 15. `list_clips` & `inspect_timeline`
+```js
+// List all video clips and durations:
+const clips = await window.__panoptik_call_tool("list_clips");
+console.log("Clips:", clips);
+
+// Detailed timeline inspection:
+const timeline = await window.__panoptik_call_tool("inspect_timeline");
+console.log("Full Timeline State:", timeline);
+```
+
+#### 16. `get_silence_intervals`
+Detects dead-air pauses for ripple editing or cutting:
+* **Parameters**:
+  * `minDurationSec` *(number, optional)*: Minimum silence duration in seconds (default: `1.0`).
+```js
+const silences = await window.__panoptik_call_tool("get_silence_intervals", {
+  minDurationSec: 1.5
+});
+console.log("Silence intervals:", silences);
+```
+
+
