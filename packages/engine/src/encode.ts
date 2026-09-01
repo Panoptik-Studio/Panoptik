@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV A — ROADMAP-A.md Task 3.1.
  * Export via mediabunny Output. Every frame goes through the same renderFrame
  * the preview uses, so what you see is what you get; audio is muxed from the
  * clip's own track. Emits "export-progress" (detail: 0..1) as it goes.
@@ -118,10 +117,7 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
   const exportFps = resolveExportFps(opts.fps);
   console.log("[Export] frame rate", exportFps, "fps");
   // Signal preview to pause its own prepareFrame — they share the global CanvasSink pump.
-  // Also drives decode.ts's sequential exportIterator path that avoids the avc1
-  // seek-storm at tail (130ms per seek) seen on Linux mp4. The flag was added in
-  // 21f6199, lost in 891c233's revert, and left dead in 6cde3e6 so export fell
-  // back to runPump and stuck at 14.8s (see decode logs: repeated seek 14.800 → 14.760).
+  // Also drives decode.ts's sequential exportIterator path.
   if (typeof window !== "undefined") (window as unknown as { __isExporting?: boolean }).__isExporting = true;
   // Reset sequential iterator so a second export starts from 0, not EOS.
   try {

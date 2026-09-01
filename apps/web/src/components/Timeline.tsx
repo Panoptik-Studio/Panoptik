@@ -1,9 +1,6 @@
 /**
- * OWNER: DEV B — Poindeo-like timeline (shell-timeline 220px, resizable, with
- * canvas scroll area, playhead, and full controls bar). Keeps existing store
- * wiring (segment filmstrip, zoom diamonds, seeking, split, speed) inside the
- * new shell. Timeline time is ON-TIMELINE; segments are laid out by
- * segmentDuration / projectDuration; diamonds/edits target the selected segment.
+ * Timeline: scroll area, playhead, and controls. Segments are laid out by
+ * duration with segment filmstrip, zoom diamonds, seeking and split support.
  */
 "use client";
 

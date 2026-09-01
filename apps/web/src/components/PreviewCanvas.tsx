@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV B — ROADMAP-B.md Task 2.2 + 2.4.
  * Interactive canvas: zoom click interaction, focal dot dragging, rAF playback loop.
  * Keyboard undo/redo (Cmd+Z / Cmd+Shift+Z).
  * Per-segment: everything the preview draws resolves the ACTIVE segment at the
@@ -1043,7 +1042,7 @@ export function PreviewCanvas() {
     return () => window.removeEventListener("panoptik:frame-dirty", onDirty);
   }, [project]);
 
-  // ── Keyboard undo/redo + moment mark (Phase 2.4 + 3.3) ──
+  // ── Keyboard undo/redo + moment mark ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;

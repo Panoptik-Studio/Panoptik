@@ -1,5 +1,5 @@
 /**
- * Audio panel (Phase 2): import music, adjust volume/fades/ducking, and record
+ * Audio panel: import music, adjust volume/fades/ducking, and record
  * voiceover takes. Tracks are project state + OPFS files — the only engine
  * surface used is the helpers already re-exported from @panoptik/engine.
  */

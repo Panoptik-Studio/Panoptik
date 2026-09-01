@@ -1,9 +1,7 @@
 /**
- * OWNER: DEV A — ROADMAP-A.md Tasks 3.4/3.5.
- * Zoom inspector: depth / duration / easing / focal / delete for selectedZoomId
- * (a field in B's store — consume, never edit the store file).
+ * Zoom inspector: depth / duration / easing / focal / delete for selected zoom.
  * Zoom points live on the selected segment, so lookups and the seek-to-keyframe
- * (on-timeline) both go through it.
+ * both go through it.
  */
 "use client";
 

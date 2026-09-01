@@ -1,9 +1,5 @@
 /**
- * @panoptik/schema — THE LOCKED CONTRACT (v1.1)
- *
- * OWNER: JOINT — DEV A + DEV B. Changes require both devs present (ROADMAP Task 0.1).
- * Delta vs Spec.md: Background is a discriminated union, GIF cut from ExportOpts,
- * engine gains prepareFrame/getAudioBuffer, renderFrame is sync off an internal cache.
+ * @panoptik/schema — project types and migration.
  */
 
 export type ZoomPoint = {

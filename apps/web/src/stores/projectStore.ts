@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV B — full staged-diff state model per ROADMAP-B.md Task 1.2.
  * Staged* arrays are first-class in Project — ghosts are data, not UI state.
  * The only write path is commitAll(), gated by human confirmation.
  */
@@ -525,7 +524,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     pushHistoryAndSet(project, s, set);
   },
 
-  // ── Audio tracks (Phase 2) ──
+  // ── Audio tracks ──
 
   addAudioTrack: (track) => {
     const s = get();

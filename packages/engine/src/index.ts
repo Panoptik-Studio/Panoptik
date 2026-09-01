@@ -1,9 +1,5 @@
 /**
  * @panoptik/engine — browser-native media pipeline.
- *
- * OWNERSHIP (ROADMAP-A/B.md matrices — do not cross these lines):
- *   DEV A: decode.ts, render.ts, encode.ts, audio.ts, layout.ts, test-fixtures.ts
- *   DEV B: record.ts, opfs.ts (re-exported below in the B-region)
  */
 
 import type { AudioTrack, ExportOpts, Media, Project, Segment } from "@panoptik/schema";
@@ -109,5 +105,3 @@ export * from "./analysis/selfEval";
 
 // Project Package Export / Import Module
 export * from "./projectPackage";
-
-// ── #endregion ──

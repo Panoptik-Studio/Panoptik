@@ -1,11 +1,8 @@
 /**
- * OWNER: DEV B — dual-stream capture (ROADMAP-B.md Task 2.5).
- * Supports layout modes + device selection, like the reference recorder
- * but on our stack (getDisplayMedia / getUserMedia / MediaRecorder only).
+ * Dual-stream capture supporting layout modes + device selection.
  * screenOnly → screenStream + no facecam
  * screenAndCamera → screenStream + facecam (video + mic)
  * cameraOnly → facecam only (no screen)
- * Blobs become a project via engine.loadRecording(...) — DEV A's decode.ts handles demux.
  */
 
 export type RecordingLayout = "screenOnly" | "screenAndCamera" | "cameraOnly";

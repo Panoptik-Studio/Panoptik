@@ -1,8 +1,6 @@
 /**
- * OWNER: DEV A — ROADMAP-A.md Task 2.3. UNIFIED with decode.ts:
- * the same mediabunny Input opened by loadClip also yields AudioBufferSink
- * (single-pass demux — no duplicate container parsing or inter-module races).
- * Signature: getAudioBuffer(project): Promise<AudioBuffer | null>
+ * Unified audio extraction: the same mediabunny Input also yields AudioBufferSink
+ * (single-pass demux).
  * Concatenates buffer chunks at running offsets into one AudioBuffer.
  */
 import type { Project } from "@panoptik/schema";

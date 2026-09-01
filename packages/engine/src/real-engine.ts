@@ -1,6 +1,5 @@
 /**
- * OWNER: DEV A — Concrete MediaEngine implementation.
- * Wires decode.ts → render.ts → audio.ts into the MediaEngine interface.
+ * Concrete MediaEngine implementation wiring decode, render and audio.
  * Preview and export share renderFrame + prepareFrame.
  */
 import type { Media, Project, Segment } from "@panoptik/schema";

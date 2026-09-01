@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV A — ROADMAP-A.md Tasks 1.5 + 2.4.
  * Header bar — 64px, canvas #fff, hairline, ink, blue hover.
  * All buttons use 13px radius like homepage Open editor.
  */

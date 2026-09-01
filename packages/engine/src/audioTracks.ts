@@ -1,8 +1,6 @@
 /**
- * AudioTrack helpers (Phase 2): decoded-buffer registry, volume/fade envelopes,
- * dialogue ducking, and wall-clock timeline mixing. Pure TS — runs under node
- * for tests and in the browser for preview/export. Music/voiceover ignore
- * segment speed by design: they play on wall-clock timeline time.
+ * AudioTrack helpers: decoded-buffer registry, volume/fade envelopes,
+ * dialogue ducking, and wall-clock timeline mixing.
  */
 import type { AudioTrack } from "@panoptik/schema";
 import { makeBuffer } from "./timeStretch";

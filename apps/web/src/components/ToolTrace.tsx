@@ -1,6 +1,3 @@
-/**
- * OWNER: DEV B — ToolTrace panel — Vercel ex-toast / card-soft style.
- */
 "use client";
 
 import { useEffect, useState } from "react";

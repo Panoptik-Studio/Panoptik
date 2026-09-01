@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV A — ROADMAP-A.md Task 1.4.
  * mediabunny CanvasSink decode path driven by one sequential pipeline.
  *
  * `prepareFrame(t)` is pull-based but strictly serialized: concurrent callers

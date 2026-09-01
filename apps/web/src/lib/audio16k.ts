@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV B — ROADMAP-B.md Task 3.1.
  * AudioBuffer → mono Float32Array @16kHz via OfflineAudioContext resample.
  * Used to feed Whisper worker which requires Float32 PCM @16kHz.
  */

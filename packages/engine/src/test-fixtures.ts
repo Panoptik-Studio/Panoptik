@@ -1,5 +1,5 @@
 /**
- * OWNER: DEV A — shared fixture. Imported by BOTH devs' tests/mocks.
+ * Shared test fixture.
  */
 import type { Project } from "@panoptik/schema";
 

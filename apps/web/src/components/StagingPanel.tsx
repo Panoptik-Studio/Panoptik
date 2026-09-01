@@ -1,9 +1,6 @@
 /**
- * OWNER: DEV A — ROADMAP-A.md Task 3.5.
- * The human-in-the-loop centerpiece: getStagedDiff() counts, per-item rejection
- * (removeStagedZoom / removeStagedTextOverlay),
- * Commit + Discard buttons, pending-background badge. All store consumption,
- * no store-file edits.
+ * Human-in-the-loop staging panel: diff counts, per-item rejection,
+ * commit + discard actions and pending background indicator.
  */
 "use client";
 

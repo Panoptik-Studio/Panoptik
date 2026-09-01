@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV B — ROADMAP-B.md Task 4.2.
  * ex-modal-card — white, rounded lg, Level 5 shadow, pill buttons (black→blue).
  */
 "use client";

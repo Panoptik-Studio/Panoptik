@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV B — ROADMAP-B.md Task 2.1.
  * Pure geometry helpers for zoom interaction on the canvas.
  * All coords are FRAME-relative (normalized 0-1).
  */

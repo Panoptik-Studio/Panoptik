@@ -1,5 +1,5 @@
 /**
- * OWNER: DEV B — OPFS project persistence (ROADMAP-B.md Task 2.6).
+ * OPFS project persistence.
  * Layout under navigator.storage.getDirectory():
  *   <project.id>/project.json · clip.webm · facecam.webm (optional)
  * Degrades gracefully off secure context.
@@ -555,7 +555,7 @@ export async function listProjects(): Promise<{ id: string; name: string }[]> {
   return projects;
 }
 
-// ── Audio track files (Phase 2) ─────────────────────────────────────────────
+// ── Audio track files ───────────────────────────────────────────────────────
 function audioExt(type: string): string {
   if (type.includes("mpeg")) return "mp3";
   if (type.includes("wav")) return "wav";

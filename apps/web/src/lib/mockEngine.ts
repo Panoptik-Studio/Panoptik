@@ -1,8 +1,3 @@
-/**
- * OWNER: DEV B — placeholder renderer used until the Day-3 integration swap.
- * Full drawing behavior per ROADMAP-B.md "Your test fixture" section.
- * A owns lib/engineProvider.ts (the switch); never edit that file.
- */
 import type { Project } from "@panoptik/schema";
 import { mockProject } from "../../../../packages/engine/src/test-fixtures";
 

@@ -1,6 +1,5 @@
 /**
- * OWNER: DEV A — ROADMAP-A.md Tasks 1.3 + 2.1.
- * getCameraTransform (sequential fold, ignores staged points) + renderFrame
+ * Camera transform (sequential fold, ignores staged points) + renderFrame
  * composition pipeline (background → letterboxed zoomed frame → facecam PiP →
  * text overlays; staged text drawn amber #f59e0b).
  * Keyframe semantics: at k.t ease FROM current state TO k.to over k.dur, then hold.
@@ -976,9 +975,8 @@ function drawTextOverlays(
 }
 
 // ── Facecam PiP ──────────────────────────────────────────────────────────────
-// Private Map<url, HTMLVideoElement>; lazy <video muted playsinline>; seek
-// currentTime = t % duration pre-draw; rounded-corner PiP at facecam.x/y/size
-// in screen space (never zoomed). Spec.md: x/y = top-left 0-1, size = 0-1 of canvas width.
+// Lazy <video muted playsinline>; seek currentTime = t % duration pre-draw;
+// rounded-corner PiP at facecam.x/y/size in screen space (never zoomed).
 const facecamCache = new Map<string, HTMLVideoElement>();
 
 // Injected by decode.ts. Kept as callbacks because decode.ts already imports

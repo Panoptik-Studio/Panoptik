@@ -1,6 +1,5 @@
 /**
- * @panoptik/utils — easing functions + registry.
- * OWNER: DEV A (see ROADMAP-A.md ownership matrix).
+ * Easing functions + registry.
  */
 
 export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;

@@ -1,9 +1,5 @@
 /**
- * OWNER: DEV B — OPFS project browser: autosave, restore, delete.
- *
- * The clip only ever lived in memory, so a reload lost it. Media is written to
- * OPFS once on import, edits are written as JSON on a debounce, and the last
- * project is reopened on mount.
+ * Project browser: persistent storage and library management via OPFS.
  */
 "use client";
 

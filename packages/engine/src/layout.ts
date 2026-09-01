@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV A — ROADMAP-A.md Task 2.1.
  * Letterbox math. All normalized coords (zoom focal, facecam)
  * are relative to this FRAME rect, never the raw canvas.
  */

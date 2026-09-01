@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV B — ReshootModal.
  * Dedicated workflow for reshooting / re-recording the facecam (webcam + mic)
  * without re-recording the screen. Plays the canvas timeline in real-time from
  * the current slider/playhead position so the user can narrate along with the screen video.

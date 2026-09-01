@@ -1,5 +1,4 @@
 /**
- * OWNER: DEV B — RecordModal.
  * Inspired by the reference recorder (screen+camera PiP, layout modes, shape, teleprompter)
  * but built on our stack: Next.js + Zustand + Tailwind, no MUI/framer.
  * Features: layout switcher (screen/screen+cam/cam only), circle/square PiP,
