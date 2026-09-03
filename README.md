@@ -1,181 +1,141 @@
 # Panoptik
 
-Panoptik is an open-source, client-side demo video editor and screen recording studio. It runs entirely in the browser using WebCodecs, HTML5 Canvas, and mediabunny, enabling high-performance video editing, keyframe zooming, multi-track audio control, smooth split transitions, and AI co-editing via WebMCP without uploading media to external servers.
+**A browser-native demo-video studio that an AI agent can edit alongside you.**
+
+Built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/).
+
+🔗 **Live demo:** _add your URL_ · 🎬 **Demo video:** _add your URL_
 
 ---
 
-## Highlights
+## What we made
 
-- **100% Client-Side Processing**: All video decoding, rendering, audio mixing, and encoding happen directly inside your browser. No server rendering, no external media uploads, and no API keys required.
-- **WebMCP AI Co-Editing**: Standardized tool interface exposing project state, keyframe creation, captioning, timeline trimming, and export controls to AI agents (such as in the ChatGPT browser or Chrome with `#enable-webmcp-testing`).
-- **Dynamic Zoom Keyframes**: Point-and-click focal zoom configuration with smooth easing curves, adjustable hold durations, and keyboard deletion (`Del` / `Backspace`).
-- **Symmetrical Distributed Transitions**: Seamless transitions between clips (Fade, Dip to Black, Slide Left/Right, Zoom In, Wipe) that occupy both adjacent clips equally across the cut boundary.
-- **Facecam Picture-in-Picture with Styling**: Customizable camera PiP with selectable shapes (Circle, Square), border width sliders, custom border colors, drop shadow / glow controls, and smooth cross-clip morphing.
-- **Multi-Track Audio Engine with Auto-Ducking**: Separate screen audio, microphone, voiceover, and music tracks with independent volume sliders, WSOLA pitch-preserving time-stretching, and dialogue auto-ducking.
-- **Origin Private File System (OPFS) Persistence**: Projects, takes, background images, and audio tracks persist locally across page refreshes.
-- **Hardware-Accelerated Export**: Real-time and faster-than-realtime video encoding into MP4 (H.264 / AAC) and WebM (VP9 / Opus) at 720p, 1080p, and 4K with configurable frame rates (24, 30, 60 fps).
+Panoptik is a screen-recording and video editor that runs entirely in the browser — decode, render, audio mixing, and export all happen client-side via WebCodecs and Canvas2D. No uploads, no render farm.
 
----
+The part that matters for this challenge: **the editor exposes itself to AI agents as 30 WebMCP tools.** An agent running in ChatGPT's in-app browser (or Chrome with the WebMCP flag) can read the project, watch the rendered preview, and propose a complete edit — zooms, cuts, captions, transitions, backgrounds — as a **staged diff** you review and commit.
 
-## WebMCP (Web Model Context Protocol) Integration
+The agent proposes. The human disposes. Nothing is written to the project without a click.
 
-Panoptik implements a complete suite of in-browser WebMCP tools that enable AI models to inspect and edit video projects collaboratively.
+## Why WebMCP, and not something else
 
-### Tool Catalog
+Editing video is the rare task where the agent genuinely has to be *inside the page*:
 
-| Tool                     | Type                   | Description                                                                                                                         |
-| --------------------------| ------------------------| -------------------------------------------------------------------------------------------------------------------------------------|
-| `get_project_state`      | Read-Only              | Returns complete project summary: duration, dimensions, segments, zoom points, text overlays, audio tracks, facecam, and click log. |
-| `list_scenes`            | Read-Only              | Returns timeline scenes with cumulative start/end timestamps, durations, and transitions.                                           |
-| `get_click_log`          | Read-Only              | Returns user mouse-click interaction timestamps with recommendations for zoom keyframe placement.                                   |
-| `propose_zoom_points`    | Staging                | Stages zoom-in keyframes as ghost diamonds on the timeline for human review.                                                        |
-| `add_text_overlay`       | Staging                | Stages text annotations/captions at specified timestamps and positions (`top`, `bottom`, `center`).                                 |
-| `set_background`         | Staging                | Stages solid colors or 2-stop linear gradient stage backgrounds.                                                                    |
-| `generate_captions`      | Staging                | Stages auto-caption annotations across the clip.                                                                                    |
-| `split_segment`          | Action (Confirm-Gated) | Prompts human confirmation and splits clip at timeline timestamp `t`.                                                               |
-| `set_speed`              | Action                 | Changes playback speed multiplier (0.5x, 1x, 1.5x, 2x) with WSOLA pitch correction.                                                 |
-| `set_aspect`             | Action                 | Changes stage aspect ratio (`16:9`, `9:16`, `1:1`, `4:3`, `source`).                                                                |
-| `add_music`              | Action                 | Places audio tracks onto the timeline at `startT`.                                                                                  |
-| `commit_staged_changes`  | Action (Confirm-Gated) | Shows staged diff dialog; on confirmation, commits all staged proposals permanently.                                                |
-| `discard_staged_changes` | Action                 | Clears all pending staged proposals without committing them.                                                                        |
-| `export_clip`            | Action (Confirm-Gated) | Prompts confirmation and encodes video locally via WebCodecs returning a download URL.                                              |
+- **The interesting moments are only visible in the rendered canvas.** "The user clicked Login at 0:08" isn't in the DOM or in any serializable state — it's pixels. A browser-resident agent can already see them. WebMCP gives it a way to *act* on what it sees.
+- **A backend MCP server can't reach any of this.** The media lives in OPFS, the project state lives in a Zustand store, the frames live in a canvas. There is no server copy to hand a server-side tool.
+- **DOM-driving is the alternative, and it's bad.** Without WebMCP the agent would screenshot the UI, hunt for the timeline, convert "8.0 seconds" into a pixel offset, and drag a diamond. That's ~150KB of screenshots and DOM per action, and it misses. `propose_edits([...])` is one structured call, ~2KB, and it either validates or fails loudly.
 
-### How to Test WebMCP
-1. **Chrome WebMCP Testing**: Open Chrome and enable `chrome://flags/#enable-webmcp-testing`.
-2. **ChatGPT In-App Browser**: Open Panoptik inside the ChatGPT web browser to let the model invoke tools.
-3. **AI Video Director Guide**: Read the comprehensive [LLM AI Video Director Guide](docs/LLM_WEBMCP_DIRECTOR_GUIDE.md) for step-by-step reasoning protocols and examples.
-4. **Browser Console**: Call tools directly from the DevTools console:
-   ```javascript
-   await window.__panoptik_call_tool("get_project_state");
-   await window.__panoptik_call_tool("propose_zoom_points", { timestamps: [2.5, 6.0], scale: 2.2 });
-   ```
-4. **Live Tool Trace**: View all agent calls, inputs, durations, and outputs in the **Agent Tool Trace** panel in the inspector.
+So: the agent's vision answers *what's interesting*; WebMCP answers *make it happen*.
 
----
+## Architecture
 
-## Repository Structure
+```mermaid
+flowchart TD
+    A["🤖 Agent — ChatGPT in-app browser / Chrome"]
 
-The project is structured as a pnpm monorepo:
+    A -->|"1 · read<br/>get_video_summary, probe_frames"| T
+    A -->|"2 · propose<br/>propose_edits"| T
 
-```
-Panoptik/
-├── apps/
-│   └── web/                     # Next.js 15 web application and editor interface
-│       ├── src/
-│       │   ├── app/             # Application routes (/projects, /editor)
-│       │   ├── components/      # UI components (Timeline, PreviewCanvas, StageControls, CameraControls, etc.)
-│       │   ├── stores/          # Zustand project store with undo/redo history
-│       │   ├── lib/             # Persistence, thumbnail extraction, export drivers
-│       │   └── webmcp/          # WebMCP tool declarations, lifecycle handlers, and validation tests
-│       └── public/              # Static assets
-├── packages/
-│   ├── engine/                  # Core video and audio processing engine
-│   │   ├── src/
-│   │   │   ├── decode.ts        # Video decoding pipeline and frame extraction
-│   │   │   ├── render.ts        # Canvas2D frame renderer with distributed transitions and facecam styling
-│   │   │   ├── encode.ts        # WebCodecs encoding and multi-track audio export
-│   │   │   ├── audio.ts         # Audio extraction, routing, and Web Audio mixing
-│   │   │   ├── audioTracks.ts   # Multi-track layering, volume envelopes, and ducking
-│   │   │   ├── timeStretch.ts   # Pitch-preserving WSOLA audio stretching algorithm
-│   │   │   ├── record.ts        # Dual-stream screen and webcam recording
-│   │   │   ├── opfs.ts          # Origin Private File System storage layer
-│   │   │   └── layout.ts        # Viewport framing and aspect ratio math
-│   ├── project-schema/          # TypeScript schemas and migration logic
-│   └── utils/                   # Shared mathematics, easings, and utility functions
+    T["<b>WebMCP layer</b> — 30 tools<br/>document.modelContext.registerTool()"]
+    T --> S["<b>Snapping + dual time-space</b><br/>word-boundary safe · timeline ↔ source rebase"]
+    S --> G["<b>Staged ghost edits</b><br/>shown as a reviewable diff"]
+
+    H["👤 Human"] -->|"3 · review & commit"| G
+    G --> P["<b>Project store</b> — Zustand + OPFS"]
+
+    P --> R["Canvas2D renderer → live preview"]
+    P --> E["WebCodecs encoder → MP4 / WebM"]
+
+    R -.->|"agent and human see the same frame"| A
 ```
 
----
+Two design decisions carry most of the weight:
 
-## Core Capabilities
+**Dual time-space.** Panoptik stores edits in absolute *source* seconds; agents reason in *timeline* seconds. Cuts and speed changes make those diverge. Every tool boundary translates between them, so an agent's timestamps stay correct even after the timeline has been re-cut underneath it.
 
-### 1. Recording & Reshoots
-- Record screen and camera simultaneously into dedicated media tracks.
-- Select audio input sources with options for screen audio, microphone, or both.
-- Reshoot specific facecam segments while preserving original screen footage and sync.
+**Deterministic snapping.** Agent-proposed edits are not applied verbatim. They're snapped: cuts avoid word boundaries (±150ms), zooms centre on real click telemetry, transitions resolve collisions, speed ops are kept from overlapping. The model supplies intent; the engine enforces correctness.
 
-### 2. Zoom & Camera Motion
-- Point-and-click focal point zoom configuration on the preview canvas.
-- Configurable zoom scales (1.0x to 5.0x), transition durations, hold windows, and easing curves.
-- Instant, non-destructive editing with keyboard deletion (`Del` / `Backspace`).
+## The tools
 
-### 3. Distributed Clip Transitions
-- Smooth symmetrical transitions across cuts (Fade, Dip to Black, Slide Left/Right, Zoom In, Wipe).
-- 50/50 time distribution across outgoing and incoming clips.
-- Facecam PiP smoothly glides, morphs, and resizes across segment splits.
+<details>
+<summary><b>Read</b> — understand the video (10 tools)</summary>
 
-### 4. Facecam Picture-in-Picture Styling
-- Shapes: Circle and Square with customizable corner radius.
-- Adjustable border width (0 to 12px) with preset colors and custom hex color picker.
-- Drop shadow and glow effects with configurable blur radius (0 to 48px) and shadow color.
+`get_video_summary` · `get_scene_detail` · `get_project_state` · `list_clips` · `list_scenes` · `get_transcript` · `get_silence_intervals` · `get_click_log` · `inspect_timeline` · `get_director_guidelines`
 
-### 5. Multi-Track Audio & Pitch-Preserving Speed
-- Independent volume control for screen audio, microphone, voiceover, and background music.
-- Auto-ducking algorithm lowers music volume under dialogue automatically.
-- WSOLA (Waveform Similarity Overlap-Add) preserves natural voice pitch when clip speed is altered.
+`get_video_summary` is the entry point: transcript phrases, scene breakdown, silence intervals, dead air, facecam position, and the director playbook — in one call. `get_scene_detail` drills into a single scene rather than paying for the whole thing.
+</details>
 
----
+<details>
+<summary><b>See</b> — ground claims in actual pixels (2 tools)</summary>
 
-## Quickstart
+`probe_frames` — samples frames at given timestamps, returns base64 snapshots with an optional A1–C3 grid overlay for visual grounding.
 
-### Prerequisites
-- Node.js 20+ (recommended: Node 20.19.6 or Node 24)
-- pnpm 9+ or 10+
-- Chromium-based browser (Chrome, Edge, Brave 110+) supporting WebCodecs and OPFS.
+`locate_visual_target` — turns "zoom on the search bar" into a safe focal point via three tiers: click telemetry (confidence 1.0) → parsed VLM bounding box / grid cell → centred fallback.
+</details>
 
-### Installation
+<details>
+<summary><b>Edit</b> — propose changes (13 tools)</summary>
+
+`propose_edits` — the main tool: one atomic batch of cut / zoom / text / speed / transition / background ops, snapped and applied together.
+
+Single-purpose tools for narrower asks: `propose_zoom_points` · `add_text_overlay` · `generate_captions` · `set_background` · `split_clip` · `delete_clip` · `set_clip_transition` · `set_clip_speed` · `set_aspect` · `add_music`, plus `split_segment` and `set_speed` kept as compatibility aliases.
+</details>
+
+<details>
+<summary><b>Commit & export</b> — human-gated (5 tools)</summary>
+
+`commit_staged_changes` (opens the diff dialog) · `discard_staged_changes` · `export_clip` (confirm-gated, encodes locally and hands back a download) · `ai_auto_director` (one-click full edit plan) · `cloud_transcribe`
+</details>
+
+## Try it
 
 ```bash
-# Clone the repository
 git clone https://github.com/Panoptik-Studio/Panoptik.git
 cd Panoptik
-
-# Install dependencies
 pnpm install
-```
-
-### Development Server
-
-```bash
-# Start the local development server
 pnpm dev
 ```
 
-Open [http://localhost:3000/editor](http://localhost:3000/editor) in your browser.
+Open <http://localhost:3000/editor>. Requires Node 20+ and a Chromium browser (WebCodecs + OPFS).
 
-### Building for Production
+**To drive it with an agent:**
 
-```bash
-# Build all packages and generate static output
-pnpm build
+1. **ChatGPT in-app browser** — open Panoptik there and the tools register themselves.
+2. **Chrome** — enable `chrome://flags/#enable-webmcp-testing`.
+3. **DevTools console** — no agent needed:
+   ```js
+   await window.__panoptik_call_tool("get_video_summary");
+   await window.__panoptik_call_tool("propose_zoom_points", { timestamps: [2.5, 6.0], scale: 2.2 });
+   ```
+
+Every call — input, duration, output — shows up live in the **Agent Tool Trace** panel. The full agent protocol is in [docs/LLM_WEBMCP_DIRECTOR_GUIDE.md](docs/LLM_WEBMCP_DIRECTOR_GUIDE.md).
+
+## What stays on your machine
+
+All video work is local: decoding, rendering, zoom, transitions, audio mixing, and MP4/WebM export never touch a network.
+
+The exceptions are opt-in and named as such: speech-to-text (Groq Whisper, via your own key or a hosted proxy) and `ai_auto_director`. **Air-gapped mode** blocks both and keeps the local tool pipeline working.
+
+## Repo layout
+
+```
+apps/web/           Next.js editor
+  src/webmcp/         ← the WebMCP layer: tools, snapping, time-space, lifecycle
+  src/components/     Timeline, PreviewCanvas, Inspector, ToolTrace
+  src/stores/         Zustand project store with undo/redo
+packages/engine/    decode · render · encode · audio · timeStretch · record · opfs
+packages/project-schema/   Project types + migrations
+packages/utils/     Shared math and easings
 ```
 
-The production bundle will be output to `apps/web/out`.
-
----
-
-## Quality Assurance & Testing
-
-The repository maintains an automated test suite across the engine, project schema, audio processing, layout math, WebMCP tools, and web stores.
-
 ```bash
-# Run all unit and integration test suites
-pnpm test
-
-# Run TypeScript typechecks across all monorepo packages
-pnpm typecheck
+pnpm test        # unit + integration suites
+pnpm typecheck   # tsc across the monorepo
 ```
 
----
+## Also in the box
 
-## Browser Requirements & Security
-
-- **Secure Context**: WebCodecs, MediaRecorder, and OPFS require a Secure Context (`https://` or `http://localhost`).
-- **WebCodecs Support**: Supported natively in Chromium 110+, Safari 16.4+, and Firefox 130+ (with media flags enabled).
-- **Origin Private File System (OPFS)**: Used for persistent local caching of project recordings, background assets, and audio tracks.
-
----
+Zoom keyframes with easing · distributed cross-cut transitions (fade, dip, slide, wipe, zoom) · facecam PiP with shape/border/glow styling that morphs across cuts · multi-track audio with auto-ducking · WSOLA pitch-preserving speed changes · OPFS project persistence · export to MP4 (H.264/AAC) or WebM (VP9/Opus) at up to 4K/60.
 
 ## License
 
-- Web application (`apps/web`): AGPL-3.0 License.
-- Media engine (`packages/engine`, `packages/project-schema`, `packages/utils`): MIT License.
+AGPL-3.0 for the app (`apps/web`); MIT for the engine and schema packages.
