@@ -70,7 +70,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     });
   }
 
-  // Auth extraction: JWT or BYOK
+  // Auth: optional. Free anonymous via platform key (env.GROQ_API_KEY etc.),
+  // BYOK override via x-panoptik headers, or Pro JWT if present.
   const authHeader = request.headers.get("Authorization") ?? "";
   const byokKey = request.headers.get("x-panoptik-byok-key");
   const byokProvider = request.headers.get("x-panoptik-provider");
@@ -102,12 +103,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         );
       }
     }
-  } else if (!byokKey) {
-    return new Response(
-      JSON.stringify({ error: "UNAUTHORIZED", message: "Missing Authorization Bearer token or BYOK key." }),
-      { status: 401, headers: corsHeaders },
-    );
   }
+  // else: anonymous free — no 401. Requests without auth use the platform
+  // keys in Worker secrets. BYOK headers (if any) are honored per-provider below.
 
   // Route: /v1/ai/transcribe
   if (url.pathname === "/v1/ai/transcribe" && request.method === "POST") {
@@ -442,3 +440,11 @@ Generate the final JSON edit plan now:`;
     ],
   };
 }
+
+// Cloudflare Workers module entrypoint — required for `wrangler deploy`.
+// Without this default export Wrangler fails with "No event handlers registered".
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    return handleRequest(request, env);
+  },
+};

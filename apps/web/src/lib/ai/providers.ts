@@ -1,9 +1,14 @@
 /**
  * AI Provider Adapters for Panoptik.
- * Normalizes transcription interactions across:
- * 1. Direct Groq Whisper Large v3 Turbo (Client-side BYOK with generous 28.8k sec/day free tier)
- * 2. Panoptik Pro Hosted Proxy
- * 3. Offline WASM Fallback
+ * Free-by-default pattern for Vercel static deploy:
+ * 1. User-supplied BYOK Groq key (localStorage only, never bundled) -> direct
+ *    Groq Whisper Large v3 Turbo call from the browser. Fast, user's own quota.
+ * 2. Anonymous free -> hosted Cloudflare proxy (Worker secrets hold the
+ *    platform GROQ_API_KEY). No login required. BYOK headers forwarded if present.
+ * 3. Offline WASM fallback / air-gapped block.
+ *
+ * No platform API keys are bundled in this file. Anything shipped to the
+ * browser is public by definition — secrets must live in the proxy Worker env.
  */
 
 import { getSessionToken } from "./authClient";
@@ -41,8 +46,8 @@ export interface AIProviderConfig {
   airGappedMode?: boolean;
 }
 
-const DEFAULT_PROXY_URL = "https://proxy.panoptik.app";
-export const DEFAULT_GROQ_KEY = "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";
+const DEFAULT_PROXY_URL =
+  process.env.NEXT_PUBLIC_PANOPTIK_PROXY_URL || "https://proxy.panoptik.app";
 
 /** Provider that produced the last transcription — surfaced in tool responses. */
 let lastTranscriptionProvider = "unknown";
@@ -65,10 +70,10 @@ function resolveConfig(config: AIProviderConfig = {}): AIProviderConfig {
       // ignore
     }
 
-    // If no custom key was stored yet in browser, provide DEFAULT_GROQ_KEY for out-of-the-box transcription
-    if (!storedKeys?.groq && !storedKeys?.openai && !storedKeys?.deepgram && !config.byokKeys?.groq) {
-      storedKeys = { ...storedKeys, groq: DEFAULT_GROQ_KEY };
-    }
+    // NOTE: no default platform key is injected here. If the user pasted their
+    // own Groq key (BYOK) it stays in their own localStorage and is used for a
+    // direct call below. Otherwise transcription goes via the hosted proxy
+    // with a Pro JWT or a BYOK key forwarded in headers.
   }
 
   return {
@@ -100,13 +105,12 @@ export async function transcribeAudioStream(
   const groqKey = config.byokKeys?.groq;
   const byokKey = groqKey || config.byokKeys?.deepgram || config.byokKeys?.openai;
 
-  if (!token && !byokKey) {
-    throw new Error("No active Panoptik Pro session or BYOK API key provided.");
-  }
+  // Free by default: no token/BYOK required — anonymous requests use the
+  // platform key in the proxy Worker. BYOK (if present) uses its own quota.
 
-  // 1. Groq is the PREFERRED transcription path — used whenever a Groq key is
-  // available (the default key ships out-of-the-box), including during Pro
-  // sessions. Direct fetch ~2.5s; the proxy below is only the fallback.
+  // 1. Direct Groq is BYOK-only — used only when the user explicitly supplied
+  // their own Groq key (stored in their own localStorage, never bundled).
+  // Direct fetch ~2.5s; the proxy below is the default path for Pro sessions.
   if (groqKey) {
     lastTranscriptionProvider = "groq";
     try {
@@ -199,7 +203,8 @@ export async function transcribeAudioStream(
     }
   }
 
-  // 2. Proxy Fallback / Pro Gateway
+  // 2. Proxy (free default) — anonymous uses platform key server-side.
+  // BYOK headers forwarded when the user supplied their own key.
   lastTranscriptionProvider = "proxy";
   const proxyUrl = config.proxyUrl || DEFAULT_PROXY_URL;
   const headers: Record<string, string> = {};
@@ -242,9 +247,7 @@ export async function runAutoDirector(
   const token = getSessionToken();
   const byokKey = config.byokKeys?.anthropic || config.byokKeys?.gemini || config.byokKeys?.openai;
 
-  if (!token && !byokKey) {
-    throw new Error("No active Panoptik Pro session or BYOK API key provided.");
-  }
+  // Free by default: anonymous requests use the platform key in the proxy Worker.
 
   const proxyUrl = config.proxyUrl || DEFAULT_PROXY_URL;
   const headers: Record<string, string> = {

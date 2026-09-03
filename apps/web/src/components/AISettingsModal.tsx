@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState } from "react";
 import { getSessionInfo } from "../lib/ai/authClient";
-import { DEFAULT_GROQ_KEY } from "../lib/ai/providers";
 
 interface AISettingsModalProps {
   isOpen: boolean;
@@ -21,9 +20,9 @@ export function AISettingsModal({ isOpen, onClose }: AISettingsModalProps) {
       setAirGapped(localStorage.getItem("panoptik:air_gapped") === "true");
       try {
         const byok = JSON.parse(localStorage.getItem("panoptik:byok_keys") || "{}");
-        setGroqKey(byok.groq || DEFAULT_GROQ_KEY);
+        setGroqKey(byok.groq || "");
       } catch {
-        setGroqKey(DEFAULT_GROQ_KEY);
+        setGroqKey("");
       }
     }
   }, [isOpen]);
@@ -31,8 +30,10 @@ export function AISettingsModal({ isOpen, onClose }: AISettingsModalProps) {
   const onSave = () => {
     if (typeof window !== "undefined") {
       localStorage.setItem("panoptik:air_gapped", airGapped ? "true" : "false");
+      // BYOK is optional. Empty = use Panoptik Pro proxy session.
+      // A pasted key stays in this browser's localStorage only, never bundled.
       const byok = {
-        groq: groqKey.trim() || DEFAULT_GROQ_KEY,
+        groq: groqKey.trim(),
       };
       localStorage.setItem("panoptik:byok_keys", JSON.stringify(byok));
       setSaved(true);
@@ -99,11 +100,11 @@ export function AISettingsModal({ isOpen, onClose }: AISettingsModalProps) {
               </span>
             </div>
             <p className="text-pk-muted text-[11px] mt-1">
-              Ultra-fast speech transcription (~2.5s) with word-level timestamps on Groq&apos;s free tier.
+              Optional: paste your own Groq key for direct ultra-fast transcription (~2.5s) on your quota. Leave blank to use the hosted proxy / Pro session. Your key stays in this browser only.
             </p>
 
             <div className="mt-2.5">
-              <label className="block text-pk-body mb-1 font-medium text-[11px]">Groq API Key (BYOK):</label>
+              <label className="block text-pk-body mb-1 font-medium text-[11px]">Groq API Key (BYOK, optional):</label>
               <input
                 type="password"
                 value={groqKey}

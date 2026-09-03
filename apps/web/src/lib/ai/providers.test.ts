@@ -19,10 +19,21 @@ describe("providers adapter", () => {
     ).rejects.toThrow("Air-gapped mode active");
   });
 
-  it("fails when no session token or BYOK key is provided", async () => {
-    await expect(
-      transcribeAudioStream(new Blob([]), {}),
-    ).rejects.toThrow("No active Panoptik Pro session or BYOK API key");
+  it("allows anonymous free transcription via proxy with no session or BYOK", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        duration: 10.0,
+        words: [{ word: "Hello", start: 0, end: 0.5, speaker: 0 }],
+      }),
+    } as any);
+
+    const res = await transcribeAudioStream(new Blob(["audio"]), { proxyUrl: "https://test-proxy.com" });
+    expect(res.words).toHaveLength(1);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://test-proxy.com/v1/ai/transcribe",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("executes transcription using in-memory Pro session token", async () => {

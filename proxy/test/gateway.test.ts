@@ -23,13 +23,13 @@ describe("Cloudflare Worker AI Gateway", () => {
     expect(data.status).toBe("healthy");
   });
 
-  it("rejects unauthorized requests with no token or BYOK key", async () => {
+  it("allows anonymous free transcription with no token or BYOK key", async () => {
     const req = new Request("https://proxy.panoptik.app/v1/ai/transcribe", {
       method: "POST",
       body: new Blob([new Uint8Array(100)]),
     });
     const res = await handleRequest(req, {});
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
   });
 
   it("accepts valid JWT token and transcribes audio", async () => {
