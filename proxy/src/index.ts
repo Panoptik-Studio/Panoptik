@@ -199,6 +199,10 @@ async function transcribeAudio(
       formData.append("model", "whisper-large-v3");
       formData.append("response_format", "verbose_json");
       formData.append("temperature", "0");
+      // Required: without word granularity, verbose_json omits `words`
+      // and every chunk transcribes to zero captions.
+      formData.append("timestamp_granularities[]", "word");
+      formData.append("timestamp_granularities[]", "segment");
 
       const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
         method: "POST",
@@ -210,12 +214,34 @@ async function transcribeAudio(
 
       if (res.ok) {
         const data = await res.json() as any;
-        const words = (data.words ?? []).map((w: any) => ({
+        let words = (data.words ?? []).map((w: any) => ({
           word: w.word?.trim(),
           start: Number(w.start),
           end: Number(w.end),
           speaker: 0,
-        }));
+        })).filter((w: any) => w.word.length > 0);
+
+        // Fallback: distribute segment text across its window when word
+        // timestamps are absent, so captions degrade instead of vanishing.
+        if (words.length === 0 && Array.isArray(data.segments)) {
+          for (const seg of data.segments) {
+            const segText = (seg.text ?? "").trim();
+            if (!segText) continue;
+            const segWords = segText.split(/\s+/).filter((s: string) => s.length > 0);
+            const segStart = Number(seg.start ?? 0);
+            const segEnd = Number(seg.end ?? segStart + 2);
+            const wordDur = segWords.length > 0 ? (segEnd - segStart) / segWords.length : 0.35;
+            segWords.forEach((sw: string, idx: number) => {
+              words.push({
+                word: sw,
+                start: Number((segStart + idx * wordDur).toFixed(2)),
+                end: Number((segStart + (idx + 1) * wordDur).toFixed(2)),
+                speaker: 0,
+              });
+            });
+          }
+        }
+
         return {
           duration: data.duration ?? 0,
           words,
