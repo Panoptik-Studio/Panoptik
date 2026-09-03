@@ -8,10 +8,16 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       { url: "/favicon.ico" },
+      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-48.png", sizes: "48x48", type: "image/png" },
       { url: "/favicon-32.webp", sizes: "32x32", type: "image/webp" },
       { url: "/favicon-48.webp", sizes: "48x48", type: "image/webp" },
     ],
-    apple: [{ url: "/favicon-180.webp", sizes: "180x180", type: "image/webp" }],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+      { url: "/favicon-180.png", sizes: "180x180", type: "image/png" },
+      { url: "/favicon-180.webp", sizes: "180x180", type: "image/webp" },
+    ],
   },
 };
 
