@@ -155,8 +155,7 @@ describe("Cloudflare Worker AI Gateway", () => {
       expect((capturedBody as FormData).getAll("timestamp_granularities[]")).toContain("word");
     });
 
-    it("falls back to segments when Groq omits word timestamps", async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue({
+    it("falls back to segments when Groq omits word timestamps", async () => {      globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
           duration: 2,
@@ -173,6 +172,41 @@ describe("Cloudflare Worker AI Gateway", () => {
       const data = await res.json() as any;
       expect(data.words.length).toBeGreaterThan(0);
       expect(data.words[0].word).toBe("Hello");
+    });
+
+    it("returns 502 (never mock words) when keys exist but all providers fail", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { message: "Invalid API Key" } }),
+      }) as any;
+
+      const req = new Request("https://proxy.panoptik.app/v1/ai/transcribe", {
+        method: "POST",
+        body: new Blob([new Uint8Array(100)]),
+      });
+      const res = await handleRequest(req, { GROQ_API_KEY: "gsk-test" });
+      expect(res.status).toBe(502);
+      const data = await res.json() as any;
+      expect(data.error).toBe("TRANSCRIPTION_FAILED");
+    });
+
+    it("returns 502 (never a mock plan) when director keys exist but providers fail", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { message: "invalid x-api-key" } }),
+      }) as any;
+
+      const req = new Request("https://proxy.panoptik.app/v1/ai/direct", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ digest: { transcript: "hi" } }),
+      });
+      const res = await handleRequest(req, { ANTHROPIC_API_KEY: "sk-ant-test" });
+      expect(res.status).toBe(502);
+      const data = await res.json() as any;
+      expect(data.error).toBe("DIRECTOR_FAILED");
     });
   });
 });

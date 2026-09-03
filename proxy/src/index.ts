@@ -316,15 +316,21 @@ async function transcribeAudio(
     }
   }
 
-  // Mock fallback if running in test environment with no live API keys
-  return {
-    duration: 10.0,
-    words: [
-      { word: "Welcome", start: 0.0, end: 0.5, speaker: 0 },
-      { word: "to", start: 0.5, end: 0.7, speaker: 0 },
-      { word: "Panoptik", start: 0.7, end: 1.2, speaker: 0 },
-    ],
-  };
+  // Mock only when NO provider keys are configured (dev/test without secrets).
+  // With keys configured, all-failed means a real outage/misconfig and must
+  // surface as an error — never fake captions.
+  if (!groqKey && !deepgramKey && !openaiKey) {
+    return {
+      duration: 10.0,
+      words: [
+        { word: "Welcome", start: 0.0, end: 0.5, speaker: 0 },
+        { word: "to", start: 0.5, end: 0.7, speaker: 0 },
+        { word: "Panoptik", start: 0.7, end: 1.2, speaker: 0 },
+      ],
+    };
+  }
+
+  throw new Error("All transcription providers failed (check Worker secrets and provider status).");
 }
 
 async function executeAutoDirector(
@@ -457,14 +463,19 @@ Generate the final JSON edit plan now:`;
     }
   }
 
-  // Fallback for mock test runs
-  return {
-    plan: "Trimmed 2 dead-air silences and staged 2 click-following zoom keyframes.",
-    ops: [
-      { op: "cut", t: 12.0, dropSilence: true },
-      { op: "zoom", t0: 15.0, t1: 20.0, scale: 2.2 },
-    ],
-  };
+  // Mock only when NO provider keys are configured (dev/test without secrets).
+  // With keys configured, all-failed must surface as an error, never a fake plan.
+  if (!anthropicKey && !geminiKey && !openaiKey) {
+    return {
+      plan: "Trimmed 2 dead-air silences and staged 2 click-following zoom keyframes.",
+      ops: [
+        { op: "cut", t: 12.0, dropSilence: true },
+        { op: "zoom", t0: 15.0, t1: 20.0, scale: 2.2 },
+      ],
+    };
+  }
+
+  throw new Error("All auto-director providers failed (check Worker secrets and provider status).");
 }
 
 // Cloudflare Workers module entrypoint — required for `wrangler deploy`.
