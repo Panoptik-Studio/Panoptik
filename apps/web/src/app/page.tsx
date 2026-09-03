@@ -316,14 +316,6 @@ export default function Home() {
                 <span key={f} style={{ background: "#fff", border: "1px solid #ebebeb", borderRadius: 100, padding: "7px 14px", fontFamily: "var(--font-poppins)", fontSize: 11.5, color: "#555" }}>{f}</span>
               ))}
             </div>
-
-            <div style={{ marginTop: 32, background: "#fff", border: "1px solid #ebebeb", borderRadius: 16, padding: 16, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", maxWidth: 1100, marginLeft: "auto", marginRight: "auto" }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--font-poppins)", fontSize: 12, color: "#1A1A1A" }}>
-                <span style={{ width: 28, height: 28, borderRadius: 8, background: "#1F1F1F", color: "#fff", display: "grid", placeItems: "center", fontSize: 12 }}>▶</span>
-                <span><strong>Tip:</strong> <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "2px 6px", fontFamily: "monospace", fontSize: 11 }}>Space</code> play/pause · <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "2px 6px", fontFamily: "monospace", fontSize: 11 }}>M</code> mark</span>
-              </span>
-              <Link href="/editor" style={{ background: "#1F1F1F", color: "#fff", borderRadius: 100, padding: "10px 18px", fontFamily: "var(--font-poppins)", fontWeight: 500, fontSize: 13, textDecoration: "none" }}>Try in editor →</Link>
-            </div>
           </div>
         </section>
 
@@ -370,7 +362,7 @@ export default function Home() {
                 { c: "Export", q: "Will my work survive a reload?", a: "Yes. Media is written to the browser's file system once and edits autosave as JSON, so closing the tab is safe and your last project reopens on its own. You can also delete a project and its media outright." },
                 { c: "Support", q: "Which browsers work?", a: "Chrome and Edge are the target today, because the capture and encode paths lean on WebCodecs and the floating camera window uses Document Picture-in-Picture. Other browsers are not supported yet." },
               ].map((f, i) => (
-                <details key={i} className="faq-item">
+                <details key={i} name="faq" className="faq-item">
                   <summary className="faq-row">
                     <span style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
                       <span className="faq-cat">{f.c}</span>
