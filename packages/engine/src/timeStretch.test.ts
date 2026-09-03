@@ -113,6 +113,32 @@ describe("segment-windowed audio (sliceAndStretchAudio / concatAudio)", () => {
     const p = makeMock(100, 48000);
     expect(concatAudio([p])).toBe(p);
   });
+
+  it("keeps transient positions across silence at 2x (no progressive lag)", () => {
+    // Regression: the WSOLA best-match search used to take the first
+    // candidate on correlation ties (≈0 in silence), consuming input slower
+    // than the rate — clicks landed late (1.0s → 0.67s) and smeared.
+    const sr = 48000;
+    const len = sr * 4;
+    const data = new Float32Array(len);
+    for (const t of [1.0, 2.0, 3.0]) {
+      const i = Math.round(t * sr);
+      for (let k = 0; k < 32 && i + k < len; k++) data[i + k] = Math.sin((k / 32) * Math.PI);
+    }
+    const src = makeBuffer(1, len, sr, [data]);
+    const out = sliceAndStretchAudio(src, seg(0, 4, 2));
+    expect(out.duration).toBeCloseTo(2.0, 3);
+    const d = out.getChannelData(0)!;
+    for (const expT of [0.5, 1.0, 1.5]) {
+      const c = Math.round(expT * sr);
+      const w = Math.round(0.05 * sr);
+      let peak = 0;
+      for (let i = Math.max(0, c - w); i < Math.min(d.length, c + w); i++) {
+        peak = Math.max(peak, Math.abs(d[i] ?? 0));
+      }
+      expect(peak).toBeGreaterThan(0.2);
+    }
+  });
 });
 
 describe("applyVolume & mixAudio", () => {

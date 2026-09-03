@@ -117,15 +117,22 @@ export function timeStretch(buffer: AudioBuffer, rate: number): AudioBuffer {
     while (curOut < outLen && anaPos < inLen) {
       const lo = Math.max(0, anaPos - R);
       const hi = Math.min(inLen - 1 - OL, anaPos + R);
+      // Bias ties toward anaPos (exact rate advance): in silence every
+      // candidate correlates ~0, and taking the first one (anaPos - R) made
+      // the input run slow — content landed progressively late after gaps.
       let best = anaPos;
-      let bestCorr = -Infinity;
+      let bestCorr = crossCorrelate(ref, anaPos, refOut, curOut, OL);
       for (let cand = lo; cand <= hi; cand++) {
+        if (cand === anaPos) continue;
         const corr = crossCorrelate(ref, cand, refOut, curOut, OL);
         if (corr > bestCorr) {
           bestCorr = corr;
           best = cand;
         }
       }
+      // anaPos can run past the readable window near end-of-input; clamp back
+      // so the tail repeats the last frame instead of writing zeros early.
+      if (hi >= lo) best = Math.max(lo, Math.min(hi, best));
       offsets.push(best);
       // Write this frame's overlap+tail into refOut so the next search has a
       // complete target.

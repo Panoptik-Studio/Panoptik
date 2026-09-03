@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useProjectStore } from "@/stores/projectStore";
-import { decodeViaAudioContext } from "@panoptik/engine";
+import { decodeViaAudioContext, resolveSegment } from "@panoptik/engine";
 import type { TextOverlay } from "@panoptik/schema";
 import {
   CAPTION_PRESETS,
@@ -261,13 +261,15 @@ export function CaptionsPanel() {
 
   // ── Add Manual Caption at Playhead ──
   const handleAddManualCaption = () => {
-    if (!currentSegment) return;
+    if (!project || !currentSegment) return;
     const preset = CAPTION_PRESETS.find((p) => p.id === selectedPresetId) ?? CAPTION_PRESETS[0]!;
 
-    const relTime = Math.max(
-      0,
-      Math.min(currentSegment.srcEnd - currentSegment.srcStart, currentTime),
-    );
+    // Same timeline→source conversion as TextPanel: overlays live in
+    // source-media seconds, the playhead is timeline time.
+    const active = resolveSegment(project, currentTime);
+    const seg = active?.segment ?? currentSegment;
+    const srcT = active ? active.srcT : currentTime;
+    const relTime = Math.max(seg.srcStart, Math.min(seg.srcEnd, srcT));
 
     addTextOverlay({
       kind: "caption",

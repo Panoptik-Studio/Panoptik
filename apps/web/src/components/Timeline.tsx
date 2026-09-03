@@ -337,10 +337,16 @@ export function Timeline({
     const allItems: TextOverlay[] = [];
     for (const s of project.segments) {
       for (const to of [...s.textOverlays, ...s.stagedTextOverlays]) {
+        const dur = to.duration != null && to.duration > 0 ? to.duration : 3;
+        // Overlays are stored in SOURCE seconds; the timeline lane is TIMELINE
+        // seconds. Convert both the start and the end (timestamp + duration) so
+        // the block's width and the drag math stay in one consistent space.
         const tlStart = sourceToTimeline(project, s.id, to.timestamp) ?? to.timestamp;
+        const tlEnd = sourceToTimeline(project, s.id, to.timestamp + dur) ?? tlStart + dur;
         allItems.push({
           ...to,
           timestamp: tlStart,
+          duration: tlEnd - tlStart,
         });
       }
     }
@@ -1231,37 +1237,40 @@ export function Timeline({
       const seg = project.segments.find((s) => s.id === draggingText.segId);
       if (!seg) return;
 
+      let segTlStart = 0;
+      for (const s of project.segments) {
+        if (s.id === seg.id) break;
+        segTlStart += segmentDuration(s);
+      }
+      // tlToSrc converts a TIMELINE offset (relative to this segment) into a
+      // SOURCE timestamp. Overlays are stored in source seconds (the renderer
+      // compares them against srcT), so we always convert back before writing.
+      const tlToSrc = (tlT: number) => Math.max(0, (tlT - segTlStart) * seg.speed + seg.srcStart);
+
       if (draggingText.type === "move") {
         const newTlT = Math.max(0, t - draggingText.grabOffset);
-        let segTlStart = 0;
-        for (const s of project.segments) {
-          if (s.id === seg.id) break;
-          segTlStart += segmentDuration(s);
-        }
-        const newSrcT = Math.max(0, (newTlT - segTlStart) * seg.speed + seg.srcStart);
-        updateTextOverlay(draggingText.id, { timestamp: Number(newSrcT.toFixed(2)) });
+        updateTextOverlay(draggingText.id, { timestamp: Number(tlToSrc(newTlT).toFixed(2)) });
       } else if (draggingText.type === "resize-right") {
-        let segTlStart = 0;
-        for (const s of project.segments) {
-          if (s.id === seg.id) break;
-          segTlStart += segmentDuration(s);
-        }
-        const overlayTlStart = segTlStart + (draggingText.initialTimestamp - seg.srcStart) / seg.speed;
-        const newDur = Math.max(0.3, t - overlayTlStart);
-        updateTextOverlay(draggingText.id, { duration: Number(newDur.toFixed(2)) });
+        // draggingText.initialTimestamp is TIMELINE space (set from the packed item)
+        const overlayTlStart = draggingText.initialTimestamp;
+        const newDurTl = Math.max(0.3, t - overlayTlStart);
+        // Convert the timeline duration back to source duration, and clamp so
+        // the overlay never runs past the end of its segment's source media.
+        const newSrcT = tlToSrc(overlayTlStart);
+        const maxDurSrc = Math.max(0.3, seg.srcEnd - newSrcT);
+        const newDurSrc = Math.min(newDurTl * seg.speed, maxDurSrc);
+        updateTextOverlay(draggingText.id, { duration: Number(newDurSrc.toFixed(2)) });
       } else if (draggingText.type === "resize-left") {
-        let segTlStart = 0;
-        for (const s of project.segments) {
-          if (s.id === seg.id) break;
-          segTlStart += segmentDuration(s);
-        }
-        const overlayTlStart = segTlStart + (draggingText.initialTimestamp - seg.srcStart) / seg.speed;
-        const delta = t - overlayTlStart;
-        const newDur = Math.max(0.3, draggingText.initialDuration - delta);
-        const newSrcT = Math.max(0, draggingText.initialTimestamp + delta * seg.speed);
+        // overlay start in timeline space == initialTimestamp
+        const delta = t - draggingText.initialTimestamp;
+        const newDurTl = Math.max(0.3, draggingText.initialDuration - delta);
+        // Shift the start (source space) but keep max source duration clamped to the segment
+        const newSrcT = tlToSrc(draggingText.initialTimestamp + delta);
+        const maxSrcT = seg.srcEnd;
+        const clampedSrcT = Math.max(seg.srcStart, Math.min(maxSrcT - 0.3, newSrcT));
         updateTextOverlay(draggingText.id, {
-          timestamp: Number(newSrcT.toFixed(2)),
-          duration: Number(newDur.toFixed(2)),
+          timestamp: Number(clampedSrcT.toFixed(2)),
+          duration: Number((newDurTl * seg.speed).toFixed(2)),
         });
       }
     },

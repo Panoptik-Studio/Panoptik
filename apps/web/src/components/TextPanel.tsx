@@ -6,6 +6,7 @@
 
 import React, { useMemo } from "react";
 import { useProjectStore } from "@/stores/projectStore";
+import { resolveSegment } from "@panoptik/engine";
 import type { TextAnimation, TextOverlay } from "@panoptik/schema";
 
 const FONT_OPTIONS: { value: string; label: string; previewFont: string }[] = [
@@ -228,11 +229,16 @@ export function TextPanel() {
   }
 
   const handleAddNew = () => {
-    const startT = Math.max(0, currentTime);
+    if (!project) return;
+    // Overlays are stored in SOURCE-media seconds (the renderer compares them
+    // against srcT), but the playhead is TIMELINE time — the two diverge after
+    // any trim/split/delete/speed change, so convert here. Storing the raw
+    // playhead put the overlay at a source moment the playhead never reaches.
+    const srcT = resolveSegment(project, currentTime)?.srcT ?? currentTime;
     addTextOverlay({
       kind: "text",
       text: "New Text",
-      timestamp: Number(startT.toFixed(2)),
+      timestamp: Number(srcT.toFixed(2)),
       duration: 3,
       position: "bottom",
       x: 0.5,

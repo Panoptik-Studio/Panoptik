@@ -400,11 +400,22 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         }
         const dur = segmentDuration(seg);
         const totalFrames = Math.max(1, Math.ceil(dur * exportFps));
+        if (seg.facecam?.src) {
+          console.log(
+            `[Export] facecam seg speed=${seg.speed} startT=${seg.facecam.startT ?? 0} ` +
+            `srcStart=${seg.srcStart} fcT(first)=${((seg.facecam.startT ?? 0) > 0 ? Math.max(0, seg.srcStart - (seg.facecam.startT ?? 0)) : seg.srcStart).toFixed(3)} ` +
+            `fcT(last)=${((seg.facecam.startT ?? 0) > 0 ? Math.max(0, seg.srcStart + dur * seg.speed - (seg.facecam.startT ?? 0)) : (seg.srcStart + dur * seg.speed)).toFixed(3)}`,
+          );
+        }
         for (let i = 0; i < totalFrames; i++) {
           const tEff = i / exportFps;
           const srcT = seg.srcStart + tEff * seg.speed;
           const fcStartT = seg.facecam?.startT ?? 0;
-          const fcT = fcStartT > 0 ? Math.max(0, (timelineCursor + tEff) - fcStartT) : srcT;
+          // Must mirror drawFacecam (render.ts): the PiP frame is indexed by
+          // main-clip SOURCE time minus startT. The previous timeline-based
+          // formula advanced at 1x while preview advances at seg.speed, so the
+          // exported facecam drifted whenever speed != 1.
+          const fcT = fcStartT > 0 ? Math.max(0, srcT - fcStartT) : srcT;
           await prepareAllFrames(srcT, fcT);
           renderFrame(ctx as unknown as CanvasRenderingContext2D, project, timelineCursor + tEff);
           await videoSource.add(timelineCursor + tEff, frameDuration);
