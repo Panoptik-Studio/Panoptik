@@ -4,7 +4,7 @@
 
 Built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/).
 
-🔗 **Live demo:** _add your URL_ · 🎬 **Demo video:** _add your URL_
+🔗 **Live demo:** <https://panoptik-studio.vercel.app/> · 🎬 **Demo video:** <https://www.youtube.com/watch?v=naWZF9vwZDE>
 
 ---
 

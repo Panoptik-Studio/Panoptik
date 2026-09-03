@@ -4,6 +4,10 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 
 // Gift4Day tokens adapted for Panoptik — no images from reference, just fonts/padding/tokens
+
+/** youtu.be/naWZF9vwZDE — the hero demo reel. */
+const DEMO_VIDEO_ID = "naWZF9vwZDE";
+
 export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -11,6 +15,7 @@ export default function Home() {
   const [leftPos, setLeftPos] = useState({ x: 0, y: 0 });
   const [rightPos, setRightPos] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState<"left" | "right" | null>(null);
+  const [videoPlaying, setVideoPlaying] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
 
   useEffect(() => {
@@ -49,6 +54,18 @@ export default function Home() {
         .container { max-width: 1300px; margin: 0 auto; padding: 0 40px; }
         @media (max-width: 768px) { .container { padding: 0 24px; } }
         @media (max-width: 480px) { .container { padding: 0 16px; } }
+
+        /* Demo video facade */
+        .video-facade img { transition: transform 0.5s ease, filter 0.4s ease; }
+        .video-facade:hover img { transform: scale(1.03); filter: brightness(1.06); }
+        .video-play { transition: transform 0.25s ease, background 0.2s ease, box-shadow 0.25s ease; }
+        .video-facade:hover .video-play { transform: translate(-50%, -50%) scale(1.09); background: #1F1F1F; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
+        .video-facade:focus-visible { outline: 3px solid #0070f3; outline-offset: 3px; }
+        @media (prefers-reduced-motion: reduce) {
+          .video-facade img, .video-play { transition: none; }
+          .video-facade:hover img { transform: none; }
+          .video-facade:hover .video-play { transform: translate(-50%, -50%); }
+        }
       `}</style>
 
       <div className="page-bg">
@@ -142,42 +159,52 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Laptop mock — larger, no floating cards */}
+            {/* Demo video — framed in the same browser chrome as the editor */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", position: "relative", marginTop: "clamp(-20px, -2vw, -10px)", marginBottom: "clamp(-20px, -2vw, -10px)" }}>
-              <div style={{ width: "clamp(380px, 78vw, 1080px)", aspectRatio: "16/9.8", borderRadius: 16, background: "#111", border: "6px solid #fff", boxShadow: "0 24px 64px rgba(0,0,0,0.18)", overflow: "hidden", position: "relative", zIndex: 2 }}>
+              <div style={{ width: "clamp(280px, 78vw, 1080px)", borderRadius: 16, background: "#111", border: "6px solid #fff", boxShadow: "0 24px 64px rgba(0,0,0,0.18)", overflow: "hidden", position: "relative", zIndex: 2 }}>
                 <div style={{ height: 28, background: "#1a1c21", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 6, padding: "0 10px" }}>
                   <span style={{ width: 8, height: 8, borderRadius: 999, background: "#ef4444" }} /><span style={{ width: 8, height: 8, borderRadius: 999, background: "#f59e0b" }} /><span style={{ width: 8, height: 8, borderRadius: 999, background: "#10b981" }} />
-                  <span style={{ marginLeft: 8, fontFamily: "var(--font-poppins)", fontSize: 10, color: "#888" }}>panoptik — preview equals export</span>
+                  <span style={{ marginLeft: 8, fontFamily: "var(--font-poppins)", fontSize: 10, color: "#888" }}>panoptik — watch the demo</span>
                 </div>
-                <div style={{ height: "calc(100% - 28px)", background: "linear-gradient(180deg, #0f1012 0%, #070709 100%)", display: "flex", alignItems: "stretch", gap: 12, padding: 16, position: "relative" }}>
-                  {/* WebMCP card */}
-                  <div style={{ flex: 1, background: "#fff", borderRadius: 12, border: "1px solid #ebebeb", padding: 16, display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ width: 28, height: 28, borderRadius: 8, background: "#0070f3", color: "#fff", display: "grid", placeItems: "center", fontFamily: "var(--font-poppins)", fontWeight: 700, fontSize: 12 }}>W</span>
-                      <span style={{ fontFamily: "var(--font-poppins)", fontWeight: 600, fontSize: 13, color: "#1A1A1A" }}>WebMCP</span>
-                      <span style={{ marginLeft: "auto", fontFamily: "var(--font-lato)", fontStyle: "italic", fontWeight: 800, fontSize: 10, color: "#0070f3", background: "#d3e5ff", borderRadius: 100, padding: "2px 8px" }}>Protocol</span>
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-nunito)", fontSize: 12, lineHeight: "140%", color: "#424242" }}>
-                      <li>Model Context Protocol for the web — structured <strong>tools</strong>, not screenshots.</li>
-                      <li>Agent sees canvas + calls <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "1px 6px", fontFamily: "monospace", fontSize: 11 }}>propose_zoom_points</code>, <code style={{ background: "#f1f1f1", borderRadius: 4, padding: "1px 6px", fontFamily: "monospace", fontSize: 11 }}>set_background</code> etc.</li>
-                      <li>Human stays in control — staged diff → commit.</li>
-                      <li>100% local, no DOM scraping.</li>
-                    </ul>
-                  </div>
-                  {/* Panoptik card */}
-                  <div style={{ flex: 1, background: "#fff", borderRadius: 12, border: "1px solid #ebebeb", padding: 16, display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ width: 28, height: 28, borderRadius: 8, background: "#1F1F1F", color: "#fff", display: "grid", placeItems: "center", fontFamily: "var(--font-lato)", fontWeight: 800, fontSize: 12 }}>P</span>
-                      <span style={{ fontFamily: "var(--font-poppins)", fontWeight: 600, fontSize: 13, color: "#1A1A1A" }}>Panoptik</span>
-                      <span style={{ marginLeft: "auto", fontFamily: "var(--font-lato)", fontStyle: "italic", fontWeight: 800, fontSize: 10, color: "#1A1A1A", background: "#f1f1f1", borderRadius: 100, padding: "2px 8px" }}>Studio</span>
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-nunito)", fontSize: 12, lineHeight: "140%", color: "#424242" }}>
-                      <li>Browser-native demo studio — record screen + camera, no upload.</li>
-                      <li>Timeline diamonds, staged ghosts, commit, export — preview equals export.</li>
-                      <li>Backgrounds, facecam PiP, text overlays.</li>
-                      <li>Open, local, fast — your video, your control.</li>
-                    </ul>
-                  </div>
+                {/* Click-to-play facade: the YouTube player (~1MB) only loads once
+                    the visitor asks for it, so it never slows the first paint. */}
+                <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#000" }}>
+                  {videoPlaying ? (
+                    <iframe
+                      src={`https://www.youtube-nocookie.com/embed/${DEMO_VIDEO_ID}?autoplay=1&rel=0&modestbranding=1&playsinline=1`}
+                      title="Panoptik demo"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      allowFullScreen
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0, display: "block" }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setVideoPlaying(true)}
+                      aria-label="Play the Panoptik demo video"
+                      className="video-facade"
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", padding: 0, border: 0, background: "#000", cursor: "pointer", display: "block", overflow: "hidden" }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`https://i.ytimg.com/vi/${DEMO_VIDEO_ID}/maxresdefault.jpg`}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => { e.currentTarget.src = `https://i.ytimg.com/vi/${DEMO_VIDEO_ID}/hqdefault.jpg`; }}
+                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                      />
+                      {/* Scrim keeps the play button readable over any frame */}
+                      <span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.34) 100%)" }} />
+                      <span className="video-play" style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: "clamp(64px, 7vw, 88px)", height: "clamp(64px, 7vw, 88px)", borderRadius: 999, background: "#0070f3", display: "grid", placeItems: "center", boxShadow: "0 10px 34px rgba(0,112,243,0.45)" }}>
+                        <svg width="30%" height="30%" viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.3-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14Z" /></svg>
+                      </span>
+                      <span style={{ position: "absolute", left: "clamp(16px, 2vw, 28px)", bottom: "clamp(16px, 2vw, 28px)", display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.94)", borderRadius: 100, padding: "8px 16px", fontFamily: "var(--font-poppins)", fontSize: "clamp(11px, 1.1vw, 13px)", fontWeight: 500, color: "#1F1F1F", boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>
+                        <span style={{ width: 7, height: 7, borderRadius: 999, background: "#ef4444" }} />
+                        Watch the demo
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
