@@ -44,6 +44,12 @@ export interface AIProviderConfig {
 const DEFAULT_PROXY_URL = "https://proxy.panoptik.app";
 export const DEFAULT_GROQ_KEY = "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";
 
+/** Provider that produced the last transcription — surfaced in tool responses. */
+let lastTranscriptionProvider = "unknown";
+export function getLastTranscriptionProvider(): string {
+  return lastTranscriptionProvider;
+}
+
 function resolveConfig(config: AIProviderConfig = {}): AIProviderConfig {
   let storedAirGapped = false;
   let storedKeys: AIProviderConfig["byokKeys"] = {};
@@ -98,8 +104,11 @@ export async function transcribeAudioStream(
     throw new Error("No active Panoptik Pro session or BYOK API key provided.");
   }
 
-  // 1. If Groq API key is explicitly used without a Pro session token, execute direct fetch (~2.5s)
-  if (groqKey && !token) {
+  // 1. Groq is the PREFERRED transcription path — used whenever a Groq key is
+  // available (the default key ships out-of-the-box), including during Pro
+  // sessions. Direct fetch ~2.5s; the proxy below is only the fallback.
+  if (groqKey) {
+    lastTranscriptionProvider = "groq";
     try {
       const formData = new FormData();
       formData.append("file", audioBlob, "audio.wav");
@@ -191,6 +200,7 @@ export async function transcribeAudioStream(
   }
 
   // 2. Proxy Fallback / Pro Gateway
+  lastTranscriptionProvider = "proxy";
   const proxyUrl = config.proxyUrl || DEFAULT_PROXY_URL;
   const headers: Record<string, string> = {};
 

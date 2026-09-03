@@ -1,12 +1,61 @@
 /**
  * Atomic batch operation executor for Panoptik WebMCP.
- * Takes snapped, rebased operations and stages them atomically into useProjectStore.
+ * Takes snapped, rebased operations and applies them atomically to useProjectStore.
+ *
+ * Time spaces: agent ops arrive in TIMELINE seconds. `batch.timelineCutMap`
+ * (timeline space) is what op times were rebased against; `batch.cutMap`
+ * (source-media seconds) is applied to the segments below, because segments
+ * store source ranges. After cuts, zoom/text placement resolves rebased
+ * timeline times against the POST-cut segments.
  */
 
 import { useProjectStore } from "../stores/projectStore";
-import { segmentDuration } from "@panoptik/engine";
-import type { Background, Segment, TextOverlay, ZoomPoint } from "@panoptik/schema";
-import type { EditOp, SnappedBatchResult, SnappedOp } from "./snapping";
+import { DEFAULT_CORNER_RADIUS_UNITS, projectDuration, segmentDuration } from "@panoptik/engine";
+import type { Background, Segment, ZoomPoint, TextOverlay } from "@panoptik/schema";
+import type { CutInterval, EditOp, SnappedBatchResult, SnappedOp } from "./snapping";
+
+/**
+ * The polished stage look, applied to EVERY agent edit unless the batch styles
+ * the stage itself ({op:'bg'}). This is unconditional by product decision —
+ * the gradient backdrop + rounded frame corners are the app's signature style.
+ * Note a gradient alone is invisible on a 16:9 recording (no letterbox), so
+ * stage padding is forced too: the frame shrinks inside the canvas and the
+ * backdrop shows around it.
+ */
+export const EDITORIAL_BASELINE = {
+  stagePadding: 28,
+  cornerRadius: DEFAULT_CORNER_RADIUS_UNITS,
+  gradient: ["#0f172a", "#1e293b"] as [string, string],
+};
+
+/** Applies the baseline; returns how many segments changed. */
+export function applyEditorialBaseline(segments: Segment[], hasBgOp: boolean): number {
+  let applied = 0;
+  for (const seg of segments) {
+    let changed = false;
+    // The untouched default stage is solid black in either hex notation.
+    const isUntouchedBlack =
+      seg.background.kind === "solid" && /^#000(000)?$/i.test(seg.background.color);
+    if (!hasBgOp && isUntouchedBlack) {
+      seg.background = { kind: "gradient", stops: [...EDITORIAL_BASELINE.gradient] };
+      changed = true;
+    }
+    if (seg.aspectPreset === "source") {
+      seg.aspectPreset = "16:9";
+      changed = true;
+    }
+    if ((seg.stagePadding ?? 0) < 12) {
+      seg.stagePadding = EDITORIAL_BASELINE.stagePadding;
+      changed = true;
+    }
+    if (!seg.cornerRadius) {
+      seg.cornerRadius = EDITORIAL_BASELINE.cornerRadius;
+      changed = true;
+    }
+    if (changed) applied++;
+  }
+  return applied;
+}
 
 export interface BatchExecutionResult {
   success: boolean;
@@ -23,6 +72,14 @@ export interface BatchExecutionResult {
   };
   rejectedCount: number;
   rejectedOps: Array<{ op: EditOp; reason: string }>;
+  cutsApplied: {
+    count: number;
+    droppedSeconds: number;
+    intervals: Array<{ start: number; end: number }>;
+  };
+  newDurationSeconds: number | null;
+  appliedToTimeline: boolean;
+  stageBaseline: { appliedSegments: number };
 }
 
 let idCounter = 1;
@@ -50,9 +107,115 @@ function resolveSegmentAndSourceTime(
   return null;
 }
 
+const keepZooms = (zooms: ZoomPoint[], pred: (t: number) => boolean): ZoomPoint[] =>
+  (zooms ?? []).filter((z) => pred(z.t)).map((z) => ({ ...z }));
+
+const keepOverlays = (overlays: TextOverlay[], pred: (t: number) => boolean): TextOverlay[] =>
+  (overlays ?? []).filter((o) => pred(o.timestamp)).map((o) => ({ ...o }));
+
+/**
+ * Applies source-space cut drops to the segment list: each drop splits and
+ * removes the covered source range. Annotations are stored at absolute source
+ * time, so surviving pieces keep the items inside their (unchanged) source
+ * bounds — no rebasing of stored data is needed.
+ */
+export function applyCutDrops(
+  input: Segment[],
+  drops: CutInterval[],
+  mediaId: string | undefined,
+): { segments: Segment[]; cutCount: number; droppedSeconds: number; intervals: Array<{ start: number; end: number }> } {
+  let working = input;
+  let cutCount = 0;
+  let droppedSeconds = 0;
+  const intervals: Array<{ start: number; end: number }> = [];
+
+  for (const drop of drops) {
+    if (drop.end - drop.start <= 0.05) continue;
+    const next: Segment[] = [];
+
+    for (const seg of working) {
+      if (mediaId && seg.mediaId !== mediaId) {
+        next.push(seg);
+        continue;
+      }
+      const d0 = drop.start;
+      const d1 = drop.end;
+      if (d1 <= seg.srcStart + 0.001 || d0 >= seg.srcEnd - 0.001) {
+        next.push(seg);
+        continue;
+      }
+
+      // Snap drop edges that graze the segment bounds, so a cut starting at
+      // 0.01s is a clean head drop instead of a 10ms sliver segment.
+      const EDGE_SNAP = 0.05;
+      const left = d0 - seg.srcStart <= EDGE_SNAP ? seg.srcStart : Math.max(seg.srcStart, d0);
+      const right = seg.srcEnd - d1 <= EDGE_SNAP ? seg.srcEnd : Math.min(seg.srcEnd, d1);
+      cutCount++;
+      droppedSeconds += right - left;
+      intervals.push({ start: Number(left.toFixed(2)), end: Number(right.toFixed(2)) });
+
+      if (left <= seg.srcStart + 0.001 && right >= seg.srcEnd - 0.001) {
+        // Whole segment dropped.
+        continue;
+      }
+
+      const head = { ...seg, facecam: { ...seg.facecam } };
+      if (left <= seg.srcStart + 0.001) {
+        // Drop covers the head.
+        next.push({
+          ...head,
+          id: nextId("seg"),
+          srcStart: right,
+          zoomPoints: keepZooms(seg.zoomPoints, (t) => t >= right),
+          stagedZoomPoints: keepZooms(seg.stagedZoomPoints, (t) => t >= right),
+          textOverlays: keepOverlays(seg.textOverlays, (t) => t >= right),
+          stagedTextOverlays: keepOverlays(seg.stagedTextOverlays, (t) => t >= right),
+        });
+      } else if (right >= seg.srcEnd - 0.001) {
+        // Drop covers the tail.
+        next.push({
+          ...head,
+          id: nextId("seg"),
+          srcEnd: left,
+          zoomPoints: keepZooms(seg.zoomPoints, (t) => t < left),
+          stagedZoomPoints: keepZooms(seg.stagedZoomPoints, (t) => t < left),
+          textOverlays: keepOverlays(seg.textOverlays, (t) => t < left),
+          stagedTextOverlays: keepOverlays(seg.stagedTextOverlays, (t) => t < left),
+        });
+      } else {
+        // Hole in the middle: split around it.
+        next.push(
+          {
+            ...head,
+            id: nextId("seg"),
+            srcEnd: left,
+            zoomPoints: keepZooms(seg.zoomPoints, (t) => t < left),
+            stagedZoomPoints: keepZooms(seg.stagedZoomPoints, (t) => t < left),
+            textOverlays: keepOverlays(seg.textOverlays, (t) => t < left),
+            stagedTextOverlays: keepOverlays(seg.stagedTextOverlays, (t) => t < left),
+          },
+          {
+            ...head,
+            id: nextId("seg"),
+            srcStart: right,
+            zoomPoints: keepZooms(seg.zoomPoints, (t) => t >= right),
+            stagedZoomPoints: keepZooms(seg.stagedZoomPoints, (t) => t >= right),
+            textOverlays: keepOverlays(seg.textOverlays, (t) => t >= right),
+            stagedTextOverlays: keepOverlays(seg.stagedTextOverlays, (t) => t >= right),
+          },
+        );
+      }
+    }
+    working = next;
+  }
+
+  return { segments: working, cutCount, droppedSeconds, intervals };
+}
+
 /**
  * Executes a pre-snapped and rebased batch of operations against the project store.
- * Accurately distributes zooms and text overlays into their respective segment with segment-relative source times.
+ * Cuts are applied for real (segments split + dropped); zooms and text overlays are
+ * distributed into their respective segment with segment-relative source times.
  * @param batch SnappedBatchResult from snapAndRebaseEditOps
  * @param mode "replace" (default) clears prior staged proposals; "append" adds to them
  */
@@ -66,7 +229,6 @@ export function executeBatchOps(
     store.clearStaged();
   }
 
-  let cutsCount = 0;
   let zoomsCount = 0;
   let facecamCount = 0;
   let transitionsCount = 0;
@@ -75,7 +237,7 @@ export function executeBatchOps(
   let speedCount = 0;
 
   const rawSegments = store.project?.segments ?? [];
-  const segments: Segment[] = rawSegments.map((s) => ({
+  let segments: Segment[] = rawSegments.map((s) => ({
     ...s,
     zoomPoints: mode === "replace" ? [] : [...s.zoomPoints],
     stagedZoomPoints: mode === "replace" ? [] : [...(s.stagedZoomPoints ?? [])],
@@ -89,6 +251,12 @@ export function executeBatchOps(
         : [...(s.stagedTextOverlays ?? [])],
     facecam: { ...s.facecam },
   }));
+
+  // Cuts first, so zoom/text placement below resolves against post-cut segments.
+  const firstMediaId = store.project?.media[0]?.id;
+  const cutResult = applyCutDrops(segments, batch.cutMap, firstMediaId);
+  segments = cutResult.segments;
+  const cutsCount = cutResult.cutCount;
 
   for (const op of batch.snappedOps) {
     if (op.op === "zoom") {
@@ -129,6 +297,12 @@ export function executeBatchOps(
       }
       for (const seg of segments) {
         seg.background = bg;
+        // A backdrop is invisible while the frame fills the canvas ('source'
+        // aspect leaves no stage padding to show it through) — enable the
+        // 16:9 padding so the background actually renders.
+        if (seg.aspectPreset === "source") {
+          seg.aspectPreset = "16:9";
+        }
       }
       backgroundsCount++;
     } else if (op.op === "text") {
@@ -191,10 +365,15 @@ export function executeBatchOps(
         seg.speed = op.mult;
       }
       speedCount++;
-    } else if (op.op === "cut") {
-      cutsCount++;
     }
   }
+
+  // Editorial baseline: gradient backdrop, visible stage padding, rounded
+  // corners — every agent edit ships the polished stage look.
+  const stageBaselineCount = applyEditorialBaseline(
+    segments,
+    batch.snappedOps.some((o) => o.op === "bg"),
+  );
 
   if (store.project) {
     useProjectStore.setState({
@@ -229,5 +408,15 @@ export function executeBatchOps(
     },
     rejectedCount: batch.rejectedOps.length,
     rejectedOps: batch.rejectedOps,
+    cutsApplied: {
+      count: cutResult.cutCount,
+      droppedSeconds: Number(cutResult.droppedSeconds.toFixed(2)),
+      intervals: cutResult.intervals,
+    },
+    newDurationSeconds: store.project
+      ? Number(projectDuration({ ...store.project, segments }).toFixed(2))
+      : null,
+    appliedToTimeline: true,
+    stageBaseline: { appliedSegments: stageBaselineCount },
   };
 }

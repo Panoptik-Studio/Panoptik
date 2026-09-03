@@ -6,6 +6,7 @@
 
 import { create } from "zustand";
 import { projectDuration, resolveSegment, segmentDuration } from "@panoptik/engine";
+import { bumpTimelineRevision } from "../webmcp/revision";
 import {
   migrateProject,
   type Project,
@@ -279,6 +280,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   // ── Project lifecycle ──
 
   setProject: (project, savedHistory, savedHistoryIndex) => {
+    // A different timeline invalidates every timestamp agents have observed.
+    bumpTimelineRevision();
     const p = migrateProject(project);
     const validMediaSrc = p.media[0]?.src ?? "";
     const validAudioSrc = p.audioSrc;
@@ -333,8 +336,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setPersistStatus: (persistStatus) => set({ persistStatus }),
 
-  clearProject: () =>
-    set({
+  clearProject: () => {
+    bumpTimelineRevision();
+    return set({
       project: null,
       history: [],
       historyIndex: -1,
@@ -347,7 +351,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       pendingBackgroundBadge: false,
   preStageBackgrounds: {},
       exportProgress: null,
-    }),
+    });
+  },
 
   selectSegment: (id, multi = false) => {
     const s = get();
@@ -1023,6 +1028,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   undo: () => {
     const state = get();
     if (state.historyIndex <= 0 || !state.project) return;
+    // Human edits shift the timeline too — agents must re-ingest after them.
+    bumpTimelineRevision();
     const newIndex = state.historyIndex - 1;
     const snap = state.history[newIndex]!;
     const validSelected = (state.selectedSegmentIds || []).filter((id) =>
@@ -1066,6 +1073,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       !state.project
     )
       return;
+    bumpTimelineRevision();
     const newIndex = state.historyIndex + 1;
     const snap = state.history[newIndex]!;
     const validSelected = (state.selectedSegmentIds || []).filter((id) =>

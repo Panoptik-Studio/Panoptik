@@ -63,7 +63,7 @@ export type { Transform, Viewport, RenderOptions, ResolvedVideoTransition } from
 export { segmentDuration, projectDuration, resolveSegment, sourceToTimeline } from "./timeline";
 export { decodeViaAudioContext } from "./audio";
 export { startRecording, openCameraTrack, openMicrophoneTrack } from "./record";
-export type { RecordingHandles } from "./record";
+export type { RecordingHandles, CursorCompositor, CursorSample } from "./record";
 export { setFacecamBlob, setAudioBlob, getFirstVideoTimestamp } from "./decode";
 export { captureProbeSnapshot, captureCropSnapshot, draw3x3GridOverlay, type ProbeSnapshotOptions } from "./probe";
 export {

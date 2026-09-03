@@ -147,12 +147,6 @@ export function Toolbar() {
 
         <div className="mx-2 hidden h-5 w-px sm:block" style={{ background: "#ebebeb" }} />
 
-        <button className="pk-icon-btn hidden h-[38px] items-center px-3.5 font-mono text-xs sm:flex" title="Command palette (⌘K)">
-          ⌘K
-        </button>
-
-        <div className="mx-2 hidden h-5 w-px sm:block" style={{ background: "#ebebeb" }} />
-
         <button
           onClick={() => setIsAiSettingsOpen(true)}
           className="pk-btn pk-btn-ghost pk-btn-sm hidden sm:inline-flex items-center gap-1.5"

@@ -3,12 +3,21 @@
  * Registered via registerToolWithLifecycle.
  * Staging tools do NOT commit — they add to staged* arrays for human review.
  * Action/write tools are gated by showConfirmDialog.
+ *
+ * TIME SPACE CONTRACT: every `timestamp` parameter these tools accept is in
+ * CURRENT TIMELINE seconds (what the agent sees from read tools). Conversion
+ * to absolute source-media seconds (the storage space) happens here via
+ * timeSpace.ts — agents never do that math. Tools that shift the timeline bump
+ * `timelineRevision` and say `timelineShifted: true` so the agent re-ingests.
  */
 
 import { registerToolWithLifecycle } from "./lifecycle";
 import { useProjectStore } from "../stores/projectStore";
-import { showConfirmDialog } from "./confirm";
-import type { AspectPreset, Background, TextAnimation, TextOverlay, ZoomPoint } from "@panoptik/schema";
+import { projectDuration, resolveSegment, segmentDuration } from "@panoptik/engine";
+import type { AspectPreset, Background, Segment, TextAnimation, TextOverlay, ZoomPoint } from "@panoptik/schema";
+import type { AudioAnalysisResult } from "@panoptik/engine";
+import { bumpTimelineRevision, getTimelineRevision, STALENESS_CONTRACT } from "./revision";
+import { timelineToSegmentSource } from "./timeSpace";
 
 const MAX_PROPOSALS = 200;
 const MAX_TEXT_LENGTH = 200;
@@ -24,12 +33,36 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-/** The selected segment's source window, or the media bounds when none selected. */
-function activeSourceWindow(): { lo: number; hi: number } {
+/**
+ * The segment that owns a timeline timestamp: the selected segment when it
+ * spans the time, otherwise whatever the playhead resolves to. Staging tools
+ * write into the selected segment, so they select this one first.
+ */
+function owningSegment(): { project: NonNullable<ReturnType<typeof useProjectStore.getState>["project"]>; seg: Segment } | null {
   const s = useProjectStore.getState();
-  const seg = s.project?.segments.find((x) => x.id === s.selectedSegmentId);
-  const duration = s.project?.media[0]?.duration ?? 0;
-  return seg ? { lo: seg.srcStart, hi: seg.srcEnd } : { lo: 0, hi: duration };
+  if (!s.project || s.project.segments.length === 0) return null;
+  const selected = s.project.segments.find((x) => x.id === s.selectedSegmentId);
+  const atPlayhead = resolveSegment(s.project, s.currentTime)?.segment;
+  const seg = selected ?? atPlayhead ?? s.project.segments[0]!;
+  return { project: s.project, seg };
+}
+
+/** Compact post-mutation clip map so agents can see the new timeline immediately. */
+function clipMap(project: NonNullable<ReturnType<typeof useProjectStore.getState>["project"]>) {
+  let acc = 0;
+  return project.segments.map((seg, idx) => {
+    const dur = segmentDuration(seg);
+    const start = acc;
+    acc += dur;
+    return {
+      clipIndex: idx,
+      id: seg.id,
+      timelineStart: Number(start.toFixed(2)),
+      timelineEnd: Number(acc.toFixed(2)),
+      duration: Number(dur.toFixed(2)),
+      speed: seg.speed,
+    };
+  });
 }
 
 export function registerEditingTools(): void {
@@ -38,14 +71,14 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "propose_zoom_points",
     description:
-      "Proposes zoom-in keyframes at specific timestamps. Proposals appear as ghost diamond markers on the timeline for human review — they are NOT applied until commit_staged_changes.",
+      "Proposes zoom-in keyframes at specific timeline timestamps. Proposals appear as ghost diamond markers on the timeline for human review — they are NOT applied until commit_staged_changes. Timestamps are CURRENT TIMELINE seconds.",
     inputSchema: {
       type: "object",
       properties: {
         timestamps: {
           type: "array",
           items: { type: "number" },
-          description: "Timestamps in seconds where zoom-in keyframes should be placed.",
+          description: "Timeline seconds where zoom-in keyframes should be placed.",
         },
         scale: {
           type: "number",
@@ -84,19 +117,27 @@ export function registerEditingTools(): void {
         return { error: "No project loaded. Ask the user to import a clip first." };
       }
 
+      const own = owningSegment();
+      if (!own) return { error: "No segment available to stage zooms into." };
+      const { project, seg } = own;
+      // Staging writes to the selected segment — select the owning one first.
+      if (seg.id !== store.selectedSegmentId) store.selectSegment(seg.id);
+
       const list = Array.isArray(timestamps) ? timestamps : [];
-      const { lo, hi } = activeSourceWindow();
-      const clamped = list
-        .filter((t: number) => typeof t === "number" && Number.isFinite(t) && t >= lo && t <= hi)
+      // Timeline seconds → this segment's source seconds; out-of-clip times skipped.
+      const converted = list
+        .filter((t: number) => typeof t === "number" && Number.isFinite(t))
+        .map((t: number) => timelineToSegmentSource(project, seg, t))
+        .filter((srcT: number) => srcT > seg.srcStart + 0.001 && srcT < seg.srcEnd - 0.001)
         .slice(0, MAX_PROPOSALS);
 
       const depth = clampNumber(scale, 1.2, 5, 2.2);
       const fx = clampNumber(focalX, 0, 1, 0.5);
       const fy = clampNumber(focalY, 0, 1, 0.5);
 
-      const proposals: ZoomPoint[] = clamped.map((t: number) => ({
+      const proposals: ZoomPoint[] = converted.map((srcT: number) => ({
         id: generateId(),
-        t,
+        t: Number(srcT.toFixed(2)),
         to: { scale: depth, x: fx, y: fy },
         dur: 0.7,
         ease: "easeInOutCubic",
@@ -105,8 +146,9 @@ export function registerEditingTools(): void {
 
       store.stageZoomProposals(proposals);
       return {
+        timelineRevision: getTimelineRevision(),
         stagedCount: proposals.length,
-        outOfRangeSkipped: list.length - clamped.length,
+        outOfRangeSkipped: list.length - converted.length,
         proposals: proposals.map((p) => ({ t: p.t, scale: p.to.scale })),
         message: `${proposals.length} zoom proposal(s) staged as ghosts on the timeline. Call commit_staged_changes to apply them permanently.`,
       };
@@ -118,7 +160,7 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "add_text_overlay",
     description:
-      "Stages a styled text caption or annotation overlay at a specific timestamp and screen position. Supports custom fonts, sizes, colors, backdrops, and entrance/exit animations. Staged overlays appear for review until committed.",
+      "Stages a styled text caption or annotation overlay at a specific timeline timestamp and screen position. Supports custom fonts, sizes, colors, backdrops, and entrance/exit animations. Staged overlays appear for review until committed. Timestamps are CURRENT TIMELINE seconds.",
     inputSchema: {
       type: "object",
       properties: {
@@ -128,7 +170,7 @@ export function registerEditingTools(): void {
         },
         timestamp: {
           type: "number",
-          description: "When the text should appear (in seconds).",
+          description: "When the text should appear (timeline seconds).",
         },
         duration: {
           type: "number",
@@ -212,15 +254,19 @@ export function registerEditingTools(): void {
       const safeText = String(text ?? "").slice(0, MAX_TEXT_LENGTH);
       if (!safeText.trim()) return { error: "Text must not be empty." };
 
-      const { lo, hi } = activeSourceWindow();
-      const at = clampNumber(timestamp, lo, hi, lo);
+      const own = owningSegment();
+      if (!own) return { error: "No segment available to stage the overlay into." };
+      const { project, seg } = own;
+      if (seg.id !== store.selectedSegmentId) store.selectSegment(seg.id);
+
       const where = position === "top" || position === "center" || position === "bottom" ? position : "bottom";
       const dur = typeof duration === "number" && duration > 0 ? duration : 3.0;
+      const srcT = timelineToSegmentSource(project, seg, typeof timestamp === "number" ? timestamp : 0);
 
       store.stageTextOverlay({
         id: generateId(),
         text: safeText,
-        timestamp: at,
+        timestamp: Number(srcT.toFixed(2)),
         duration: dur,
         position: where,
         fontSize,
@@ -235,12 +281,13 @@ export function registerEditingTools(): void {
       });
 
       return {
+        timelineRevision: getTimelineRevision(),
         staged: true,
         text: safeText,
-        timestamp: at,
+        timestamp: Number(srcT.toFixed(2)),
         duration: dur,
         position: where,
-        message: `Text overlay "${safeText}" staged at ${at}s (${dur}s duration). Call commit_staged_changes to apply.`,
+        message: `Text overlay "${safeText}" staged at ${srcT.toFixed(2)}s (${dur}s duration). Call commit_staged_changes to apply.`,
       };
     },
   });
@@ -295,9 +342,10 @@ export function registerEditingTools(): void {
 
       store.stageBackground(bg);
       return {
+        timelineRevision: getTimelineRevision(),
         staged: true,
         background: bg,
-        message: `${kind} background staged. Call commit_staged_changes to apply permanently.`,
+        message: `${kind} background staged. NOTE: the backdrop is only visible where the stage has padding — propose_edits {op:'bg'} auto-enables 16:9 padding; with aspect 'source' the frame fills the canvas and the background stays hidden.`,
       };
     },
   });
@@ -307,7 +355,7 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "generate_captions",
     description:
-      "MANDATORY FOR SPEECH: Transcribes the video's audio using Whisper and generates timestamped subtitle phrases across the timeline. Always call this if transcript is empty.",
+      "MANDATORY FOR SPEECH: Transcribes the video's audio and generates timestamped subtitle phrases across the timeline. Always call this first if get_transcript is empty — cuts, zooms and silence detection all depend on speech timestamps.",
     inputSchema: {
       type: "object",
       properties: {
@@ -325,7 +373,7 @@ export function registerEditingTools(): void {
       }
 
       try {
-        const { transcribeAudioStream } = await import("../lib/ai/providers");
+        const { transcribeAudioStream, getLastTranscriptionProvider } = await import("../lib/ai/providers");
         const { decodeViaAudioContext, encodeWavBlob, resampleMonoPcm } = await import("@panoptik/engine");
 
         const audioSource = project.segments[0]?.facecam?.src || project.audioSrc || project.media[0]?.src;
@@ -336,14 +384,14 @@ export function registerEditingTools(): void {
         const res = await fetch(audioSource);
         const blob = await res.blob();
         let wavBlob = blob;
+        let pcm: Float32Array | null = null;
 
-        if (!blob.type.includes("wav")) {
-          const buf = await decodeViaAudioContext(blob);
-          if (buf) {
-            const rawData = buf.getChannelData(0);
-            const pcm = resampleMonoPcm(rawData, buf.sampleRate, 16000);
-            wavBlob = await encodeWavBlob(pcm, 16000);
-          }
+        // Always decode + resample: Whisper wants 16k mono WAV, and the same
+        // PCM feeds the audio-feature analysis below.
+        const buf = await decodeViaAudioContext(blob);
+        if (buf) {
+          pcm = resampleMonoPcm(buf.getChannelData(0), buf.sampleRate, 16000);
+          wavBlob = await encodeWavBlob(pcm, 16000);
         }
 
         const result = await transcribeAudioStream(wavBlob, { language: language || "en" });
@@ -387,12 +435,19 @@ export function registerEditingTools(): void {
           store.stageTextOverlay(cap);
         }
 
-        // Update analysis cache phrases so get_transcript and get_video_summary immediately see them
-        const { setAnalysisCache, getAnalysisCache } = await import("./tools-batch");
-        const prev = getAnalysisCache();
-        if (prev) {
+        // Seed the analysis cache: real RMS silences + emphasis peaks from the
+        // same PCM that fed Whisper, so get_silence_intervals, dropSilence cuts
+        // and emphasis-anchored zooms are grounded in actual audio immediately
+        // — no separate heavy analysis pass required.
+        const { setAnalysisCache, getAnalysisCache, synthesizeAnalysisFromProject } = await import("./tools-batch");
+        let audioFeatures: AudioAnalysisResult | null = null;
+        if (pcm && pcm.length > 0) {
+          const { extractAudioFeatures } = await import("@panoptik/engine");
+          audioFeatures = extractAudioFeatures(pcm, 16000);
           setAnalysisCache({
-            ...prev,
+            ...(getAnalysisCache() ?? synthesizeAnalysisFromProject(project)),
+            duration: audioFeatures.duration,
+            audio: audioFeatures,
             words: words.map((w) => ({
               word: w.word,
               start: w.start,
@@ -410,11 +465,17 @@ export function registerEditingTools(): void {
         }
 
         return {
+          timelineRevision: getTimelineRevision(),
           staged: true,
+          provider: getLastTranscriptionProvider(),
           captionCount: generatedOverlays.length,
           wordCount: words.length,
           firstPhrase: generatedOverlays[0]?.text,
-          message: `Successfully generated and staged ${generatedOverlays.length} timestamped captions. Spoken transcript is now available.`,
+          silenceCount: audioFeatures?.silences.length ?? null,
+          emphasisPeakCount: audioFeatures?.loudPeaks.length ?? null,
+          message: audioFeatures
+            ? `Generated and staged ${generatedOverlays.length} timestamped captions. Audio analysis is ready: ${audioFeatures.silences.length} silence interval(s) and ${audioFeatures.loudPeaks.length} emphasis peak(s) — get_silence_intervals and {op:'cut'} windows are now grounded in real audio.`
+            : `Generated and staged ${generatedOverlays.length} timestamped captions. Transcript available via get_transcript (CURRENT TIMELINE seconds); cut ops need explicit {t0, t1} windows until audio analysis is available.`,
         };
       } catch (err: any) {
         console.warn("[WebMCP] generate_captions error:", err);
@@ -427,11 +488,13 @@ export function registerEditingTools(): void {
   });
 
   // ── 5. TIMELINE: SPLIT SEGMENT & SPLIT CLIP ──
+  // A split adds a boundary without shifting any timestamp, but the clip map
+  // changes — agents get the new boundaries right in the response.
 
   registerToolWithLifecycle({
     name: "split_clip",
     description:
-      "Splits a video clip into two separate segments at the specified timeline timestamp.",
+      "Splits the clip at a timeline timestamp into two segments. Use before delete_clip to remove an unwanted range. Timestamps are CURRENT TIMELINE seconds. The response includes the new clip map — use it, not your pre-split observations.",
     inputSchema: {
       type: "object",
       properties: {
@@ -445,13 +508,23 @@ export function registerEditingTools(): void {
     execute: async ({ timestamp }: { timestamp: number }) => {
       const store = useProjectStore.getState();
       if (!store.project) return { error: "No project loaded." };
+      const before = store.project.segments.length;
       store.splitAt(timestamp);
-      const segs = useProjectStore.getState().project?.segments ?? [];
+      const project = useProjectStore.getState().project;
+      if (!project) return { error: "No project loaded." };
+      const segs = project.segments;
+      const changed = segs.length > before;
       return {
-        split: true,
+        timelineRevision: getTimelineRevision(),
+        split: changed,
         timestamp,
+        structureChanged: changed,
         segmentCount: segs.length,
-        message: `Clip split successfully at ${timestamp.toFixed(2)}s. Total clips: ${segs.length}.`,
+        clips: clipMap(project),
+        totalDurationSeconds: Number(projectDuration(project).toFixed(2)),
+        message: changed
+          ? `Clip split at ${timestamp.toFixed(2)}s. Total clips: ${segs.length}. Timestamps did NOT shift, but clip indices/boundaries changed — use the returned clip map.`
+          : `No split performed (timestamp at a clip boundary or outside the timeline).`,
       };
     },
   });
@@ -459,7 +532,7 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "split_segment",
     description:
-      "Splits the video clip at the given timeline timestamp.",
+      "Splits the video clip at the given timeline timestamp. Timestamps are CURRENT TIMELINE seconds. The response includes the new clip map.",
     inputSchema: {
       type: "object",
       properties: {
@@ -473,13 +546,23 @@ export function registerEditingTools(): void {
     execute: async ({ timestamp }: { timestamp: number }) => {
       const store = useProjectStore.getState();
       if (!store.project) return { error: "No project loaded." };
+      const before = store.project.segments.length;
       store.splitAt(timestamp);
-      const segs = useProjectStore.getState().project?.segments ?? [];
+      const project = useProjectStore.getState().project;
+      if (!project) return { error: "No project loaded." };
+      const segs = project.segments;
+      const changed = segs.length > before;
       return {
-        split: true,
+        timelineRevision: getTimelineRevision(),
+        split: changed,
         timestamp,
+        structureChanged: changed,
         segmentCount: segs.length,
-        message: `Clip split successfully at ${timestamp.toFixed(2)}s.`,
+        clips: clipMap(project),
+        totalDurationSeconds: Number(projectDuration(project).toFixed(2)),
+        message: changed
+          ? `Clip split at ${timestamp.toFixed(2)}s. Timestamps did NOT shift, but clip indices/boundaries changed — use the returned clip map.`
+          : `No split performed (timestamp at a clip boundary or outside the timeline).`,
       };
     },
   });
@@ -489,7 +572,7 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "delete_clip",
     description:
-      "Deletes an unwanted video clip segment from the timeline and ripple-joins adjacent clips. Cannot delete the only remaining clip.",
+      "Deletes a clip segment and ripple-joins the adjacent clips. THIS SHIFTS THE TIMELINE: every timestamp after the deleted range moves earlier. The response flags timelineShifted — you MUST re-ingest get_project_state and get_transcript afterwards and never reuse pre-delete timestamps. Cannot delete the only remaining clip.",
     inputSchema: {
       type: "object",
       properties: {
@@ -528,13 +611,39 @@ export function registerEditingTools(): void {
           message: `Clip at index ${clipIndex} not found.`,
         };
       }
+
+      // Compute the deleted range in timeline seconds BEFORE the delete.
+      let acc = 0;
+      let shiftFrom: number | null = null;
+      let removedSeconds = 0;
+      for (const seg of segments) {
+        const dur = segmentDuration(seg);
+        if (seg.id === targetSeg.id) {
+          shiftFrom = Number(acc.toFixed(2));
+          removedSeconds = Number(dur.toFixed(2));
+          break;
+        }
+        acc += dur;
+      }
+
       store.deleteSegment(targetSeg.id);
-      const remaining = useProjectStore.getState().project?.segments ?? [];
+      const revision = bumpTimelineRevision();
+      const project = useProjectStore.getState().project;
+      const remaining = project?.segments ?? [];
       return {
+        timelineRevision: revision,
+        timelineShifted: true,
+        stalenessWarning: STALENESS_CONTRACT,
         deleted: true,
         deletedSegmentId: targetSeg.id,
         remainingClips: remaining.length,
-        message: `Clip deleted successfully. Timeline ripple-joined (${remaining.length} clips remaining).`,
+        shiftFromSecond: shiftFrom,
+        removedSeconds,
+        newDurationSeconds: project ? Number(projectDuration(project).toFixed(2)) : null,
+        clips: project ? clipMap(project) : [],
+        nextStep:
+          "Timeline shifted: every timestamp after shiftFromSecond moved earlier by removedSeconds. Re-call get_project_state and get_transcript now; never reuse pre-delete timestamps for zooms, overlays, probes or cursor queries.",
+        message: `Clip deleted and ripple-joined (${remaining.length} clips remaining). Timeline shifted at ${shiftFrom?.toFixed(2)}s by ${removedSeconds.toFixed(2)}s — re-ingest before further edits.`,
       };
     },
   });
@@ -544,7 +653,7 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "set_clip_transition",
     description:
-      "Sets the incoming transition effect (e.g. 'fade', 'wipe', 'slide-left', 'slide-right', 'zoom-in', 'dipToBlack', 'cut') and duration on a clip segment.",
+      "Sets the incoming transition effect and duration on a clip segment. Does not shift timestamps.",
     inputSchema: {
       type: "object",
       properties: {
@@ -596,11 +705,12 @@ export function registerEditingTools(): void {
         transitionDuration: Math.max(0.1, Math.min(2.0, duration)),
       });
       return {
+        timelineRevision: bumpTimelineRevision(),
         updated: true,
         clipIndex,
         transition,
         duration,
-        message: `Clip #${clipIndex} transition set to "${transition}" (${duration}s).`,
+        message: `Clip #${clipIndex} transition set to "${transition}" (${duration}s). Timestamps did not shift.`,
       };
     },
   });
@@ -610,7 +720,7 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "set_clip_speed",
     description:
-      "Sets playback speed multiplier for a clip segment (0.5x, 1x, 1.5x, 2x, 3x with pitch-preserved WSOLA audio).",
+      "Sets playback speed for a clip segment (0.5x, 1x, 1.5x, 2x, 3x with pitch-preserved WSOLA audio). THIS SHIFTS THE TIMELINE: the segment's duration changes, so later timestamps compress or expand. Re-ingest after calling.",
     inputSchema: {
       type: "object",
       properties: {
@@ -645,10 +755,19 @@ export function registerEditingTools(): void {
       }
       const safeSpeed = [0.5, 1, 1.5, 2, 3].includes(speed) ? speed : 1;
       store.updateSegment(targetSeg.id, { speed: safeSpeed });
+      const revision = bumpTimelineRevision();
+      const project = useProjectStore.getState().project;
       return {
+        timelineRevision: revision,
+        timelineShifted: safeSpeed !== targetSeg.speed,
         updated: true,
         clipIndex,
         speed: safeSpeed,
+        newDurationSeconds: project ? Number(projectDuration(project).toFixed(2)) : null,
+        nextStep:
+          safeSpeed !== targetSeg.speed
+            ? "Segment duration changed — timestamps after this clip shifted. Re-call get_project_state and get_transcript before further edits."
+            : undefined,
         message: `Clip #${clipIndex} speed updated to ${safeSpeed}x.`,
       };
     },
@@ -657,7 +776,7 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "set_speed",
     description:
-      "Sets playback speed multiplier for the selected segment (0.5x, 1x, 1.5x, 2x).",
+      "Sets playback speed multiplier for the selected segment (0.5x, 1x, 1.5x, 2x). THIS SHIFTS THE TIMELINE — re-ingest after calling.",
     inputSchema: {
       type: "object",
       properties: {
@@ -677,19 +796,25 @@ export function registerEditingTools(): void {
 
       const safeSpeed = [0.5, 1, 1.5, 2].includes(speed) ? speed : 1;
       store.updateSelectedSegments({ speed: safeSpeed });
+      const revision = bumpTimelineRevision();
+      const project = useProjectStore.getState().project;
       return {
+        timelineRevision: revision,
+        timelineShifted: true,
         speed: safeSpeed,
+        newDurationSeconds: project ? Number(projectDuration(project).toFixed(2)) : null,
+        nextStep: "Segment durations changed — re-call get_project_state and get_transcript before further edits.",
         message: `Clip speed updated to ${safeSpeed}x.`,
       };
     },
   });
 
-  // ── 7. TIMELINE: SET ASPECT ──
+  // ── 9. TIMELINE: SET ASPECT ──
 
   registerToolWithLifecycle({
     name: "set_aspect",
     description:
-      "Sets the stage aspect ratio preset ('16:9', '9:16', '1:1', '4:3', or 'source').",
+      "Sets the stage aspect ratio preset ('16:9', '9:16', '1:1', '4:3', or 'source'). Does not shift timestamps.",
     inputSchema: {
       type: "object",
       properties: {
@@ -712,18 +837,19 @@ export function registerEditingTools(): void {
       store.setAspectPreset(targetPreset);
 
       return {
+        timelineRevision: getTimelineRevision(),
         aspect: targetPreset,
         message: `Aspect ratio preset set to ${targetPreset}.`,
       };
     },
   });
 
-  // ── 8. TIMELINE: ADD MUSIC ──
+  // ── 10. TIMELINE: ADD MUSIC ──
 
   registerToolWithLifecycle({
     name: "add_music",
     description:
-      "Adds or moves an audio track on the timeline at a specified start timestamp.",
+      "Adds or moves an audio track on the timeline at a specified start timestamp (timeline seconds).",
     inputSchema: {
       type: "object",
       properties: {
@@ -753,6 +879,7 @@ export function registerEditingTools(): void {
 
       store.updateAudioTrack(trackId, { startT: Math.max(0, startT) });
       return {
+        timelineRevision: getTimelineRevision(),
         trackId,
         startT: Math.max(0, startT),
         message: `Audio track "${existing.name}" positioned at ${startT.toFixed(2)}s.`,
@@ -760,77 +887,7 @@ export function registerEditingTools(): void {
     },
   });
 
-  // ── 9. ACTION: COMMIT STAGED CHANGES ──
-
-  registerToolWithLifecycle({
-    name: "commit_staged_changes",
-    description:
-      "Commits ALL staged proposals (zoom keyframes, text overlays, backgrounds) to the project. Shows the staged diff dialog for human confirmation.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-    },
-    execute: async () => {
-      const store = useProjectStore.getState();
-      if (!store.project) {
-        return { error: "No project loaded. Ask the user to import a clip first." };
-      }
-
-      const diff = store.getStagedDiff();
-      if (diff.totalCount === 0) {
-        return {
-          committed: false,
-          reason: "nothing_staged",
-          message: "No staged changes to commit.",
-        };
-      }
-
-      const confirmed = await showConfirmDialog({
-        diff,
-        message: `Commit ${diff.totalCount} staged change(s)?\n\n${diff.added.join("\n")}`,
-      });
-
-      if (!confirmed) {
-        return {
-          committed: false,
-          reason: "user_declined",
-          message: "Commit declined by user.",
-        };
-      }
-
-      store.commitAll();
-      return {
-        committed: true,
-        itemsCommitted: diff.totalCount,
-        message: "All staged changes committed successfully. The project is updated.",
-      };
-    },
-  });
-
-  // ── 10. ACTION: DISCARD STAGED CHANGES ──
-
-  registerToolWithLifecycle({
-    name: "discard_staged_changes",
-    description: "Discards all currently staged ghost proposals without committing them.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-    },
-    execute: async () => {
-      const store = useProjectStore.getState();
-      if (!store.project) {
-        return { error: "No project loaded." };
-      }
-
-      const diff = store.getStagedDiff();
-      const count = diff.totalCount;
-      store.clearStaged();
-
-      return {
-        discarded: true,
-        itemsDiscarded: count,
-        message: `Discarded ${count} staged change(s).`,
-      };
-    },
-  });
+  // NOTE: commit_staged_changes and discard_staged_changes are registered once
+  // in tools-batch.ts (registered last → authoritative). Do not duplicate them
+  // here: duplicate names made the console dispatch ambiguous.
 }

@@ -1,6 +1,13 @@
 /**
  * WebMCP Engine Tools (Read-only project inspection + Gated Export).
  * Registered via registerToolWithLifecycle.
+ *
+ * TIME SPACE CONTRACT: every timestamp these tools return is in CURRENT
+ * TIMELINE seconds at the `timelineRevision` included in the response.
+ * Source-media timestamps (analysis cache, click log, stored edits) are mapped
+ * via timeSpace.ts before returning, and moments trimmed out of the timeline
+ * are dropped. Agents therefore never need to convert source↔timeline
+ * themselves — they only must RE-INGEST after the revision changes.
  */
 
 import { registerToolWithLifecycle } from "./lifecycle";
@@ -9,6 +16,12 @@ import { projectDuration, segmentDuration } from "@panoptik/engine";
 import { engine } from "@/lib/engineProvider";
 import { showConfirmDialog } from "./confirm";
 import { getAnalysisCache } from "./tools-batch";
+import { getTimelineRevision, STALENESS_CONTRACT } from "./revision";
+import { directorPlaybookBlock } from "./playbook";
+import {
+  mapIntervalToTimeline,
+  sourceToTimelineT,
+} from "./timeSpace";
 import type { ExportFps, ExportOpts } from "@panoptik/schema";
 import { DEFAULT_EXPORT_FPS } from "@panoptik/schema";
 
@@ -18,7 +31,7 @@ export function registerEngineTools(): void {
   registerToolWithLifecycle({
     name: "get_project_state",
     description:
-      "MANDATORY FIRST STEP for any video editing, review, or enhancement request in Panoptik. Call this immediately to discover the project timeline, clips, durations, and to load the Director Playbook heuristics into your context.",
+      "MANDATORY FIRST STEP for any video editing, review, or enhancement request. Returns the full project: clips, durations, zooms, overlays, audio, plus the Director Playbook and the autonomous decision tree for vague requests like 'edit this video'. All timestamps are CURRENT TIMELINE seconds; check timelineRevision — if it changed since your last read, your cached observations are stale and you MUST re-ingest.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -33,6 +46,11 @@ export function registerEngineTools(): void {
       const totalDur = projectDuration(project);
       const media = project.media[0];
       const dimensions = media ? `${media.width}x${media.height}` : "1920x1080";
+      const revision = getTimelineRevision();
+
+      // Display helper: stored source seconds → current timeline seconds.
+      const mapT = (t: number, mediaId: string): number =>
+        Number((sourceToTimelineT(project, t, mediaId) ?? t).toFixed(2));
 
       let allCommittedZooms = 0;
       let allStagedZooms = 0;
@@ -51,13 +69,22 @@ export function registerEngineTools(): void {
 
       return {
         projectId: project.id,
+        timelineRevision: revision,
+        timeSpace: "timeline",
         durationSeconds: Number(totalDur.toFixed(2)),
+        mediaSourceDuration: media ? Number(media.duration.toFixed(2)) : null,
         dimensions,
         segmentCount: project.segments.length,
         segments: project.segments.map((seg, i) => ({
           index: i + 1,
           id: seg.id,
           name: seg.name ?? `Clip ${i + 1}`,
+          timelineStart: Number(
+            project
+              .segments.slice(0, i)
+              .reduce((acc, s) => acc + segmentDuration(s), 0)
+              .toFixed(2),
+          ),
           duration: Number(segmentDuration(seg).toFixed(2)),
           speed: seg.speed,
           aspect: seg.aspectPreset,
@@ -66,17 +93,23 @@ export function registerEngineTools(): void {
           facecam: seg.facecam,
           zoomPoints: (seg.zoomPoints ?? []).map((z) => ({
             id: z.id,
-            t: Number(z.t.toFixed(2)),
+            t: mapT(z.t, seg.mediaId),
             scale: z.to.scale,
             focalPoint: `(${z.to.x.toFixed(2)}, ${z.to.y.toFixed(2)})`,
           })),
           stagedZooms: (seg.stagedZoomPoints ?? []).map((z) => ({
             id: z.id,
-            t: Number(z.t.toFixed(2)),
+            t: mapT(z.t, seg.mediaId),
             scale: z.to.scale,
           })),
-          textOverlays: seg.textOverlays ?? [],
-          stagedTextOverlays: seg.stagedTextOverlays ?? [],
+          textOverlays: (seg.textOverlays ?? []).map((o) => ({
+            ...o,
+            timestamp: mapT(o.timestamp, seg.mediaId),
+          })),
+          stagedTextOverlays: (seg.stagedTextOverlays ?? []).map((o) => ({
+            ...o,
+            timestamp: mapT(o.timestamp, seg.mediaId),
+          })),
         })),
         totalCommittedZooms: allCommittedZooms,
         totalStagedZooms: allStagedZooms,
@@ -90,29 +123,13 @@ export function registerEngineTools(): void {
           volume: a.volume,
           ducking: a.ducking,
         })),
+        audioTrackCount,
         facecamPresent,
         aspectPreset: project.segments[0]?.aspectPreset ?? "source",
         background: project.segments[0]?.background ?? { kind: "solid", color: "#000000" },
         clickLogCount: project.clickLog?.length ?? 0,
-        directorPlaybook: {
-          coreRules: [
-            "NO EMOJIS: Do NOT use emojis in titles, badges, or overlays. Use clean typographic hierarchy (e.g. FEATURE:, ARCHITECTURE:, SECTION:).",
-            "MULTI-STAGE PANS: When tracking longitudinal content or reading down comments, create sequential focal transitions (Stage 1 cy=0.45, Stage 2 cy=0.68 at 1.6x-1.8x) rather than a single static zoom that clips the bottom.",
-            "PARKED CURSOR HEURISTIC: If cursor was stationary >3s, it is parked. Verify active target via probe_frames 3x3 grid snapshots.",
-            "CLOSED-LOOP POST-TRIM RE-INGESTION: Any trim or split rebases timeline time and durations. Always re-fetch get_project_state and get_transcript after trimming before placing zoom keyframes.",
-            "SAFE VIEWPORT FORMULA: Visible vertical height is 1/scale (e.g. 1.8x scale shows 55.5% vertical height from cy-0.277 to cy+0.277). Keep content within [0.05, 0.95].",
-            "OVERLAY INVERSION: If an active zoom targets the top half (cy <= 0.45), place overlays at pos: 'bottom' (and vice versa).",
-            "FACECAM KEEPOUT: Check actualCamCorner ('br') to prevent zoom centers and overlays from colliding with facecam."
-          ],
-          standardProtocol: [
-            "1. get_project_state & get_transcript (Ingest timeline state & speech)",
-            "2. probe_frames (Sample 3x3 grid frames at target timestamps to ground visual coordinates)",
-            "3. get_click_log (Inspect human click telemetry for active cursor grounding)",
-            "4. propose_edits (Stage batched atomic edits with zooms, text overlays, speed)",
-            "5. inspect_timeline (Verify staged diff on rebased timeline)",
-            "6. commit_staged_changes (Bake approved edits into timeline)"
-          ]
-        },
+        stalenessContract: STALENESS_CONTRACT,
+        directorPlaybook: directorPlaybookBlock(),
       };
     },
   });
@@ -120,7 +137,7 @@ export function registerEngineTools(): void {
   registerToolWithLifecycle({
     name: "list_clips",
     description:
-      "Returns a list of all timeline video clips with cumulative start/end timestamps, durations, speeds, and transitions.",
+      "Returns all timeline video clips with cumulative start/end timestamps, durations, speeds, and transitions. All times are CURRENT TIMELINE seconds.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -153,6 +170,8 @@ export function registerEngineTools(): void {
       });
 
       return {
+        timelineRevision: getTimelineRevision(),
+        timeSpace: "timeline",
         totalClips: clips.length,
         totalDuration: Number(timelineCursor.toFixed(2)),
         clips,
@@ -163,7 +182,7 @@ export function registerEngineTools(): void {
   registerToolWithLifecycle({
     name: "list_scenes",
     description:
-      "Returns a list of all timeline segments (scenes) with their cumulative timeline start/end timestamps, duration, speed, and transitions.",
+      "Returns all timeline segments (scenes) with cumulative timeline start/end timestamps, duration, speed, and transitions. All times are CURRENT TIMELINE seconds.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -195,6 +214,8 @@ export function registerEngineTools(): void {
       });
 
       return {
+        timelineRevision: getTimelineRevision(),
+        timeSpace: "timeline",
         totalScenes: scenes.length,
         totalDuration: Number(timelineCursor.toFixed(2)),
         scenes,
@@ -205,7 +226,7 @@ export function registerEngineTools(): void {
   registerToolWithLifecycle({
     name: "get_silence_intervals",
     description:
-      "Detects audio silence and dead-air intervals in the video where the speaker is inactive. Returns start/end timestamps and durations for ripple trimming.",
+      "Detects audio silence and dead-air intervals where the speaker is inactive, returned in CURRENT TIMELINE seconds. Use for ripple trimming: dead air >= 1.5s is a cut candidate ({op:'cut', dropSilence:true}). Requires transcription — call generate_captions first if status is PENDING_TRANSCRIPTION.",
     inputSchema: {
       type: "object",
       properties: {
@@ -225,28 +246,36 @@ export function registerEngineTools(): void {
 
       const totalDur = projectDuration(project);
       const cache = getAnalysisCache();
+      const revision = getTimelineRevision();
 
       if (cache?.audio?.silences && cache.audio.silences.length > 0) {
+        // Cache silences are SOURCE-media seconds — map to the current timeline
+        // and drop moments that were trimmed away.
         const silences = cache.audio.silences
-          .filter((s) => s.duration >= minDurationSec)
+          .map((s) => mapIntervalToTimeline(project, s.start, s.end, cache.mediaId))
+          .filter((s): s is { start: number; end: number } => s !== null)
           .map((s) => ({
             start: Number(s.start.toFixed(2)),
             end: Number(s.end.toFixed(2)),
-            duration: Number(s.duration.toFixed(2)),
-          }));
+            duration: Number((s.end - s.start).toFixed(2)),
+          }))
+          .filter((s) => s.duration >= minDurationSec)
+          .sort((a, b) => a.start - b.start);
         return {
+          timelineRevision: revision,
+          timeSpace: "timeline",
           totalDuration: Number(totalDur.toFixed(2)),
           count: silences.length,
           silences,
         };
       }
 
-      // Compute silences from text overlays / captions / speech phrases
+      // Compute silences from transcript phrases (also source-space → mapped).
       const allTextOverlays = project.segments.flatMap((s) => [
         ...(s.textOverlays ?? []),
         ...(s.stagedTextOverlays ?? []),
       ]);
-      const phrases =
+      const sourcePhrases =
         cache?.phrases && cache.phrases.length > 0
           ? cache.phrases
           : allTextOverlays
@@ -258,8 +287,10 @@ export function registerEngineTools(): void {
                 speaker: c.speaker === "Screen" ? 1 : 0,
               }));
 
-      if (phrases.length === 0) {
+      if (sourcePhrases.length === 0) {
         return {
+          timelineRevision: revision,
+          timeSpace: "timeline",
           totalDuration: Number(totalDur.toFixed(2)),
           count: 0,
           silences: [],
@@ -268,11 +299,14 @@ export function registerEngineTools(): void {
         };
       }
 
-      const silences: Array<{ start: number; end: number; duration: number }> = [];
-      const sorted = [...phrases].sort((a, b) => a.start - b.start);
+      const phrases = sourcePhrases
+        .map((p) => mapIntervalToTimeline(project, p.start, p.end))
+        .filter((p): p is { start: number; end: number } => p !== null)
+        .sort((a, b) => a.start - b.start);
 
+      const silences: Array<{ start: number; end: number; duration: number }> = [];
       let prevEnd = 0;
-      for (const p of sorted) {
+      for (const p of phrases) {
         if (p.start - prevEnd >= minDurationSec) {
           silences.push({
             start: Number(prevEnd.toFixed(2)),
@@ -291,6 +325,8 @@ export function registerEngineTools(): void {
       }
 
       return {
+        timelineRevision: revision,
+        timeSpace: "timeline",
         totalDuration: Number(totalDur.toFixed(2)),
         count: silences.length,
         silences,
@@ -300,7 +336,8 @@ export function registerEngineTools(): void {
 
   registerToolWithLifecycle({
     name: "get_transcript",
-    description: "Returns the spoken transcript with timestamps and speaker tags. If empty, call generate_captions to transcribe.",
+    description:
+      "Returns the spoken transcript with timestamps in CURRENT TIMELINE seconds. If empty, call generate_captions to transcribe. Re-fetch this after any cut/delete/speed change — earlier timestamps go stale when the timeline shifts.",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true },
     execute: async () => {
@@ -312,7 +349,7 @@ export function registerEngineTools(): void {
         ...(s.stagedTextOverlays ?? []),
       ]);
       const cache = getAnalysisCache();
-      const phrases =
+      const sourcePhrases =
         cache?.phrases && cache.phrases.length > 0
           ? cache.phrases
           : allOverlays
@@ -324,8 +361,10 @@ export function registerEngineTools(): void {
                 speaker: c.speaker === "Screen" ? 1 : 0,
               }));
 
-      if (phrases.length === 0) {
+      if (sourcePhrases.length === 0) {
         return {
+          timelineRevision: getTimelineRevision(),
+          timeSpace: "timeline",
           phraseCount: 0,
           transcript: "",
           phrases: [],
@@ -333,6 +372,15 @@ export function registerEngineTools(): void {
           guidance: "Transcript has not been generated for this video yet. Call `generate_captions` to transcribe audio and produce timestamped speech phrases.",
         };
       }
+
+      // Source → timeline mapping; trimmed speech is dropped.
+      const phrases = sourcePhrases
+        .map((p) => {
+          const iv = mapIntervalToTimeline(project, p.start, p.end);
+          return iv ? { ...p, start: iv.start, end: iv.end } : null;
+        })
+        .filter((p): p is NonNullable<typeof p> => p !== null)
+        .sort((a, b) => a.start - b.start);
 
       const formatted = phrases
         .map((p) => {
@@ -345,6 +393,8 @@ export function registerEngineTools(): void {
         .join("\n");
 
       return {
+        timelineRevision: getTimelineRevision(),
+        timeSpace: "timeline",
         phraseCount: phrases.length,
         transcript: formatted,
         phrases,
@@ -355,7 +405,7 @@ export function registerEngineTools(): void {
   registerToolWithLifecycle({
     name: "inspect_timeline",
     description:
-      "Detailed inspector of all clips, timeline timestamps, transitions, speed, zooms, and overlays.",
+      "Detailed inspector of all clips, timeline timestamps, transitions, speed, zooms, and overlays. All times are CURRENT TIMELINE seconds.",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true },
     execute: async () => {
@@ -363,11 +413,13 @@ export function registerEngineTools(): void {
       const project = store.project;
       if (!project) return { error: "No project loaded." };
       return {
-        totalDuration: projectDuration(project),
+        timelineRevision: getTimelineRevision(),
+        timeSpace: "timeline",
+        totalDuration: Number(projectDuration(project).toFixed(2)),
         clips: project.segments.map((seg, idx) => ({
           clipIndex: idx,
           id: seg.id,
-          duration: segmentDuration(seg),
+          duration: Number(segmentDuration(seg).toFixed(2)),
           speed: seg.speed,
           transition: seg.transition ?? "cut",
           transitionDuration: seg.transitionDuration ?? 0.45,
@@ -381,42 +433,63 @@ export function registerEngineTools(): void {
   registerToolWithLifecycle({
     name: "get_click_log",
     description:
-      "Returns the continuous cursor trajectory and click interaction timestamps recorded during the session. Can also interpolate the exact cursor (x, y) at a specific timestamp.",
+      "Returns cursor telemetry in CURRENT TIMELINE seconds. Default response is COMPACT: per-20s attention buckets (where the mouse was active), click counts, and suggested zoom timestamps — plus exact cursor (x, y) interpolation via atTimestamp. Pass detail:'full' for the raw point list (token-heavy; rarely needed). Click clusters are prime zoom candidates; a parked cursor (no recent events) is NOT a good zoom target.",
     inputSchema: {
       type: "object",
       properties: {
         atTimestamp: {
           type: "number",
-          description: "Optional: interpolate and return the exact cursor (x, y) at this specific video timestamp",
+          description: "Optional: interpolate and return the exact cursor (x, y) at this timeline timestamp",
+        },
+        detail: {
+          type: "string",
+          enum: ["summary", "full"],
+          description: "'summary' (default) returns attention buckets only; 'full' also includes the raw point list.",
         },
       },
     },
     annotations: { readOnlyHint: true },
-    execute: async ({ atTimestamp }: { atTimestamp?: number } = {}) => {
+    execute: async ({
+      atTimestamp,
+      detail,
+    }: {
+      atTimestamp?: number;
+      detail?: "summary" | "full";
+    } = {}) => {
       const project = useProjectStore.getState().project;
       if (!project) {
         return { error: "No project loaded. Ask the user to import or record a clip first." };
       }
 
+      const revision = getTimelineRevision();
       const clicks = project.clickLog ?? [];
 
-      // If atTimestamp requested, find nearest cursor coordinate or interpolate
+      // Clicks are stored at source-media seconds; map to the current timeline
+      // and drop moments that were trimmed away.
+      const mapped = clicks
+        .map((c) => {
+          const tl = sourceToTimelineT(project, c.t);
+          return tl == null ? null : { ...c, t: tl };
+        })
+        .filter((c): c is NonNullable<typeof c> => c !== null)
+        .sort((a, b) => a.t - b.t);
+
+      // If atTimestamp requested, interpolate the cursor at that timeline time.
       if (typeof atTimestamp === "number") {
-        if (clicks.length === 0) {
-          return { t: atTimestamp, x: 0.5, y: 0.5, interpolated: false, count: 0 };
+        if (mapped.length === 0) {
+          return { timelineRevision: revision, timeSpace: "timeline", t: atTimestamp, x: 0.5, y: 0.5, interpolated: false, count: 0 };
         }
-        const sorted = [...clicks].sort((a, b) => a.t - b.t);
-        const exact = sorted.find((c) => Math.abs(c.t - atTimestamp) < 0.05);
+        const exact = mapped.find((c) => Math.abs(c.t - atTimestamp) < 0.05);
         if (exact) {
-          return { t: exact.t, x: exact.x, y: exact.y, type: exact.type, count: clicks.length };
+          return { timelineRevision: revision, timeSpace: "timeline", t: Number(exact.t.toFixed(2)), x: exact.x, y: exact.y, type: exact.type, count: mapped.length };
         }
-        // Find surrounding points
-        let prev = sorted[0]!;
-        let next = sorted[sorted.length - 1]!;
-        for (let i = 0; i < sorted.length - 1; i++) {
-          if (sorted[i]!.t <= atTimestamp && sorted[i + 1]!.t >= atTimestamp) {
-            prev = sorted[i]!;
-            next = sorted[i + 1]!;
+        // Interpolate in timeline space between the mapped neighbours.
+        let prev = mapped[0]!;
+        let next = mapped[mapped.length - 1]!;
+        for (let i = 0; i < mapped.length - 1; i++) {
+          if (mapped[i]!.t <= atTimestamp && mapped[i + 1]!.t >= atTimestamp) {
+            prev = mapped[i]!;
+            next = mapped[i + 1]!;
             break;
           }
         }
@@ -424,23 +497,54 @@ export function registerEngineTools(): void {
         const alpha = span > 0.001 ? Math.max(0, Math.min(1, (atTimestamp - prev.t) / span)) : 0;
         const interpX = Number((prev.x + alpha * (next.x - prev.x)).toFixed(3));
         const interpY = Number((prev.y + alpha * (next.y - prev.y)).toFixed(3));
-        return { t: atTimestamp, x: interpX, y: interpY, type: "interpolated", count: clicks.length };
+        return { timelineRevision: revision, timeSpace: "timeline", t: atTimestamp, x: interpX, y: interpY, type: "interpolated", count: mapped.length };
       }
 
-      const clickOnly = clicks.filter((c) => c.type === "click" || c.type === "manual");
+      const clickOnly = mapped.filter((c) => c.type === "click" || c.type === "manual");
 
-      const formatted = clicks.slice(0, 300).map((c) => ({
-        t: Number(c.t.toFixed(2)),
-        x: Number(c.x.toFixed(3)),
-        y: Number(c.y.toFixed(3)),
-        type: c.type,
-      }));
+      // Attention summary: per-20s buckets so the agent sees WHERE the mouse
+      // was active without parsing a raw point dump.
+      const bucketSec = 20;
+      const buckets = new Map<number, { events: number; clicks: number; sx: number; sy: number }>();
+      for (const c of mapped) {
+        const key = Math.floor(c.t / bucketSec);
+        const b = buckets.get(key) ?? { events: 0, clicks: 0, sx: 0, sy: 0 };
+        b.events++;
+        if (c.type === "click" || c.type === "manual") b.clicks++;
+        b.sx += c.x;
+        b.sy += c.y;
+        buckets.set(key, b);
+      }
+      const attention = [...buckets.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([key, b]) => ({
+          from: Number((key * bucketSec).toFixed(1)),
+          to: Number(((key + 1) * bucketSec).toFixed(1)),
+          events: b.events,
+          clicks: b.clicks,
+          centroid: { x: Number((b.sx / b.events).toFixed(3)), y: Number((b.sy / b.events).toFixed(3)) },
+        }));
+
+      // Raw points: capped by default, omitted in summary mode. The old
+      // response also sent the same list twice (clicks + trajectory) — gone.
+      const cap = detail === "full" ? 300 : 120;
+      const rawPoints =
+        detail === "summary"
+          ? undefined
+          : mapped.slice(0, cap).map((c) => ({
+              t: Number(c.t.toFixed(2)),
+              x: Number(c.x.toFixed(3)),
+              y: Number(c.y.toFixed(3)),
+              type: c.type,
+            }));
 
       return {
-        count: clicks.length,
+        timelineRevision: revision,
+        timeSpace: "timeline",
+        count: mapped.length,
         clickCount: clickOnly.length,
-        clicks: formatted,
-        trajectory: formatted,
+        ...(rawPoints ? { clicks: rawPoints } : { clicksOmitted: "Pass detail:'full' to receive the raw point list." }),
+        attention,
         suggestedZoomTimestamps: clickOnly.slice(0, 15).map((c) => Number(c.t.toFixed(2))),
       };
     },

@@ -1,4 +1,4 @@
-# Open Demo Studio × WebMCP
+# Panoptik × WebMCP
 
 > The open-source, browser-native demo video studio where you and your AI agent co-edit on the same canvas. Drop in a recording, the agent watches the preview, proposes zoom points and captions at the interesting moments, you review a diff and commit, then export a polished MP4 — all client-side, no uploads, no server.
 
@@ -13,7 +13,7 @@
 
 Making a polished demo video today means manually placing every zoom keyframe, typing every caption, picking every background. A 2-minute product demo might need 15 zoom points, 40 caption lines, and 3 background changes — all placed by hand in a timeline UI. It's tedious, error-prone, and the reason most people ship raw recordings instead of polished demos.
 
-**Open Demo Studio fixes this by making the editor agent-native.** When you open the editor in ChatGPT's in-app browser (or Chrome with the WebMCP flag), your agent can watch the same preview you're watching, identify the interesting moments (UI clicks, text reveals, scene changes), and propose zoom points, captions, and backgrounds as a staged diff. You review the diff, approve it, and export. The agent does the tedious 80%; you do the creative 20%.
+**Panoptik fixes this by making the editor agent-native.** When you open the editor in ChatGPT's in-app browser (or Chrome with the WebMCP flag), your agent can watch the same preview you're watching, identify the interesting moments (UI clicks, text reveals, scene changes), and propose zoom points, captions, and backgrounds as a staged diff. You review the diff, approve it, and export. The agent does the tedious 80%; you do the creative 20%.
 
 ---
 
@@ -190,8 +190,8 @@ The project exposes 9 imperative tools and 1 declarative form. Each tool follows
 ### Setup
 
 ```bash
-git clone https://github.com/[your-org]/open-demo-studio.git
-cd open-demo-studio
+git clone https://github.com/Panoptik-Studio/Panoptik.git
+cd Panoptik
 pnpm install
 pnpm dev
 ```
@@ -230,7 +230,7 @@ The editor works fully without an agent. You can:
 ## Project structure
 
 ```
-open-demo-studio/
+Panoptik/
 ├─ apps/
 │  └─ web/                         # Next.js static export
 │     ├─ src/
@@ -291,7 +291,7 @@ This project follows the WebMCP spec's security guidance:
 | Time | Content |
 |---|---|
 | 0:00–0:15 | The problem: "Making demo videos means manually placing every zoom point. A 2-minute demo needs 15+ zooms, 40+ captions. Most people ship raw recordings instead." |
-| 0:15–0:30 | Import a screen recording into Open Demo Studio. The clip renders on the canvas. |
+| 0:15–0:30 | Import a screen recording into Panoptik. The clip renders on the canvas. |
 | 0:30–1:00 | In ChatGPT's in-app browser, ask: "Watch this preview and propose zoom points at the interesting moments." The agent calls `get_click_log`, then `propose_zoom_points`. Ghost diamonds appear on the timeline. |
 | 1:00–1:20 | Ask: "Also add captions and set a gradient background." The agent calls `generate_captions` (Whisper runs locally) and `set_background`. More items stage. |
 | 1:20–1:50 | The human adjusts one zoom depth from 2× to 2.5× by dragging. The agent calls `commit_staged_changes`. A confirmation dialog shows the full diff. The human clicks "Confirm." All staged items commit. Ghost diamonds become solid. |
@@ -334,7 +334,7 @@ Based on the quickstart benchmark and community measurements, WebMCP tool calls 
 | v0.5 | SRT/VTT caption sidecar export, PDF-to-video, privacy blur regions |
 | Later | Mini-tools suite (compress, crop, split, merge), optional hosted convenience tier, i18n, template gallery |
 
-The engine package (`@open-demo-studio/engine`, MIT) is designed to be npm-publishable — other projects can embed the zoom-rendering pipeline in their apps. This is the contributor magnet and the moat against maintainer burnout.
+The engine package (`@panoptik/engine`, MIT) is designed to be npm-publishable — other projects can embed the zoom-rendering pipeline in their apps. This is the contributor magnet and the moat against maintainer burnout.
 
 ---
 

@@ -1,28 +1,39 @@
 /**
- * Consolidated 6 Core + 3 Tiered WebMCP Tool Catalog for Panoptik.
+ * Consolidated core WebMCP tool catalog for Panoptik (registered last → authoritative).
  * Implements:
- * 1. get_video_summary (Read-Only Free)
- * 2. get_scene_detail (Read-Only Free)
- * 3. probe_frames (Read-Only Free)
- * 4. propose_edits (Staging Batch Free)
- * 5. commit_staged_changes (Action Free)
- * 6. discard_staged_changes (Action Free)
- * 7. export_clip (Action Free)
- * 8. cloud_transcribe (Cloud AI Pro / BYOK)
- * 9. ai_auto_director (Cloud AI Pro / BYOK)
+ * 1. get_director_guidelines (Read-Only Free)
+ * 2. get_video_summary (Read-Only Free)
+ * 3. get_scene_detail (Read-Only Free)
+ * 4. probe_frames (Read-Only Free)
+ * 5. locate_visual_target (Read-Only Free)
+ * 6. propose_edits (Batch Apply Free)
+ * 7. commit_staged_changes (Action Free)
+ * 8. discard_staged_changes (Action Free)
+ * 9. cloud_transcribe (Cloud AI Pro / BYOK)
+ * 10. ai_auto_director (Cloud AI Pro / BYOK)
+ *
+ * TIME SPACE CONTRACT: read tools return CURRENT TIMELINE seconds (mapped from
+ * the source-space analysis cache at the boundary — the cache itself stays in
+ * source space for snapping). propose_edits accepts timeline-space ops.
  */
 
 import {
   generateVideoDigest,
   type FullMediaAnalysis,
+  type SilenceInterval,
+  type SceneFeature,
   type VideoDigest,
 } from "@panoptik/engine";
+import type { Project } from "@panoptik/schema";
 import { useProjectStore } from "../stores/projectStore";
 import { showConfirmDialog } from "./confirm";
 import { registerToolWithLifecycle } from "./lifecycle";
 import { snapAndRebaseEditOps, type EditOp } from "./snapping";
 import { executeBatchOps } from "./batchExecutor";
 import { runAutoDirector, transcribeAudioStream } from "../lib/ai/providers";
+import { bumpTimelineRevision, getTimelineRevision, STALENESS_CONTRACT } from "./revision";
+import { AUTONOMOUS_DECISION_TREE, DIRECTOR_RULES, STANDARD_PROTOCOL, directorPlaybookBlock } from "./playbook";
+import { mapAnalysisToTimeline, mapIntervalToTimeline, sourceToTimelineT, timelineToSource } from "./timeSpace";
 
 let currentAnalysisCache: FullMediaAnalysis | null = null;
 
@@ -34,11 +45,78 @@ export function getAnalysisCache(): FullMediaAnalysis | null {
   return currentAnalysisCache;
 }
 
+/**
+ * A minimal source-space analysis synthesized from project state alone, used
+ * when the full media analysis has not been computed. Gives the snapping
+ * pipeline silence intervals (caption/speech gaps) and scenes so cut ops and
+ * feature lookups still work; real RMS silences and emphasis peaks replace it
+ * once generate_captions seeds the cache.
+ */
+export function synthesizeAnalysisFromProject(project: Project): FullMediaAnalysis {
+  const total = project.media[0]?.duration ?? 0;
+  const speech = project.segments
+    .flatMap((s) => [...(s.textOverlays ?? []), ...(s.stagedTextOverlays ?? [])])
+    .filter((o) => Boolean(o.text?.trim()) && o.kind === "caption")
+    .map((c) => ({ start: c.timestamp, end: c.timestamp + (c.duration ?? 3) }))
+    .sort((a, b) => a.start - b.start);
+
+  const silences: SilenceInterval[] = [];
+  let prevEnd = 0;
+  for (const p of speech) {
+    if (p.start - prevEnd >= 0.45) {
+      silences.push({ start: prevEnd, end: p.start, duration: Number((p.start - prevEnd).toFixed(2)) });
+    }
+    prevEnd = Math.max(prevEnd, p.end);
+  }
+  if (total - prevEnd >= 0.45) {
+    silences.push({ start: prevEnd, end: total, duration: Number((total - prevEnd).toFixed(2)) });
+  }
+
+  const scenes: SceneFeature[] = project.segments.map((seg, idx) => {
+    const fc = seg.facecam;
+    const isLeft = (fc?.x ?? 0.8) < 0.5;
+    const isTop = (fc?.y ?? 0.8) < 0.5;
+    return {
+      id: idx,
+      t0: seg.srcStart,
+      t1: seg.srcEnd,
+      motionCategory: "medium" as const,
+      paletteIndex: 0,
+      camCorner: (fc?.src ? `${isTop ? "t" : "b"}${isLeft ? "l" : "r"}` : "br") as SceneFeature["camCorner"],
+      keyframeTime: (seg.srcStart + seg.srcEnd) / 2,
+    };
+  });
+
+  return {
+    mediaId: project.media[0]?.id ?? "m1",
+    sampledHash: "synthetic",
+    duration: total,
+    scenes,
+    audio: {
+      duration: total,
+      silences,
+      minorPauses: [],
+      loudPeaks: [],
+      speechRatio: speech.length > 0 ? 0.6 : 0,
+    },
+    words: [],
+    phrases: [],
+    interactions: [],
+    createdAt: Date.now(),
+  };
+}
+
+/** The best analysis available: the real cache when present, else the synthesized one. */
+export function resolveAnalysis(project: Project): FullMediaAnalysis {
+  return currentAnalysisCache ?? synthesizeAnalysisFromProject(project);
+}
+
 export function registerBatchTools(): void {
   // ── 0. get_director_guidelines (Read-Only Free) ──
   registerToolWithLifecycle({
     name: "get_director_guidelines",
-    description: "Returns the authoritative Video Director reasoning playbook: multimodal heuristics, zoom scales, text overlay rules (no emojis), keepouts, and standard 7-step execution protocol.",
+    description:
+      "Returns the authoritative Video Director reasoning playbook: multimodal heuristics, zoom scales, text overlay rules (no emojis), keepouts, the staleness contract, and the autonomous decision tree for vague requests like 'edit the reaction video'.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -46,31 +124,19 @@ export function registerBatchTools(): void {
     annotations: { readOnlyHint: true },
     execute: async () => {
       return {
+        timelineRevision: getTimelineRevision(),
         guideTitle: "Panoptik AI Video Director Playbook",
-        corePhilosophy: "Multimodal spatial-temporal reasoning (Spoken intent + Human cursor telemetry + Frame probing)",
-        rules: [
-          "1. NO EMOJIS: Do NOT use emojis in titles, badges, or overlays. Use clean typographic hierarchy (e.g. FEATURE:, ARCHITECTURE:, SECTION:).",
-          "2. SEQUENTIAL TRACKING & MULTI-STAGE PANS: When reading multiple comments or scrolling lists, create sequential focal transitions (e.g. Stage 1 at cy=0.45, Stage 2 at cy=0.68 at 1.6x-1.8x) rather than a single static zoom that clips the bottom.",
-          "3. PARKED MOUSE VS ACTIVE ATTENTION: If mouse cursor is stationary for >3s, it is parked. Do NOT blindly center zoom on parked coordinates; always verify active visual target via probe_frames 3x3 grid snapshots.",
-          "4. CLOSED-LOOP POST-TRIM RE-INGESTION: Any trim or split operation rebases timeline time and durations. Always re-fetch get_project_state and get_transcript after trimming before placing zoom keyframes.",
-          "5. SAFE VIEWPORT FORMULA: Visible vertical height is 1/scale (e.g. 1.8x scale shows 55.5% vertical height from cy-0.277 to cy+0.277). Target cy must ensure content stays inside [0.05, 0.95].",
-          "6. TEXT OVERLAY INVERSION: If an active zoom targets the top half (cy <= 0.45), place overlays at pos: 'bottom' to avoid obscuring the magnified area (and vice versa).",
-          "7. FACECAM KEEPOUT: Verify actualCamCorner ('br') to ensure zoom centers and bottom overlays never collide with the facecam bubble.",
-          "8. SILENCE & SETTINGS KEEPOUT: Do not zoom into incidental settings adjustments (e.g. subtitle gear icons) or silent pauses."
-        ],
-        standardProtocol: [
-          "Step 1: get_project_state & get_transcript (Ingest timeline state & speech)",
-          "Step 2: probe_frames (Sample 3x3 grid frames at target timestamps to ground visual coordinates)",
-          "Step 3: get_click_log (Inspect human click telemetry for active cursor grounding)",
-          "Step 4: propose_edits (Stage batched atomic edits with zooms, text overlays, speed)",
-          "Step 5: inspect_timeline (Verify staged diff on rebased timeline)",
-          "Step 6: commit_staged_changes (Bake approved edits into timeline)"
-        ],
+        corePhilosophy:
+          "Multimodal spatial-temporal reasoning (Spoken intent + Human cursor telemetry + Frame probing)",
+        rules: DIRECTOR_RULES,
+        standardProtocol: STANDARD_PROTOCOL,
+        autonomousDecisionTree: AUTONOMOUS_DECISION_TREE,
+        stalenessContract: STALENESS_CONTRACT,
         textOverlayStyles: {
           fonts: ["Inter", "Outfit", "Montserrat", "Playfair Display", "Fira Code"],
           animations: ["fade", "pop", "slide-up", "slide-down", "zoom-in", "typewriter", "bounce"],
-          backdrops: ["rgba(15,23,42,0.85)", "#1e293b", "rgba(0,0,0,0.75)"]
-        }
+          backdrops: ["rgba(15,23,42,0.85)", "#1e293b", "rgba(0,0,0,0.75)"],
+        },
       };
     },
   });
@@ -78,7 +144,8 @@ export function registerBatchTools(): void {
   // ── 1. get_video_summary (Read-Only Free) ──
   registerToolWithLifecycle({
     name: "get_video_summary",
-    description: "Returns the complete semantic summary of the loaded video: transcript phrases, scene breakdown, silence intervals, and the Director Playbook. Call this to understand the video content before editing.",
+    description:
+      "Returns the complete semantic summary of the loaded video in CURRENT TIMELINE seconds: transcript phrases, scene breakdown, silence intervals, dead air, facecam corner, and the Director Playbook. Call this to understand the video before editing; call generate_captions first if the transcript is missing.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -89,79 +156,52 @@ export function registerBatchTools(): void {
       if (!store.project) {
         return { error: "NO_ACTIVE_PROJECT", message: "No active video project loaded." };
       }
+      const project = store.project;
 
-      const allTextOverlays = store.project.segments.flatMap((s) => [
+      const allTextOverlays = project.segments.flatMap((s) => [
         ...(s.textOverlays ?? []),
         ...(s.stagedTextOverlays ?? []),
       ]);
+      // Caption overlays store source-media timestamps — map to the current
+      // timeline and drop phrases whose moment was trimmed away.
       const phrasesFromCaptions = allTextOverlays
         .filter((o) => Boolean(o.text && o.text.trim()))
-        .map((c) => ({
-          start: c.timestamp,
-          end: c.timestamp + (c.duration ?? 3),
-          text: c.text,
-          speaker: c.speaker === "Screen" ? 1 : 0,
-        }));
+        .flatMap((c) => {
+          const iv = mapIntervalToTimeline(project, c.timestamp, c.timestamp + (c.duration ?? 3));
+          return iv
+            ? [{ start: iv.start, end: iv.end, text: c.text, speaker: c.speaker === "Screen" ? 1 : 0 }]
+            : [];
+        });
 
-      const dummyAnalysis: FullMediaAnalysis = currentAnalysisCache
-        ? {
-            ...currentAnalysisCache,
-            phrases: currentAnalysisCache.phrases.length > 0 ? currentAnalysisCache.phrases : phrasesFromCaptions,
-          }
-        : {
-            mediaId: store.project.media[0]?.id ?? "m1",
-            sampledHash: "mock",
-            duration: store.project.media[0]?.duration ?? 60,
-            scenes: store.project.segments.map((seg, idx) => {
-              const fc = seg.facecam;
-              const isLeft = (fc?.x ?? 0.8) < 0.5;
-              const isTop = (fc?.y ?? 0.8) < 0.5;
-              const actualCorner = fc?.src ? (`${isTop ? "t" : "b"}${isLeft ? "l" : "r"}` as "tl" | "tr" | "bl" | "br") : "br";
-              return {
-                id: idx,
-                t0: seg.srcStart,
-                t1: seg.srcEnd,
-                motionCategory: "medium" as const,
-                paletteIndex: 0,
-                camCorner: actualCorner,
-                keyframeTime: (seg.srcStart + seg.srcEnd) / 2,
-              };
-            }),
-            audio: {
-              duration: store.project.media[0]?.duration ?? 60,
-              silences: [],
-              minorPauses: [],
-              loudPeaks: [],
-              speechRatio: 0.8,
-            },
-            words: [],
-            phrases: phrasesFromCaptions,
-            interactions: [],
-            createdAt: Date.now(),
-          };
+      let analysisForDigest: FullMediaAnalysis;
+      if (currentAnalysisCache) {
+        // Map the source-space cache into current timeline space for the agent.
+        const mapped = mapAnalysisToTimeline(project, currentAnalysisCache);
+        analysisForDigest =
+          mapped.phrases.length > 0
+            ? mapped
+            : { ...mapped, phrases: phrasesFromCaptions };
+      } else {
+        // Synthesized source-space analysis (caption-gap silences + segment
+        // scenes), mapped to the current timeline for the digest.
+        analysisForDigest = mapAnalysisToTimeline(project, synthesizeAnalysisFromProject(project));
+        if (analysisForDigest.phrases.length === 0) {
+          analysisForDigest = { ...analysisForDigest, phrases: phrasesFromCaptions };
+        }
+      }
 
-      const digest = generateVideoDigest(store.project, dummyAnalysis);
+      const digest = generateVideoDigest(project, analysisForDigest);
       return {
+        timelineRevision: getTimelineRevision(),
+        timeSpace: "timeline",
         ...digest,
-        directorPlaybook: {
-          coreRules: [
-            "NO EMOJIS: Do NOT use emojis in titles, badges, or overlays. Use clean typographic hierarchy (e.g. FEATURE:, ARCHITECTURE:, SECTION:).",
-            "MULTI-STAGE PANS: When tracking longitudinal content or reading down comments, create sequential focal transitions (Stage 1 cy=0.45, Stage 2 cy=0.68 at 1.6x-1.8x) rather than a single static zoom that clips the bottom.",
-            "PARKED CURSOR HEURISTIC: If cursor was stationary >3s, it is parked. Verify active target via probe_frames 3x3 grid snapshots.",
-            "CLOSED-LOOP POST-TRIM RE-INGESTION: Any trim or split rebases timeline time and durations. Always re-fetch get_project_state and get_transcript after trimming before placing zoom keyframes.",
-            "SAFE VIEWPORT FORMULA: Visible vertical height is 1/scale (e.g. 1.8x scale shows 55.5% vertical height from cy-0.277 to cy+0.277). Keep content within [0.05, 0.95].",
-            "OVERLAY INVERSION: If an active zoom targets the top half (cy <= 0.45), place overlays at pos: 'bottom' (and vice versa).",
-            "FACECAM KEEPOUT: Check actualCamCorner ('br') to prevent zoom centers and overlays from colliding with facecam."
-          ],
-          standardProtocol: [
-            "1. get_project_state & get_transcript (Ingest timeline state & speech)",
-            "2. probe_frames (Sample 3x3 grid frames at target timestamps to ground visual coordinates)",
-            "3. get_click_log (Inspect human click telemetry for active cursor grounding)",
-            "4. propose_edits (Stage batched atomic edits with zooms, text overlays, speed)",
-            "5. inspect_timeline (Verify staged diff on rebased timeline)",
-            "6. commit_staged_changes (Bake approved edits into timeline)"
-          ]
-        },
+        suggestedNextActions: [
+          ...(digest.transcript ? [] : ["Transcript is empty — call generate_captions to unlock speech-aware editing."]),
+          "Call get_silence_intervals to find dead-air cut candidates.",
+          "Call get_click_log + probe_frames to ground zoom targets.",
+          "Stage everything in ONE propose_edits call, then commit_staged_changes.",
+        ],
+        directorPlaybook: directorPlaybookBlock(),
       };
     },
   });
@@ -169,7 +209,8 @@ export function registerBatchTools(): void {
   // ── 2. get_scene_detail (Read-Only Free) ──
   registerToolWithLifecycle({
     name: "get_scene_detail",
-    description: "Lazy drill-down: returns raw click coordinates, bounding box, and word-level timestamps for a single scene.",
+    description:
+      "Lazy drill-down: returns raw click coordinates, bounding box, and word-level timestamps for a single scene. Windows are in CURRENT TIMELINE seconds.",
     inputSchema: {
       type: "object",
       properties: {
@@ -180,13 +221,24 @@ export function registerBatchTools(): void {
     annotations: { readOnlyHint: true },
     execute: async ({ sceneId }) => {
       const store = useProjectStore.getState();
-      const clicks = store.project?.clickLog ?? [];
+      const project = store.project;
+      const clicks = project?.clickLog ?? [];
       const scene = currentAnalysisCache?.scenes.find((s) => s.id === sceneId);
       const interaction = currentAnalysisCache?.interactions.find((i) => i.sceneId === sceneId);
 
+      let sceneWindow: { t0: number; t1: number } | null = null;
+      if (scene && project) {
+        const mapped = mapIntervalToTimeline(project, scene.t0, scene.t1, currentAnalysisCache?.mediaId);
+        sceneWindow = mapped ? { t0: Number(mapped.start.toFixed(2)), t1: Number(mapped.end.toFixed(2)) } : null;
+      } else if (scene) {
+        sceneWindow = { t0: scene.t0, t1: scene.t1 };
+      }
+
       return {
+        timelineRevision: getTimelineRevision(),
+        timeSpace: "timeline",
         sceneId,
-        sceneWindow: scene ? { t0: scene.t0, t1: scene.t1 } : null,
+        sceneWindow,
         clicks: interaction ? interaction.clicks : clicks.length,
         centroid: interaction?.centroid ?? null,
         boundingBox: interaction?.boundingBox ?? null,
@@ -198,14 +250,15 @@ export function registerBatchTools(): void {
   // ── 3. probe_frames (Read-Only Free) ──
   registerToolWithLifecycle({
     name: "probe_frames",
-    description: "Returns deterministic feature summaries and visual snapshot images with optional 3x3 grid overlays for visual keyframes.",
+    description:
+      "Samples video frames at timeline timestamps: returns deterministic feature summaries and base64 snapshot images with an optional A1..C3 alphanumeric 3x3 grid for visual grounding. Snapshot rendering can take seconds on long recordings — request only the timestamps you need and set includeSnapshot:false when you only need features. Use the grid cells to reference screen regions in locate_visual_target. Timestamps are CURRENT TIMELINE seconds.",
     inputSchema: {
       type: "object",
       properties: {
         timestamps: {
           type: "array",
           items: { type: "number" },
-          description: "List of timestamps to query",
+          description: "List of timeline timestamps to query",
         },
         includeSnapshot: {
           type: "boolean",
@@ -226,7 +279,12 @@ export function registerBatchTools(): void {
 
       const frames = await Promise.all(
         times.map(async (t) => {
-          const scene = currentAnalysisCache?.scenes.find((s) => t >= s.t0 && t <= s.t1);
+          // Scene features are indexed in source time; probe times are timeline time.
+          const srcRef = store.project ? timelineToSource(store.project, t) : null;
+          const analysis = store.project ? resolveAnalysis(store.project) : null;
+          const scene = srcRef
+            ? analysis?.scenes.find((s) => srcRef.srcT >= s.t0 && srcRef.srcT <= s.t1)
+            : undefined;
           let snapshot: string | undefined;
           if (includeSnapshot && store.project) {
             try {
@@ -240,26 +298,31 @@ export function registerBatchTools(): void {
             t,
             sceneId: scene?.id ?? 0,
             features: scene
-              ? `${scene.motionCategory} motion, palette: ${scene.paletteIndex}, camCorner: ${scene.camCorner}`
-              : "Standard video frame",
+              ? `${currentAnalysisCache ? "" : "(synthetic) "}${scene.motionCategory} motion, palette: ${scene.paletteIndex}, camCorner: ${scene.camCorner}`
+              : "No scene analysis available at this timestamp",
             snapshot,
           };
         }),
       );
 
-      return { frames };
+      return {
+        timelineRevision: getTimelineRevision(),
+        timeSpace: "timeline",
+        frames,
+      };
     },
   });
 
   // ── 3b. locate_visual_target (Tiered Grounding & Viewport Verification) ──
   registerToolWithLifecycle({
     name: "locate_visual_target",
-    description: "Locates a visual element via 3-Tier hierarchy: (1) Click Telemetry, (2) Grounded VLM 0-1000 BBox & 3x3 Grid centroid, (3) Crop-and-verify loop for deep zooms.",
+    description:
+      "Grounds a visual target into a safe zoom focal point via a 3-tier hierarchy: (1) click telemetry near the timestamp (confidence 1.0), (2) parse VLM output — Gemini-style 0-1000 bbox, 3x3 grid cell (A1..C3), or normalized x/y — from probe_frames snapshots, (3) fallback center with guidance. Timestamps are CURRENT TIMELINE seconds.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", description: "Target element description, e.g. 'elephant' or 'search bar'" },
-        timestamp: { type: "number", description: "Video timestamp to search in" },
+        timestamp: { type: "number", description: "Timeline timestamp to search in" },
         scale: { type: "number", description: "Desired zoom depth (default: 2.2)" },
         vlmOutput: { type: "string", description: "Raw VLM response containing bbox or grid cell (if already called)" },
       },
@@ -273,9 +336,17 @@ export function registerBatchTools(): void {
 
       const { calculateZoomTolerance, parseGroundingOutput } = await import("../lib/ai/grounding");
 
-      // Tier 1: Check Deterministic Click Telemetry (within ±1.5s window)
+      // Tier 1: Deterministic click telemetry within ±1.5s (timeline space —
+      // clickLog t values are mapped at read time by get_click_log; the raw
+      // store is source space, so map the window over raw clicks).
       const clicks = project.clickLog ?? [];
-      const match = clicks.find((c) => Math.abs(c.t - timestamp) <= 1.5);
+      const timelineClicks = clicks
+        .map((c) => {
+          const tl = sourceToTimelineT(project, c.t);
+          return tl == null ? null : { ...c, t: tl };
+        })
+        .filter((c): c is NonNullable<typeof c> => c !== null);
+      const match = timelineClicks.find((c) => Math.abs(c.t - timestamp) <= 1.5);
       if (match) {
         return {
           target: query,
@@ -316,21 +387,25 @@ export function registerBatchTools(): void {
         verified: false,
         source: "fallback_center",
         tolerance: calculateZoomTolerance(scale),
-        guidance: "No high-confidence visual target found. Use probe_frames({ timestamps: [" + timestamp + "], gridOverlay: true }) to inspect visual cells.",
+        guidance:
+          "No high-confidence visual target found. If your host cannot display snapshot images, ground zooms on get_click_log attention centroids inside the zoom window instead — propose_edits does this automatically when cx/cy are omitted. Otherwise use probe_frames({ timestamps: [" +
+          timestamp +
+          "], gridOverlay: true }) to inspect visual cells, then pass the grid cell or bbox as vlmOutput.",
       };
     },
   });
 
-  // ── 4. propose_edits (Staging Batch Free) ──
+  // ── 4. propose_edits (Batch Apply) ──
   registerToolWithLifecycle({
     name: "propose_edits",
-    description: "Stages a single atomic batch of edit operations (cut, zoom, cam, trans, bg, speed, text, music). MANDATORY RULES: (1) NO emojis in text overlays. (2) Use multi-stage sequential pans (1.6x-1.8x) for long content to prevent bottom clipping. (3) Invert overlay position if zoom is in the top half. (4) Verify active target via probe_frames rather than blindly centering on parked mouse.",
+    description:
+      "The main editing tool: applies one atomic batch of edit ops in a single call. STAGE BASELINE (automatic): every batch applies the signature look — gradient backdrop, 28px stage padding, 16px rounded frame corners — unless the batch carries its own {op:'bg'}. ZOOMS PERSIST: zoom windows auto-extend until the next scene boundary or a sustained cursor move to a different region (minimum 4s hold). Ops (times in CURRENT TIMELINE seconds): {op:'cut', t0, t1} removes the exact window — the deterministic form, pass the intervals from get_silence_intervals; {op:'cut', t, dropSilence:true} expands t to the matching silence interval; a cut without a window or matching silence is REJECTED, never silently skipped. Also: {op:'zoom', t0, t1, cx?, cy?, scale?, ease?}; {op:'text', t, text, pos?:'top'|'bottom'|'center', dur?, fontSize?, fontWeight?, color?, backgroundColor?, animation?}; {op:'cam', corner:'tl'|'tr'|'bl'|'br', shape?, size?}; {op:'bg', kind:'solid'|'gradient', c0, c1?}; {op:'trans', at, kind, dur?}; {op:'speed', t0, t1, mult}. mode 'replace' clears prior agent zooms/overlays but NEVER Whisper captions. MANDATORY RULES: (1) NO emojis in text. (2) Multi-stage sequential pans (1.6x-1.8x) for long content. (3) Invert overlay position vs zoom half. (4) Verify targets via probe_frames, not a parked cursor. AFTER CUTS: the response sets cutsApplied and timelineShifted — re-ingest get_project_state + get_transcript before any further op batch. CHECK rejectedOps: a rejected cut means dead air was NOT removed.",
     inputSchema: {
       type: "object",
       properties: {
         ops: {
           type: "array",
-          description: "Array of EditOp objects",
+          description: "Array of EditOp objects (see description for the exact shapes)",
           items: { type: "object" },
         },
         plan: { type: "string", description: "Concise explanation of your editorial strategy" },
@@ -340,18 +415,44 @@ export function registerBatchTools(): void {
     },
     execute: async ({ ops, plan, mode = "replace" }) => {
       const store = useProjectStore.getState();
+      if (!store.project) {
+        return { error: "NO_ACTIVE_PROJECT", message: "No active video project loaded." };
+      }
       const rawOps = Array.isArray(ops) ? (ops as EditOp[]) : [];
-      const snappedBatch = snapAndRebaseEditOps(rawOps, currentAnalysisCache, store.project);
+      // Prefer the real analysis; fall back to a project-synthesized one so
+      // dropSilence cuts and scene lookups work before a full analysis exists.
+      const analysis = resolveAnalysis(store.project);
+      const snappedBatch = snapAndRebaseEditOps(rawOps, analysis, store.project);
       const executionResult = executeBatchOps(snappedBatch, mode as "replace" | "append");
 
+      const revision =
+        executionResult.stagedCount > 0 ? bumpTimelineRevision() : getTimelineRevision();
+
       return {
-        staged: true,
-        plan: plan || "Batched edits staged for human review.",
-        stagedCount: executionResult.stagedCount,
-        diffSummary: executionResult.diffSummary,
+        appliedToTimeline: true,
+        timelineRevision: revision,
+        timelineShifted: executionResult.cutsApplied.count > 0,
+        plan: plan || "Batched edits applied.",
+        appliedCount: executionResult.stagedCount,
+        analysisSource: currentAnalysisCache ? "media_analysis" : "synthesized_from_project",
+        diffSummary: executionResult.diffSummary.replace(/^Staged:/, "Applied:"),
         diff: executionResult.diff,
+        cutsApplied: executionResult.cutsApplied,
+        stageBaseline: {
+          ...executionResult.stageBaseline,
+          note: "Gradient backdrop, 28px stage padding and rounded frame corners applied automatically (overridden by an explicit {op:'bg'}).",
+        },
+        newDurationSeconds: executionResult.newDurationSeconds,
         rejectedCount: executionResult.rejectedCount,
         rejectedOps: executionResult.rejectedOps,
+        nextStep:
+          executionResult.cutsApplied.count > 0
+            ? `Cuts removed ${executionResult.cutsApplied.droppedSeconds}s and the timeline shifted. Re-call get_project_state and get_transcript now; all pre-edit timestamps are stale. Do NOT place more cuts at pre-shift times.`
+            : executionResult.rejectedCount > 0
+              ? "Some ops were REJECTED (see rejectedOps) and were not applied — fix and re-propose them. Do not report them as done."
+              : "Verify with inspect_timeline if needed, then commit_staged_changes (ghost items) and offer export_clip.",
+        humanApproval:
+          "commit_staged_changes and export_clip surface a human confirmation dialog — check their responses for user_declined rather than assuming success.",
       };
     },
   });
@@ -359,7 +460,8 @@ export function registerBatchTools(): void {
   // ── 5. commit_staged_changes (Action Free) ──
   registerToolWithLifecycle({
     name: "commit_staged_changes",
-    description: "Prompts user with a staging diff dialog and permanently commits all staged edits.",
+    description:
+      "Commits ALL staged ghost proposals (from propose_zoom_points, add_text_overlay, set_background, generate_captions) permanently. Shows the staged diff dialog for human confirmation. Edits already applied via propose_edits need no commit.",
     inputSchema: { type: "object", properties: {} },
     execute: async () => {
       const store = useProjectStore.getState();
@@ -368,9 +470,14 @@ export function registerBatchTools(): void {
       if (diff.totalCount === 0) {
         const activeZooms = store.project?.segments.flatMap((s) => s.zoomPoints).length ?? 0;
         return {
+          timelineRevision: getTimelineRevision(),
           committed: true,
+          nothingStaged: true,
           itemsCommitted: activeZooms,
-          message: activeZooms > 0 ? "All proposed edits are committed and active on the timeline." : "No pending proposals to commit.",
+          message:
+            activeZooms > 0
+              ? "Nothing was pending: propose_edits applies its ops directly, so all proposed edits are already live on the timeline. Only ghost proposals (propose_zoom_points / add_text_overlay / set_background) need a commit dialog."
+              : "Nothing staged and no pending proposals. generate_captions also applies its captions directly.",
         };
       }
 
@@ -380,11 +487,11 @@ export function registerBatchTools(): void {
       });
 
       if (!confirmed) {
-        return { committed: false, message: "User canceled commit." };
+        return { timelineRevision: getTimelineRevision(), committed: false, reason: "user_declined", message: "User canceled commit." };
       }
 
       store.commitAll();
-      return { committed: true, itemsCommitted: diff.totalCount };
+      return { timelineRevision: getTimelineRevision(), committed: true, itemsCommitted: diff.totalCount, message: "All staged changes committed successfully." };
     },
   });
 
@@ -395,42 +502,16 @@ export function registerBatchTools(): void {
     inputSchema: { type: "object", properties: {} },
     execute: async () => {
       const store = useProjectStore.getState();
+      const diff = store.getStagedDiff();
       store.clearStaged();
-      return { discarded: true };
+      return { timelineRevision: getTimelineRevision(), discarded: true, itemsDiscarded: diff.totalCount };
     },
   });
 
-  // ── 7. export_clip (Action Free) ──
-  registerToolWithLifecycle({
-    name: "export_clip",
-    description: "Prompts confirmation and encodes the project into 4K/1080p MP4 via local WebCodecs.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        resolution: { type: "string", enum: ["720p", "1080p", "4k"], description: "Export resolution" },
-        format: { type: "string", enum: ["mp4", "webm"], description: "Container format" },
-      },
-    },
-    execute: async ({ resolution = "1080p", format = "mp4" }) => {
-      const confirmed = await showConfirmDialog({
-        message: `Render project as ${resolution.toUpperCase()} ${format.toUpperCase()}?`,
-      });
-
-      if (!confirmed) {
-        return { exported: false, message: "Export cancelled by user." };
-      }
-
-      return {
-        exported: true,
-        message: `Export triggered (${resolution}, ${format}).`,
-      };
-    },
-  });
-
-  // ── 8. cloud_transcribe (Cloud AI Pro / BYOK) ──
+  // ── 7. cloud_transcribe (Cloud AI Pro / BYOK) ──
   registerToolWithLifecycle({
     name: "cloud_transcribe",
-    description: "Transcribes project audio in ~4s using Cloud Whisper Large v3 with word timestamps (Requires Pro or BYOK).",
+    description: "Transcribes project audio using Cloud Whisper Large v3 with word timestamps (Requires Pro or BYOK). Prefer generate_captions first — it both transcribes and stages caption overlays.",
     inputSchema: {
       type: "object",
       properties: {
@@ -460,10 +541,11 @@ export function registerBatchTools(): void {
     },
   });
 
-  // ── 9. ai_auto_director (Cloud AI Pro / BYOK) ──
+  // ── 8. ai_auto_director (Cloud AI Pro / BYOK) ──
   registerToolWithLifecycle({
     name: "ai_auto_director",
-    description: "Hosted 1-click auto-director using Claude Haiku / Gemini Flash via prompt-cached proxy (Requires Pro or BYOK).",
+    description:
+      "Hosted 1-click auto-director: sends the video digest to a cloud model (Claude Haiku / Gemini Flash) which returns a full edit plan, applied via the same snapping pipeline as propose_edits (Requires Pro or BYOK). Air-gapped mode blocks it — use the local tool pipeline instead.",
     inputSchema: {
       type: "object",
       properties: {
@@ -485,27 +567,32 @@ export function registerBatchTools(): void {
       }
 
       try {
-        const digest = generateVideoDigest(store.project, currentAnalysisCache ?? {
-          mediaId: "m1",
-          sampledHash: "mock",
-          duration: 60,
-          scenes: [],
-          audio: { duration: 60, silences: [], minorPauses: [], loudPeaks: [], speechRatio: 0.8 },
-          words: [],
-          phrases: [],
-          interactions: [],
-          createdAt: Date.now(),
-        });
+        const analysis = resolveAnalysis(store.project);
+        const digest: VideoDigest = generateVideoDigest(store.project, mapAnalysisToTimeline(store.project, analysis));
 
         const response = await runAutoDirector(digest, instruction);
-        const snappedBatch = snapAndRebaseEditOps(response.ops, currentAnalysisCache, store.project);
+        // The cloud model returns ops against the digest's timeline space; the
+        // snapping pipeline matches cut times against the (source-space)
+        // analysis, same as a local propose_edits batch.
+        const snappedBatch = snapAndRebaseEditOps(response.ops, analysis, store.project);
         const executionResult = executeBatchOps(snappedBatch, "replace");
+        const revision = executionResult.stagedCount > 0 ? bumpTimelineRevision() : getTimelineRevision();
 
         return {
-          executed: true,
+          appliedToTimeline: true,
+          timelineRevision: revision,
           plan: response.plan,
-          stagedCount: executionResult.stagedCount,
-          diffSummary: executionResult.diffSummary,
+          appliedCount: executionResult.stagedCount,
+          diffSummary: executionResult.diffSummary.replace(/^Staged:/, "Applied:"),
+          cutsApplied: executionResult.cutsApplied,
+          newDurationSeconds: executionResult.newDurationSeconds,
+          rejectedOps: executionResult.rejectedOps,
+          nextStep:
+            executionResult.cutsApplied.count > 0
+              ? "Timeline shifted — re-ingest get_project_state and get_transcript before further edits."
+              : executionResult.rejectedCount > 0
+                ? "Some ops were REJECTED (see rejectedOps) — fix and re-propose; do not report them as done."
+                : "Verify with inspect_timeline, then offer export_clip.",
         };
       } catch (err: any) {
         return { error: "DIRECTOR_ERROR", message: err.message };

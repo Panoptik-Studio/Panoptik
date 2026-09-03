@@ -5,14 +5,42 @@
  * cameraOnly → facecam only (no screen)
  */
 
+import { CURSOR_WORKER_SOURCE } from "./recordCursorWorker";
+
 export type RecordingLayout = "screenOnly" | "screenAndCamera" | "cameraOnly";
 export type RecordingShape = "circle" | "square";
+
+/** A cursor position in normalized frame coordinates (0–1). */
+export type CursorSample = { x: number; y: number; down: boolean };
+
+/**
+ * Cursor compositing for the recorded screen stream. Platforms whose window
+ * compositor does not embed the OS cursor into captured frames (Linux
+ * window/tab capture) get it drawn in by a worker instead; positions come from
+ * frame-diff tracking plus DOM reports pushed via `report()`.
+ */
+export type CursorCompositor = {
+  /** Screen stream to hand to the MediaRecorder: composited video + original audio. */
+  recordStream: MediaStream;
+  /** Foreground/DOM cursor observation; wins over frame-diff tracking while fresh. */
+  report: (x: number, y: number, down: boolean) => void;
+  /** Worker-tracked positions (~11Hz) for click-log telemetry. */
+  onSample: (cb: (s: CursorSample) => void) => () => void;
+  /** Resolves true once the compositor drew its first frame; false → record raw. */
+  ready: Promise<boolean>;
+  dispose: () => void;
+};
 
 export type RecordingHandles = {
   screenStream: MediaStream;
   facecamStream: MediaStream;
   layout: RecordingLayout;
   shape: RecordingShape;
+  /** Present when the cursor is composited into the recorded stream. */
+  cursor?: {
+    report: (x: number, y: number, down: boolean) => void;
+    onSample: (cb: (s: CursorSample) => void) => () => void;
+  };
   /**
    * Begin encoding. Separate from acquisition because the permission prompts
    * have to happen up front, while the countdown runs afterwards — encoding
@@ -40,6 +68,14 @@ export type StartRecordingOpts = {
    * in every view of it. The caller keeps ownership: stop() will not close it.
    */
   cameraStream?: MediaStream | null;
+  /**
+   * Draw the cursor into the recorded screen stream when the platform does not
+   * embed it (default true). Costs one canvas composite per frame in a worker;
+   * silently skipped when the browser already bakes the cursor in or when the
+   * required APIs (MediaStreamTrackProcessor, OffscreenCanvas, Worker) are
+   * missing.
+   */
+  cursorOverlay?: boolean;
 };
 
 /** Longest we wait for a recorder's final chunk before giving up on it. */
@@ -208,9 +244,126 @@ export async function openSystemAudioTrack(deviceId?: string): Promise<MediaStre
   return null;
 }
 
+/**
+ * How long to wait for the compositor worker to come up before recording the
+ * raw stream instead. Normal init is a few milliseconds; the timeout only ever
+ * fires on a broken environment, and a slow start must never cost the user
+ * their recording.
+ */
+const CURSOR_READY_TIMEOUT_MS = 2000;
+
+/**
+ * Builds the cursor-compositing layer for a screen capture stream, or null
+ * when it is not needed / not possible. The worker tracks the cursor from the
+ * capture frames themselves and draws it onto a canvas whose capture stream
+ * becomes the recorded video — so the cursor is baked into the recorded file
+ * even when the platform's compositor does not embed it.
+ */
+function composeCursorCapture(source: MediaStream): CursorCompositor | null {
+  try {
+    if (typeof document === "undefined" || typeof Worker === "undefined") return null;
+    const track = source.getVideoTracks()[0];
+    if (!track) return null;
+
+    // If the platform already bakes the cursor into the frames (e.g. Windows
+    // monitor capture reports it), compositing would paint a second cursor.
+    const settings = track.getSettings?.() as (MediaTrackSettings & { cursor?: string }) | undefined;
+    if (settings?.cursor === "always" || settings?.cursor === "motion") return null;
+
+    const g = globalThis as unknown as {
+      MediaStreamTrackProcessor?: new (init: { track: MediaStreamTrack }) => {
+        readable: ReadableStream;
+      };
+    };
+    const canvas = document.createElement("canvas");
+    if (!g.MediaStreamTrackProcessor || typeof canvas.transferControlToOffscreen !== "function") {
+      return null;
+    }
+    const width = settings?.width ?? 1280;
+    const height = settings?.height ?? 720;
+    canvas.width = width;
+    canvas.height = height;
+
+    const offscreen = canvas.transferControlToOffscreen();
+    const captureStream = canvas.captureStream();
+    const outTrack = captureStream.getVideoTracks()[0];
+    if (!outTrack) return null;
+
+    const processor = new g.MediaStreamTrackProcessor({ track });
+    const workerUrl = URL.createObjectURL(new Blob([CURSOR_WORKER_SOURCE], { type: "text/javascript" }));
+    const worker = new Worker(workerUrl);
+
+    const listeners = new Set<(s: CursorSample) => void>();
+    let readyResolve: (ok: boolean) => void = () => {};
+    const ready = new Promise<boolean>((resolve) => {
+      readyResolve = resolve;
+    });
+    const failTimer = setTimeout(() => readyResolve(false), CURSOR_READY_TIMEOUT_MS);
+
+    worker.onmessage = (e: MessageEvent) => {
+      const d = e.data as { type?: string; x?: number; y?: number; down?: boolean };
+      if (d?.type === "ready") {
+        clearTimeout(failTimer);
+        readyResolve(true);
+      } else if (d?.type === "fail") {
+        clearTimeout(failTimer);
+        console.warn("[Record] cursor compositor failed:", d);
+        readyResolve(false);
+      } else if (d?.type === "sample" && typeof d.x === "number" && typeof d.y === "number") {
+        const sample = { x: d.x, y: d.y, down: !!d.down };
+        listeners.forEach((cb) => cb(sample));
+      }
+    };
+    worker.onerror = (e) => {
+      clearTimeout(failTimer);
+      console.warn("[Record] cursor compositor error:", e.message || e);
+      readyResolve(false);
+    };
+
+    worker.postMessage(
+      { type: "init", canvas: offscreen, frames: processor.readable, sampleW: 240, sampleH: 135 },
+      [offscreen, processor.readable],
+    );
+
+    const onResize = () => {
+      const s = track.getSettings();
+      if (s?.width && s?.height) {
+        worker.postMessage({ type: "resize", width: s.width, height: s.height });
+      }
+    };
+    track.addEventListener("resize", onResize);
+
+    return {
+      recordStream: new MediaStream([outTrack, ...source.getAudioTracks()]),
+      ready,
+      report: (x, y, down) => {
+        worker.postMessage({ type: "cursor", x, y, down });
+      },
+      onSample: (cb) => {
+        listeners.add(cb);
+        return () => {
+          listeners.delete(cb);
+        };
+      },
+      dispose: () => {
+        track.removeEventListener("resize", onResize);
+        try {
+          worker.terminate();
+        } catch { /* already dead */ }
+        try {
+          outTrack.stop();
+        } catch { /* already stopped */ }
+        URL.revokeObjectURL(workerUrl);
+      },
+    };
+  } catch (err) {
+    console.warn("[Record] cursor compositing unavailable — recording the raw stream", err);
+    return null;
+  }
+}
+
 /** Stop a recorder and resolve once its last chunk has been delivered. */
-function flushRecorder(rec: MediaRecorder | null): Promise<void> {
-  if (!rec || rec.state === "inactive") return Promise.resolve();
+function flushRecorder(rec: MediaRecorder | null): Promise<void> {  if (!rec || rec.state === "inactive") return Promise.resolve();
   return new Promise<void>((resolve) => {
     const done = () => {
       clearTimeout(timer);
@@ -330,6 +483,20 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   const screen = screenStream!;
   const facecam = facecamStream!;
 
+  // ── Cursor compositing ──
+  // Platforms whose compositor does not embed the OS cursor in captured frames
+  // (Linux window/tab capture) get it drawn in by a worker, so the recording
+  // itself carries the original cursor. Falls back to the raw stream.
+  let cursorLayer: CursorCompositor | null = null;
+  if (layout !== "cameraOnly" && opts.cursorOverlay !== false) {
+    cursorLayer = composeCursorCapture(screen);
+    if (cursorLayer && !(await cursorLayer.ready)) {
+      cursorLayer.dispose();
+      cursorLayer = null;
+    }
+  }
+  const screenRecordStream = cursorLayer ? cursorLayer.recordStream : screen;
+
   // ── MediaRecorders ──
   // Bitrate is scaled to the pixels actually being captured: a fixed 8 Mbps is
   // generous for 720p and visibly lossy for a 4K screen full of text.
@@ -378,9 +545,9 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   const screenChunks: Blob[] = [];
   const facecamChunks: Blob[] = [];
 
-  if (screen.getTracks().length > 0) {
+  if (screen.getVideoTracks().length > 0) {
     screenRecorder = new MediaRecorder(
-      screen,
+      screenRecordStream,
       MediaRecorder.isTypeSupported(screenMime)
         ? ({ mimeType: screenMime, videoBitsPerSecond: screenBitrate, audioBitsPerSecond: 192_000 } as unknown as MediaRecorderOptions)
         : ({ videoBitsPerSecond: screenBitrate, audioBitsPerSecond: 192_000 } as unknown as MediaRecorderOptions),
@@ -408,10 +575,14 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
     return {
       screenStream: screen,
       facecamStream: facecam,
+      cursor: cursorLayer
+        ? { report: cursorLayer.report, onSample: cursorLayer.onSample }
+        : undefined,
       begin: async () => {},
       layout,
       shape,
       stop: async () => {
+        cursorLayer?.dispose();
         ownedTracks.forEach((t) => t.stop());
         return { screenBlob: new Blob([], { type: "video/webm" }), facecamBlob: new Blob([], { type: "video/webm" }) };
       },
@@ -421,6 +592,9 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
   return {
     screenStream: screen,
     facecamStream: facecam,
+    cursor: cursorLayer
+      ? { report: cursorLayer.report, onSample: cursorLayer.onSample }
+      : undefined,
     layout,
     shape,
     begin: async () => {
@@ -435,6 +609,7 @@ export async function startRecording(opts: StartRecordingOpts = {}): Promise<Rec
 
       // Only now release the devices; stopping tracks first can truncate the
       // tail. A camera passed in by the caller is not ours to close.
+      cursorLayer?.dispose();
       ownedTracks.forEach((t) => t.stop());
 
       return {
