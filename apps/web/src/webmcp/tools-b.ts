@@ -355,113 +355,200 @@ export function registerEditingTools(): void {
   registerToolWithLifecycle({
     name: "generate_captions",
     description:
-      "MANDATORY FOR SPEECH: Transcribes the video's audio and generates timestamped subtitle phrases across the timeline. Always call this first if get_transcript is empty — cuts, zooms and silence detection all depend on speech timestamps.",
+      "Transcribes the video's audio (camera/mic + screen tracks separately) and generates timestamped additive subtitle phrases across the timeline — same pipeline as the manual Auto-Generate button. Always call this first if get_transcript is empty — cuts, zooms and silence detection all depend on speech timestamps.",
     inputSchema: {
       type: "object",
       properties: {
         language: {
           type: "string",
-          description: "Language code (e.g. 'en', 'es', 'hinglish'). Default auto-detect.",
+          description: "Audio language: 'auto', 'hinglish', 'en', 'hi', 'es', 'fr', 'de', 'ja', 'zh'. Default 'auto'.",
+        },
+        includeSpeakerLabels: {
+          type: "boolean",
+          description: "Prefix captions with 'Speaker:' / 'Screen:' (default true, matches the manual Speaker toggle).",
+        },
+        presetId: {
+          type: "string",
+          description: "Caption style preset id: viral, clean, outline, subtitles, electric, highlighter (default 'viral').",
+        },
+        speakerFontSize: {
+          type: "number",
+          description: "Font size px for Speaker captions (default 36).",
+        },
+        screenFontSize: {
+          type: "number",
+          description: "Font size px for Screen captions (default 28).",
         },
       },
     },
-    execute: async ({ language }: { language?: string }) => {
+    execute: async ({
+      language,
+      includeSpeakerLabels = true,
+      presetId = "viral",
+      speakerFontSize = 36,
+      screenFontSize = 28,
+    }: {
+      language?: string;
+      includeSpeakerLabels?: boolean;
+      presetId?: string;
+      speakerFontSize?: number;
+      screenFontSize?: number;
+    }) => {
       const store = useProjectStore.getState();
       const project = store.project;
       if (!project) {
         return { error: "No project loaded. Ask the user to import a clip first." };
       }
+      const own = owningSegment();
+      if (!own) return { error: "No segment available to generate captions into." };
+      const { seg } = own;
+      if (seg.id !== store.selectedSegmentId) store.selectSegment(seg.id);
 
       try {
-        const { transcribeAudioStream, getLastTranscriptionProvider } = await import("../lib/ai/providers");
-        const { decodeViaAudioContext, encodeWavBlob, resampleMonoPcm } = await import("@panoptik/engine");
+        const { getLastTranscriptionProvider } = await import("../lib/ai/providers");
+        const {
+          CAPTION_PRESETS,
+          DEFAULT_CAPTION_PRESET_ID,
+          DEFAULT_SPEAKER_FONT_SIZE,
+          DEFAULT_SCREEN_FONT_SIZE,
+          packStreamWordsAdditively,
+          transcribeTrackAudio,
+        } = await import("../lib/captions");
+        const { decodeViaAudioContext, resampleMonoPcm } = await import("@panoptik/engine");
+        const lang = language || "auto";
+        const withSpeakers = includeSpeakerLabels !== false;
+        const preset =
+          CAPTION_PRESETS.find((p) => p.id === presetId) ??
+          CAPTION_PRESETS.find((p) => p.id === DEFAULT_CAPTION_PRESET_ID) ??
+          CAPTION_PRESETS[0]!;
+        const speakerSize =
+          typeof speakerFontSize === "number" && Number.isFinite(speakerFontSize)
+            ? speakerFontSize
+            : DEFAULT_SPEAKER_FONT_SIZE;
+        const screenSize =
+          typeof screenFontSize === "number" && Number.isFinite(screenFontSize)
+            ? screenFontSize
+            : DEFAULT_SCREEN_FONT_SIZE;
 
-        const audioSource = project.segments[0]?.facecam?.src || project.audioSrc || project.media[0]?.src;
-        if (!audioSource) {
-          return { error: "No audio source found in the project." };
+        // Same dual-track sources as the manual panel: camera/mic + screen.
+        const media = project.media.find((m) => m.id === seg.mediaId) ?? project.media[0];
+        const speakerSrc = seg.facecam?.src || project.audioSrc;
+        const screenSrc = media?.src;
+
+        const decodeSrc = async (src: string | null | undefined): Promise<AudioBuffer | null> => {
+          if (!src) return null;
+          try {
+            const res = await fetch(src);
+            if (!res.ok) return null;
+            const blob = await res.blob();
+            if (blob.size === 0) return null;
+            const buf = await decodeViaAudioContext(blob);
+            return buf && buf.duration > 0 ? buf : null;
+          } catch {
+            return null;
+          }
+        };
+
+        const [decodedSpeaker, decodedScreen] = await Promise.all([
+          decodeSrc(speakerSrc),
+          decodeSrc(screenSrc),
+        ]);
+
+        if (!decodedSpeaker && !decodedScreen) {
+          return { error: "No decodable audio track found in screen or camera recording." };
         }
 
-        const res = await fetch(audioSource);
-        const blob = await res.blob();
-        let wavBlob = blob;
-        let pcm: Float32Array | null = null;
-
-        // Always decode + resample: Whisper wants 16k mono WAV, and the same
-        // PCM feeds the audio-feature analysis below.
-        const buf = await decodeViaAudioContext(blob);
-        if (buf) {
-          pcm = resampleMonoPcm(buf.getChannelData(0), buf.sampleRate, 16000);
-          wavBlob = await encodeWavBlob(pcm, 16000);
+        // Separate STT requests per track (parallel) — identical to manual.
+        const trackTasks: { label: "Speaker" | "Screen"; buffer: AudioBuffer }[] = [];
+        if (decodedSpeaker) trackTasks.push({ label: "Speaker", buffer: decodedSpeaker });
+        if (decodedScreen && decodedScreen !== decodedSpeaker) {
+          trackTasks.push({ label: "Screen", buffer: decodedScreen });
         }
 
-        const result = await transcribeAudioStream(wavBlob, { language: language || "en" });
-        const words = result.words ?? [];
+        const trackResults = await Promise.all(
+          trackTasks.map((t) => transcribeTrackAudio(t.buffer, t.label, lang)),
+        );
 
-        if (words.length === 0) {
+        const generatedOverlays: TextOverlay[] = [];
+        let wordCount = 0;
+        trackTasks.forEach((task, idx) => {
+          const words = trackResults[idx] ?? [];
+          wordCount += words.length;
+          if (words.length > 0) {
+            generatedOverlays.push(
+              ...packStreamWordsAdditively(
+                words,
+                task.label,
+                preset,
+                withSpeakers,
+                task.label === "Speaker" ? speakerSize : screenSize,
+              ),
+            );
+          }
+        });
+
+        if (generatedOverlays.length === 0) {
           return {
             transcribed: false,
             message: "Transcription ran, but no spoken words were detected in the audio.",
           };
         }
 
-        // Pack words into caption overlays (~4-6 words per subtitle card)
-        const generatedOverlays: TextOverlay[] = [];
-        const wordsPerPhrase = 5;
-        for (let i = 0; i < words.length; i += wordsPerPhrase) {
-          const chunk = words.slice(i, i + wordsPerPhrase);
-          const start = chunk[0]!.start;
-          const end = chunk[chunk.length - 1]!.end;
-          const phraseText = chunk.map((w) => w.word).join(" ");
-          generatedOverlays.push({
-            id: generateId(),
-            kind: "caption",
-            text: phraseText,
-            timestamp: Number(start.toFixed(2)),
-            duration: Number(Math.max(1.2, end - start).toFixed(2)),
-            position: "bottom",
-            fontSize: 26,
-            fontFamily: "Inter",
-            fontWeight: "600",
-            color: "#ffffff",
-            backgroundColor: "rgba(24, 24, 27, 0.85)",
-            borderRadius: 6,
-            animation: "fade",
-            staged: true,
-          });
-        }
+        generatedOverlays.sort((a, b) => a.timestamp - b.timestamp);
 
-        // Stage all generated captions
-        for (const cap of generatedOverlays) {
-          store.stageTextOverlay(cap);
-        }
+        // Direct-apply like the manual panel: replace caption overlays, keep
+        // graphic text overlays intact. (commit_staged_changes reports these
+        // as "applies directly" — no ghost commit needed.)
+        const fresh = useProjectStore.getState();
+        const targetSeg =
+          fresh.project?.segments.find((s) => s.id === seg.id) ?? seg;
+        const nonCaptionOverlays = targetSeg.textOverlays.filter((t) => t.kind !== "caption");
+        fresh.setSegmentTextOverlays(seg.id, [...nonCaptionOverlays, ...generatedOverlays]);
 
-        // Seed the analysis cache: real RMS silences + emphasis peaks from the
-        // same PCM that fed Whisper, so get_silence_intervals, dropSilence cuts
-        // and emphasis-anchored zooms are grounded in actual audio immediately
-        // — no separate heavy analysis pass required.
+        // Seed the analysis cache: real RMS silences + emphasis peaks from
+        // the same audio that fed Whisper, so get_silence_intervals,
+        // dropSilence cuts and emphasis-anchored zooms are grounded in actual
+        // audio immediately — no separate heavy analysis pass required.
         const { setAnalysisCache, getAnalysisCache, synthesizeAnalysisFromProject } = await import("./tools-batch");
         let audioFeatures: AudioAnalysisResult | null = null;
-        if (pcm && pcm.length > 0) {
-          const { extractAudioFeatures } = await import("@panoptik/engine");
-          audioFeatures = extractAudioFeatures(pcm, 16000);
-          setAnalysisCache({
-            ...(getAnalysisCache() ?? synthesizeAnalysisFromProject(project)),
-            duration: audioFeatures.duration,
-            audio: audioFeatures,
-            words: words.map((w) => ({
-              word: w.word,
-              start: w.start,
-              end: w.end,
-              speaker: w.speaker ?? 0,
-              confidence: 0.95,
-            })),
-            phrases: generatedOverlays.map((c) => ({
-              start: c.timestamp,
-              end: c.timestamp + (c.duration ?? 3),
-              text: c.text,
-              speaker: 0,
-            })),
-          });
+        const featureBuffer = decodedSpeaker ?? decodedScreen;
+        if (featureBuffer) {
+          try {
+            const pcm = resampleMonoPcm(
+              featureBuffer.getChannelData(0),
+              featureBuffer.sampleRate,
+              16000,
+            );
+            if (pcm.length > 0) {
+              const { extractAudioFeatures } = await import("@panoptik/engine");
+              audioFeatures = extractAudioFeatures(pcm, 16000);
+              const liveProject = useProjectStore.getState().project ?? project;
+              setAnalysisCache({
+                ...(getAnalysisCache() ?? synthesizeAnalysisFromProject(liveProject)),
+                duration: audioFeatures.duration,
+                audio: audioFeatures,
+                words: generatedOverlays.length
+                  ? trackResults.flatMap((words) =>
+                      words.map((w) => ({
+                        word: w.word,
+                        start: w.start,
+                        end: w.end,
+                        speaker: 0,
+                        confidence: 0.95,
+                      })),
+                    )
+                  : [],
+                phrases: generatedOverlays.map((c) => ({
+                  start: c.timestamp,
+                  end: c.timestamp + (c.duration ?? 3),
+                  text: c.text,
+                  speaker: 0,
+                })),
+              });
+            }
+          } catch (e) {
+            console.warn("[WebMCP] generate_captions audio-feature seeding failed:", e);
+          }
         }
 
         return {
@@ -469,13 +556,15 @@ export function registerEditingTools(): void {
           staged: true,
           provider: getLastTranscriptionProvider(),
           captionCount: generatedOverlays.length,
-          wordCount: words.length,
+          wordCount,
           firstPhrase: generatedOverlays[0]?.text,
           silenceCount: audioFeatures?.silences.length ?? null,
           emphasisPeakCount: audioFeatures?.loudPeaks.length ?? null,
+          preset: preset.id,
+          includeSpeakerLabels: withSpeakers,
           message: audioFeatures
-            ? `Generated and staged ${generatedOverlays.length} timestamped captions. Audio analysis is ready: ${audioFeatures.silences.length} silence interval(s) and ${audioFeatures.loudPeaks.length} emphasis peak(s) — get_silence_intervals and {op:'cut'} windows are now grounded in real audio.`
-            : `Generated and staged ${generatedOverlays.length} timestamped captions. Transcript available via get_transcript (CURRENT TIMELINE seconds); cut ops need explicit {t0, t1} windows until audio analysis is available.`,
+            ? `Generated ${generatedOverlays.length} additive timestamped captions (${wordCount} words, ${preset.id} style${withSpeakers ? " with speaker prefixes" : ""}). Audio analysis is ready: ${audioFeatures.silences.length} silence interval(s) and ${audioFeatures.loudPeaks.length} emphasis peak(s) — get_silence_intervals and {op:'cut'} windows are now grounded in real audio.`
+            : `Generated ${generatedOverlays.length} additive timestamped captions (${wordCount} words, ${preset.id} style). Transcript available via get_transcript (CURRENT TIMELINE seconds); cut ops need explicit {t0, t1} windows until audio analysis is available.`,
         };
       } catch (err: any) {
         console.warn("[WebMCP] generate_captions error:", err);
