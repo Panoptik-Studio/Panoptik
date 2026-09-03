@@ -198,10 +198,11 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         const standaloneAudioSrc = !seg.facecam?.src ? project.audioSrc : null;
         const standaloneBuf = standaloneAudioSrc ? await getBufferForSrc(standaloneAudioSrc) : null;
         const screenBufForSeg = segScreenBuf ?? standaloneBuf;
+        let firstTs = 0;
         if (screenBufForSeg) {
           const screenSrc = segMedia?.src || standaloneAudioSrc;
           const blob = await getBlobForSrc(screenSrc);
-          const firstTs = blob ? await getFirstVideoTimestamp(blob, screenSrc ?? undefined) : 0;
+          firstTs = blob ? await getFirstVideoTimestamp(blob, screenSrc ?? undefined) : 0;
           screenPart = sliceAndPadScreenAudio(screenBufForSeg, seg, firstTs);
           hasAnyAudio = true;
         }
@@ -209,9 +210,11 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         // 2. Process Facecam / Mic Audio
         const fcSrc = seg.facecam?.src;
         let fcPart: AudioBuffer | null = null;
+        let fcBufDur = "null";
         if (fcSrc) {
           const fcBuf = await getBufferForSrc(fcSrc);
           if (fcBuf) {
+            fcBufDur = fcBuf.duration.toFixed(3);
             fcPart = sliceAndPadFacecamAudio(fcBuf, seg);
             hasAnyAudio = true;
           }
@@ -235,6 +238,14 @@ export async function exportProject(project: Project, opts: ExportFrameOpts): Pr
         }
 
         parts.push(mixedSegAudio);
+        console.log(
+          `[Export] audio seg speed=${seg.speed} srcSpan=${(seg.srcEnd - seg.srcStart).toFixed(3)} ` +
+          `screen=${screenPart ? screenPart.duration.toFixed(3) : "null"} ` +
+          `fc=${fcPart ? fcPart.duration.toFixed(3) : "null"} ` +
+          `mixed=${mixedSegAudio.duration.toFixed(3)} expectTl=${segmentDuration(seg).toFixed(3)} ` +
+          `screenBuf=${screenBufForSeg ? screenBufForSeg.duration.toFixed(3) : "null"} ` +
+          `fcBuf=${fcBufDur} firstVideoTs=${firstTs.toFixed(3)}`,
+        );
       }
 
       if (parts.length > 0 && hasAnyAudio) {

@@ -169,3 +169,62 @@ describe("applyVolume & mixAudio", () => {
     expect(mixed.getChannelData(0)[1]).toBeCloseTo(0.5);
   });
 });
+
+describe("timeStretch content timing (rate is actually applied)", () => {
+  /**
+   * Duration alone does not prove a stretch happened: a 1x copy truncated to
+   * outLen has exactly the right length too. This marks the source with loud
+   * bursts on a 1s grid and checks WHERE they land in the output.
+   *
+   * Regression: the analysis position used to advance as `best + Sa`. Because
+   * the previous frame's samples are what sits in the correlation target, the
+   * candidate scoring a perfect 1.0 is always the trivial continuation
+   * `best + Ss` — so every frame lost (Sa - Ss) and the net advance was Ss.
+   * Output ran at 1x and stopped early, which in export showed up as facecam
+   * audio drifting behind the picture across a sped-up segment and snapping
+   * back at the next segment (each segment is stretched independently).
+   */
+  function burstMarkedNoise(sampleRate: number, seconds: number): Float32Array {
+    const n = Math.round(sampleRate * seconds);
+    const out = new Float32Array(n);
+    let seed = 987654321;
+    let lp = 0;
+    for (let i = 0; i < n; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      lp = lp * 0.85 + (seed / 0x3fffffff - 1) * 0.15;
+      out[i] = lp * ((i / sampleRate) % 1 < 0.03 ? 3.0 : 0.15);
+    }
+    return out;
+  }
+
+  /** Onset time of each loud burst, in seconds. */
+  function burstTimes(x: Float32Array, sampleRate: number): number[] {
+    const times: number[] = [];
+    const w = Math.round(0.01 * sampleRate);
+    for (let i = 0; i < x.length - w; ) {
+      let energy = 0;
+      for (let k = 0; k < w; k++) energy += Math.abs(x[i + k]!);
+      if (energy / w > 0.12) {
+        times.push(i / sampleRate);
+        i += Math.round(0.4 * sampleRate);
+      } else i += w;
+    }
+    return times;
+  }
+
+  for (const rate of [1.15, 1.5, 0.8]) {
+    it(`keeps source markers on the ${rate}x timeline`, () => {
+      const sr = 48000;
+      const seconds = 12;
+      const src = burstMarkedNoise(sr, seconds);
+      const out = timeStretch(mockAudioBuffer(sr, [src]), rate);
+
+      const found = burstTimes(out.getChannelData(0), sr);
+      // Every source burst survives the stretch, landing at srcT / rate.
+      expect(found.length).toBe(seconds);
+      for (let n = 0; n < found.length; n++) {
+        expect(Math.abs(found[n]! - n / rate)).toBeLessThan(0.05);
+      }
+    });
+  }
+});

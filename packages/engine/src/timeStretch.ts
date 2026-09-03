@@ -88,7 +88,8 @@ export function timeStretch(buffer: AudioBuffer, rate: number): AudioBuffer {
   // keeping the best-match search cheap.
   const N = Math.max(256, Math.round(sr * 0.04)); // analysis frame
   const Ss = Math.max(64, Math.round(N / 4)); // synthesis hop (output)
-  const Sa = Math.max(1, Math.round(Ss * rate)); // analysis hop (input)
+  const Sa = Math.max(1, Ss * rate); // analysis hop (input; fractional so the
+  // absolute analysis grid below cannot accumulate rounding error)
   const OL = N - Ss; // overlap length in the output domain
   const R = Math.round(Ss * 0.5); // ± search range for best-match offset
 
@@ -113,20 +114,35 @@ export function timeStretch(buffer: AudioBuffer, rate: number): AudioBuffer {
     const fn = Math.min(N, outLen);
     for (let i = 0; i < fn; i++) refOut[i] = ref[i] ?? 0;
     let curOut = Ss;
-    let anaPos = Sa;
+    let frame = 1;
+    // The analysis position is an ABSOLUTE grid (frame * Sa), never
+    // `best + Sa`. Deriving it from the previous match compounds the search
+    // offset, and that offset is systematically negative: the previous frame
+    // wrote ref[best .. best+N] into the output, so the candidate correlating
+    // *perfectly* with the target is always the trivial continuation
+    // `best + Ss`, i.e. anaPos - (Sa - Ss). Feeding that back made every frame
+    // advance by Ss instead of Sa — the stretch silently played at 1x and ran
+    // out of source early, no matter what `rate` said.
+    let anaPos = Math.round(frame * Sa);
     while (curOut < outLen && anaPos < inLen) {
       const lo = Math.max(0, anaPos - R);
-      const hi = Math.min(inLen - 1 - OL, anaPos + R);
-      // Bias ties toward anaPos (exact rate advance): in silence every
-      // candidate correlates ~0, and taking the first one (anaPos - R) made
-      // the input run slow — content landed progressively late after gaps.
+      const hi = Math.min(inLen - N, anaPos + R);
+      // Pick the offset with the best correlation, penalised by distance from
+      // anaPos (exact rate advance). Three jobs in one: exact ties in silence
+      // resolve to anaPos instead of drifting; near-tie noise jitters stay
+      // near exact rate instead of random-walking timing away over long
+      // stretches (audible lip-sync wander that resets every segment, since
+      // each segment is stretched independently); genuine transient/phase
+      // matches still win because their correlation lead dwarfs the penalty.
+      const LAMBDA = 0.2;
       let best = anaPos;
-      let bestCorr = crossCorrelate(ref, anaPos, refOut, curOut, OL);
+      let bestScore = crossCorrelate(ref, anaPos, refOut, curOut, OL);
       for (let cand = lo; cand <= hi; cand++) {
         if (cand === anaPos) continue;
         const corr = crossCorrelate(ref, cand, refOut, curOut, OL);
-        if (corr > bestCorr) {
-          bestCorr = corr;
+        const score = corr - (LAMBDA * Math.abs(cand - anaPos)) / R;
+        if (score > bestScore) {
+          bestScore = score;
           best = cand;
         }
       }
@@ -148,7 +164,8 @@ export function timeStretch(buffer: AudioBuffer, rate: number): AudioBuffer {
       for (let i = OL; i < N; i++) {
         if (curOut + i < outLen) refOut[curOut + i] = ref[best + i] ?? 0;
       }
-      anaPos = best + Sa;
+      frame++;
+      anaPos = Math.round(frame * Sa);
       curOut += Ss;
     }
   }
