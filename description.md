@@ -3,8 +3,8 @@
 > The open-source, browser-native demo video studio where you and your AI agent co-edit on the same canvas. Drop in a recording, the agent watches the preview, proposes zoom points and captions at the interesting moments, you review a diff and commit, then export a polished MP4 — all client-side, no uploads, no server.
 
 **Hackathon:** The WebMCP Challenge (OpenAI, Devpost) — September 2026
-**Live demo:** _[your Vercel URL here]_
-**Demo video:** _[your YouTube URL here]_
+**Live demo:** <https://panoptik-studio.vercel.app/editor>
+**Demo video:** <https://www.youtube.com/watch?v=naWZF9vwZDE>
 **License:** MIT (engine) + AGPL-3.0 (app)
 
 ---
@@ -36,7 +36,7 @@ This is the core question the hackathon asks, and the answer is specific to this
 | Before WebMCP | With WebMCP |
 |---|---|
 | Human manually places every zoom point by clicking on the preview at the right timestamp | Agent watches the preview, identifies interesting moments, proposes zoom points automatically |
-| Human types every caption line by hand | Agent triggers local Whisper transcription, stages word-level captions with timestamps |
+| Human types every caption line by hand | Agent triggers transcription and stages word-level captions with timestamps |
 | Human picks a background from a color picker | Agent suggests a background based on the video's content ("use a warm gradient for the onboarding demo") |
 | Human exports and hopes it looks right | Agent can call `get_project_state` to verify the project before export |
 | ~5 minutes of manual editing per minute of video | ~30 seconds of review-and-approve per minute of video |
@@ -66,8 +66,8 @@ The key insight: **the agent proposes, the human disposes.** Every agent action 
 │     ┌───────────────┼───────────────┐                     │
 │     ▼               ▼               ▼                     │
 │  ┌──────┐    ┌────────────┐  ┌───────────┐               │
-│  │Engine│    │Whisper WASM│  │  WebMCP   │               │
-│  │(TS)  │    │  (Worker)  │  │  Tools    │               │
+│  │Engine│    │ Transcribe │  │  WebMCP   │               │
+│  │(TS)  │    │  (opt-in)  │  │  Tools    │               │
 │  └──┬───┘    └────────────┘  └─────┬─────┘               │
 │     │                               │                     │
 │     ▼                               ▼                     │
@@ -88,13 +88,13 @@ The key insight: **the agent proposes, the human disposes.** Every agent action 
 
 ### Design principles
 
-1. **The browser is the media engine.** All decode, render, and encode happens via WebCodecs + Canvas2D — no ffmpeg.wasm, no server-side transcoding. This matches the Poindeo-validated architecture: zero WASM for media processing (Whisper WASM for captions is the sole exception, lazy-loaded only on demand).
+1. **The browser is the media engine.** All decode, render, and encode happens via WebCodecs + Canvas2D — no ffmpeg.wasm, no server-side transcoding. This matches the Poindeo-validated architecture: zero WASM for media processing — the only WASM in the media path is the AAC encoder fallback for MP4 audio.
 
 2. **Preview equals export.** The `renderFrame()` function is the single source of truth. Preview calls it at display refresh rate; export calls it per-frame in the encode loop. If it looks right in preview, the export is right. This eliminates the "export looks different" bug class.
 
 3. **Agent proposes, human disposes.** Every agent tool either reads state (read-only, `readOnlyHint: true`) or stages a change (pending diff). The only write tool (`commit_staged_changes`) surfaces a confirmation dialog with the full diff. The agent never writes directly.
 
-4. **Two-API coverage.** The project uses both the imperative API (`document.modelContext.registerTool`) for complex tools and the declarative API (`tool-name` / `tool-description` HTML attributes) for the export settings form. This demonstrates full spec coverage.
+4. **Registration that degrades gracefully.** Tools register through `document.modelContext.registerTool`, falling back to `window.modelContext` where the host exposes it there, and always mirroring onto `window.__panoptik_call_tool` so the suite stays drivable from the DevTools console when no agent is attached. Every registration carries an `AbortSignal`, so unmounting the editor cleanly unregisters all 30 tools.
 
 5. **Zero uploads.** Privacy is architecture, not a promise. The codebase has no upload endpoint. All media stays in the browser. AGPL source lets anyone verify this claim by reading every line.
 
@@ -102,38 +102,56 @@ The key insight: **the agent proposes, the human disposes.** Every agent action 
 
 ## WebMCP tool catalog
 
-The project exposes 9 imperative tools and 1 declarative form. Each tool follows one of three patterns identified by Alex Nahas (creator of MCP-B and WebMCP spec contributor):
+The project exposes 30 imperative tools, registered across `webmcp/tools-a.ts` (read + export), `tools-b.ts` (single-purpose edits) and `tools-batch.ts` (analysis, batch edits, commit). Read-only tools carry `annotations: { readOnlyHint: true }`. The tables below cover the core surface; the full list is in the README.
 
-### Read-only tools (flat list, always available, `readOnlyHint: true`)
+### Read — understand the video before touching it
 
 | Tool | Description | Why the agent needs it |
 |---|---|---|
-| `get_project_state` | Returns the full project: clip metadata, committed zoom points, text overlays, captions, background, facecam, click log | The agent needs to know what's already in the project before proposing changes — without scraping the DOM |
-| `list_scenes` | Returns scenes with in/out points | Lets the agent understand the video structure |
-| `get_click_log` | Returns mouse-click timestamps from the recording | The agent uses this to find moments where the user interacted with the UI — prime zoom-point candidates |
+| `get_video_summary` | One call returning transcript phrases, scene breakdown, silence intervals, dead air, facecam corner and the director playbook — in timeline seconds | The entry point. Replaces a dozen round-trips with a single digest |
+| `get_scene_detail` | Drill-down for one scene: raw click coordinates, bounding box, word-level timestamps | Lazy detail, so the summary stays small |
+| `get_project_state` | Full project: clip metadata, committed zooms, overlays, captions, background, facecam, click log | Knows what is already there before proposing — without scraping the DOM |
+| `list_clips` / `list_scenes` | Clips and scenes with in/out points and transitions | Understands the structure it is editing |
+| `get_transcript` | Phrases and words in timeline seconds | Places captions and cuts on real speech |
+| `get_silence_intervals` | Silence and dead-air windows | Feeds deterministic `cut` ops |
+| `get_click_log` | Mouse-click timestamps from the recording | Prime zoom-point candidates — the moments the user actually did something |
+| `inspect_timeline` | Current timeline shape after edits | Re-orients after a cut shifts everything |
+| `get_director_guidelines` | The authoritative reasoning playbook: zoom scales, overlay rules, keepouts, decision tree | Lets the model act like an editor instead of guessing |
 
-### Staging tools (propose changes, mark as pending, do NOT commit)
+All nine carry `annotations: { readOnlyHint: true }`.
 
-| Tool | Description | What it stages |
+### See — ground claims in actual pixels
+
+| Tool | Description | Why the agent needs it |
 |---|---|---|
-| `propose_zoom_points` | Takes an array of timestamps, creates zoom-in keyframes at each, stages them as ghost diamonds on the timeline | Ghost zoom points (dashed outline, not yet committed) |
-| `add_text_overlay` | Takes text, timestamp, and position, stages a text overlay | Pending text overlay in the inspector |
-| `set_background` | Takes kind (solid/gradient) and color/stops, stages a background change | Pending background swap |
-| `generate_captions` | Runs local Whisper WASM transcription, stages word-level captions with timestamps | Pending caption track |
+| `probe_frames` | Samples frames at given timestamps; returns feature summaries plus base64 snapshots with an optional A1–C3 grid overlay | The interesting moments live in the rendered canvas, not the DOM |
+| `locate_visual_target` | Resolves "zoom on the search bar" to a safe focal point via three tiers: click telemetry (confidence 1.0) → parsed VLM bbox / grid cell → centred fallback | Turns a vague visual instruction into coordinates the engine can trust |
 
-### Write tool (gated by human confirmation inside `execute()`)
+### Edit — propose changes
+
+`propose_edits` is the main tool: one atomic batch of cut / zoom / text / speed / transition / background ops, snapped and applied together. Narrower asks are served by single-purpose tools:
+
+| Tool | Stages or applies |
+|---|---|
+| `propose_zoom_points` | Ghost zoom diamonds (dashed, not yet committed) |
+| `add_text_overlay` | Pending text overlay in the inspector |
+| `set_background` | Pending solid or gradient background |
+| `generate_captions` | Pending caption track with word-level timestamps |
+| `split_clip` · `delete_clip` | Timeline cuts |
+| `set_clip_transition` | Fade, dip, slide, wipe, zoom across a cut |
+| `set_clip_speed` · `set_aspect` · `add_music` | Speed (pitch-preserving), aspect preset, audio track |
+
+`split_segment` and `set_speed` remain as compatibility aliases.
+
+### Commit and export — human-gated
 
 | Tool | Description | Safety mechanism |
 |---|---|---|
-| `commit_staged_changes` | Commits ALL staged items to the project | Shows a confirmation dialog with the full diff (green additions). The human clicks Yes/No. The agent cannot bypass this. |
-| `export_clip` | Exports the project as MP4/WebM via WebCodecs | Shows a confirmation dialog with format/resolution before rendering |
-
-### Declarative form (HTML attributes, agent fills, human submits)
-
-| Form | Attributes | Purpose |
-|---|---|---|
-| Export settings | `tool-name="export_settings"` `tool-description="..."` on `<form>`; `tool-name` on `<select>` and `<input>` elements | The agent can fill the format/resolution/captions fields, but the human must click "Export & Download" — the form does not auto-submit |
-
+| `commit_staged_changes` | Commits all staged ghosts to the project | Confirmation dialog showing the full diff. The human clicks Yes/No; the agent cannot bypass it |
+| `discard_staged_changes` | Clears pending proposals | Non-destructive — committed work is untouched |
+| `export_clip` | Renders to MP4/WebM locally via WebCodecs | Confirmation dialog showing format, resolution and frame rate before any encoding starts |
+| `ai_auto_director` | One-click full edit plan from a hosted model | Applied through the same snapping pipeline as `propose_edits`; blocked in air-gapped mode |
+| `cloud_transcribe` | Transcription with word timestamps | Requires BYOK or a Pro session; blocked in air-gapped mode |
 ---
 
 ## How the agent collaboration works (end to end)
@@ -146,7 +164,7 @@ The project exposes 9 imperative tools and 1 declarative form. Each tool follows
 
 4. **Agent watches the preview** — the agent uses its own vision (it's in the browser, it can see the canvas) to watch the video play and identify moments of interest: "the user clicked the login button at 0:08, the dashboard loaded at 0:15, the form appeared at 0:22."
 
-5. **Agent proposes changes** — the agent calls `propose_zoom_points({timestamps:[8, 15, 22]})`. Three ghost diamonds appear on the timeline. The agent calls `generate_captions()` — Whisper WASM runs in a worker, stages word-level captions. The agent calls `set_background({kind:"gradient", stops:["#6366f1","#a855f7"]})`.
+5. **Agent proposes changes** — the agent calls `propose_zoom_points({timestamps:[8, 15, 22]})`. Three ghost diamonds appear on the timeline. The agent calls `generate_captions()` — audio is transcribed and word-level captions stage as pending. The agent calls `set_background({kind:"gradient", stops:["#6366f1","#a855f7"]})`.
 
 6. **Human reviews the diff** — the staging panel shows all pending changes: "3 zoom points, 47 captions, 1 background." The human can click any ghost diamond to adjust its depth or focal point, or reject individual items.
 
@@ -168,13 +186,12 @@ The project exposes 9 imperative tools and 1 declarative form. Each tool follows
 | Media encode | WebCodecs `VideoEncoder` + `AudioEncoder` + mediabunny mux | Same native pipeline, reversed |
 | Rendering | Canvas2D + `ctx.translate/scale` | GPU-composited, 60fps, the camera transform math lives here |
 | Recording | `getDisplayMedia` + `getUserMedia` + `MediaRecorder` | Zero-install screen + webcam + mic capture |
-| Captions | Whisper WASM (`@xenova/transformers`) in a Web Worker | Local, private, lazy-loaded only on demand |
+| Captions | Groq Whisper Large v3 Turbo, via the user's own key (BYOK, localStorage) or a hosted Cloudflare Worker proxy | Word-level timestamps at speed. The only step that leaves the device; air-gapped mode blocks it |
 | Persistence | OPFS (`navigator.storage.getDirectory()`) | Large quota, off-main-thread writes, portable project bundles |
-| WebMCP | `document.modelContext.registerTool` + declarative HTML attributes | The W3C Web Machine Learning Community Group draft standard |
-| Polyfill | `@mcp-b/global` (fallback) | For browsers without native WebMCP support |
+| WebMCP | `document.modelContext.registerTool` (with a `window.modelContext` fallback) | The W3C Web Machine Learning Community Group draft standard |
 | Deployment | Vercel (static export, HTTPS/SecureContext) | Required for WebMCP; satisfies the Vercel sponsor prize |
 
-**No ffmpeg.wasm. No server. No uploads. No database. No API keys.**
+**No ffmpeg.wasm. No render server. No media uploads. No database.** Transcription and `ai_auto_director` are the only network calls, both opt-in and both blocked by air-gapped mode.
 
 ---
 
@@ -237,8 +254,7 @@ Panoptik/
 │     │  ├─ app/editor/            # Editor route
 │     │  ├─ components/            # React UI (preview, timeline, inspector, panels)
 │     │  ├─ stores/                # Zustand (project state + undo/redo history)
-│     │  ├─ webmcp/                # Tool registration (9 imperative + 1 declarative)
-│     │  └─ workers/               # Whisper transcription worker
+│     │  ├─ webmcp/                # Tool registration (30 tools) + snapping + time-space
 │     └─ next.config.ts            # output: 'export'
 ├─ packages/
 │  ├─ engine/                      # Media pipeline (MIT, npm-publishable)
@@ -256,7 +272,7 @@ Panoptik/
 
 The project was built by two developers working in parallel on independent vertical slices:
 
-**Person A — Media Pipeline:** owns the engine package (decode, render, encode, record, OPFS) and the WebMCP tools that wrap engine functions (`get_project_state`, `list_scenes`, `get_click_log`, `export_clip`, declarative export form). Developed and tested against a hardcoded mock project with all fields populated.
+**Person A — Media Pipeline:** owns the engine package (decode, render, encode, record, OPFS) and the WebMCP tools that wrap engine functions (`get_project_state`, `list_scenes`, `get_click_log`, `export_clip`). Developed and tested against a hardcoded mock project with all fields populated.
 
 **Person B — Editor + State:** owns the Zustand store, zoom interaction logic, captions (Whisper), backgrounds, text overlays, undo/redo, and the WebMCP tools that wrap editing functions (`propose_zoom_points`, `add_text_overlay`, `set_background`, `generate_captions`, `commit_staged_changes`). Developed and tested against a mock engine that renders placeholder frames.
 
@@ -272,16 +288,17 @@ This project follows the WebMCP spec's security guidance:
 
 - **Read-only tools are marked** with `annotations: { readOnlyHint: true }` — the agent and the browser know these don't mutate state
 - **Write tools require human confirmation** — `commit_staged_changes` and `export_clip` both surface a confirmation dialog inside `execute()` before writing. The agent cannot bypass this
-- **No `toolautosubmit`** — the declarative export form requires a human click on the submit button. The agent can fill the fields but cannot submit
+- **Export is confirm-gated** — `export_clip` opens a confirmation dialog showing format, resolution and frame rate, and waits for a human click before any encoding starts. The agent can request an export but cannot complete one
 - **Tool descriptions use positive language** — they describe what the tool *can* do, not what it *can't* (per Chrome WebMCP best practices)
 - **AbortController lifecycle** — tools are registered on mount and aborted on unmount to prevent leaked registrations
 
 ### Privacy posture
 
-- **No upload endpoint exists in the codebase** — this is verifiable by reading the source
-- **All media processing is client-side** — WebCodecs, Canvas2D, OPFS
-- **Whisper captions run locally** — the audio never leaves the browser
-- **No telemetry by default** — zero network requests in the editor
+- **Your video never leaves the device** — there is no media upload endpoint in the codebase, and this is verifiable by reading the source
+- **All media processing is client-side** — decode, render, zoom, audio mixing and MP4/WebM export run on WebCodecs, Canvas2D and OPFS with no network involved
+- **Two opt-in exceptions, named plainly** — `generate_captions` / `cloud_transcribe` send *audio only* to Groq Whisper (via your own key or a hosted proxy), and `ai_auto_director` sends a text digest to a hosted model. Neither runs unless you invoke it
+- **Air-gapped mode** — blocks both outright and keeps the local tool pipeline fully usable
+- **No telemetry** — nothing is reported anywhere
 - **AGPL-3.0 license** — any fork must stay open-source
 
 ---
@@ -293,7 +310,7 @@ This project follows the WebMCP spec's security guidance:
 | 0:00–0:15 | The problem: "Making demo videos means manually placing every zoom point. A 2-minute demo needs 15+ zooms, 40+ captions. Most people ship raw recordings instead." |
 | 0:15–0:30 | Import a screen recording into Panoptik. The clip renders on the canvas. |
 | 0:30–1:00 | In ChatGPT's in-app browser, ask: "Watch this preview and propose zoom points at the interesting moments." The agent calls `get_click_log`, then `propose_zoom_points`. Ghost diamonds appear on the timeline. |
-| 1:00–1:20 | Ask: "Also add captions and set a gradient background." The agent calls `generate_captions` (Whisper runs locally) and `set_background`. More items stage. |
+| 1:00–1:20 | Ask: "Also add captions and set a gradient background." The agent calls `generate_captions` and `set_background`. More items stage. |
 | 1:20–1:50 | The human adjusts one zoom depth from 2× to 2.5× by dragging. The agent calls `commit_staged_changes`. A confirmation dialog shows the full diff. The human clicks "Confirm." All staged items commit. Ghost diamonds become solid. |
 | 1:50–2:15 | Ask: "Export as 1080p MP4." The agent calls `export_clip`. Confirmation dialog. Human confirms. MP4 renders locally and downloads. |
 | 2:15–2:35 | Side-by-side: raw recording vs polished demo with zooms, captions, text, and gradient background. |
@@ -307,7 +324,7 @@ This project follows the WebMCP spec's security guidance:
 ### API surface used
 
 - **Imperative API:** `document.modelContext.registerTool({ name, description, inputSchema, annotations, execute, signal })` — 9 tools registered
-- **Declarative API:** `tool-name` and `tool-description` HTML attributes on `<form>` and its child elements — 1 export settings form
+- **Fallback discovery:** every tool is mirrored onto `window.__panoptik_webmcp_tools` and callable via `window.__panoptik_call_tool(name, input)`, so the suite is testable from the DevTools console with no agent attached
 - **Tool discovery:** `document.modelContext.getTools()` — used by the agent to discover available tools
 - **Annotations:** `readOnlyHint: true` on all 3 read-only tools; omitted on staging and write tools
 - **Lifecycle:** `AbortController` + `signal` on each `registerTool` call; aborted on component unmount
@@ -315,7 +332,7 @@ This project follows the WebMCP spec's security guidance:
 ### What we deliberately did NOT use
 
 - `requestUserInteraction()` — this method does not exist in the WebMCP spec. Human confirmation is implemented inside the tool's `execute()` function via a custom event that triggers a React portal dialog
-- `toolautosubmit` attribute — unverified in the spec; omitted. The declarative form requires a human click on the submit button
+- The declarative form API (`tool-name` / `tool-description` HTML attributes) — every editing surface here needs validation, snapping and cut-map rebasing before it touches the project, which is imperative work; a form that writes straight through would bypass the staging model
 - `navigator.modelContext` — this is the polyfill's API surface (`@mcp-b/global`), not the standard. The standard is `document.modelContext`. We use the standard as primary, polyfill as fallback
 
 ### Token efficiency
