@@ -1,89 +1,89 @@
 # Panoptik
 
-**A browser-native demo-video studio that an AI agent can edit alongside you.**
+A browser-native demo-video studio that an AI agent can edit alongside you.
 
 Built for the [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/).
 
-🔗 **Live demo:** <https://panoptik-studio.vercel.app/> · 🎬 **Demo video:** <https://www.youtube.com/watch?v=naWZF9vwZDE>
+Live demo: <https://panoptik-studio.vercel.app/> | Demo video: <https://www.youtube.com/watch?v=naWZF9vwZDE>
 
 ---
 
 ## What we made
 
-Panoptik is a screen-recording and video editor that runs entirely in the browser — decode, render, audio mixing, and export all happen client-side via WebCodecs and Canvas2D. No uploads, no render farm.
+Panoptik is a screen recording and video editor that runs completely inside the browser. Decoding, rendering, audio mixing, and exporting all happen on your computer using WebCodecs and Canvas2D. There are no file uploads and no remote render servers.
 
-The part that matters for this challenge: **the editor exposes itself to AI agents as 30 WebMCP tools.** An agent running in ChatGPT's in-app browser (or Chrome with the WebMCP flag) can read the project, watch the rendered preview, and propose a complete edit — zooms, cuts, captions, transitions, backgrounds — as a **staged diff** you review and commit.
+The main feature for this challenge: the editor gives AI agents 30 WebMCP tools. When an agent runs inside ChatGPT's in-app browser (or in Chrome with the WebMCP testing flag), it can inspect the project, watch the canvas preview, and propose edits like zooms, cuts, subtitles, transitions, and backgrounds as a staged diff that you review and confirm.
 
-The agent proposes. The human disposes. Nothing is written to the project without a click.
+The agent proposes edits, and the human decides. Nothing is changed in the project until you click to accept.
 
 ## Why WebMCP, and not something else
 
-Editing video is the rare task where the agent genuinely has to be *inside the page*:
+Video editing needs the agent to work directly inside the web page:
 
-- **The interesting moments are only visible in the rendered canvas.** "The user clicked Login at 0:08" isn't in the DOM or in any serializable state — it's pixels. A browser-resident agent can already see them. WebMCP gives it a way to *act* on what it sees.
-- **A backend MCP server can't reach any of this.** The media lives in OPFS, the project state lives in a Zustand store, the frames live in a canvas. There is no server copy to hand a server-side tool.
-- **DOM-driving is the alternative, and it's bad.** Without WebMCP the agent would screenshot the UI, hunt for the timeline, convert "8.0 seconds" into a pixel offset, and drag a diamond. That's ~150KB of screenshots and DOM per action, and it misses. `propose_edits([...])` is one structured call, ~2KB, and it either validates or fails loudly.
+- The important events only exist in the canvas pixels. For example, when a user clicks a button at 0:08, that action is not in the DOM or in any text state. It is only in the rendered video frames. A browser-resident agent can see these pixels directly. WebMCP gives the agent a clean way to take action on what it sees.
+- A backend MCP server cannot reach client data. The video file stays in browser storage (OPFS), the timeline state is in a local Zustand store, and the frames are on a canvas. There is no copy on a server for a backend tool to use.
+- Controlling the DOM with mouse clicks is slow and fragile. Without WebMCP, an agent would have to take a screenshot of the UI, search the DOM for the timeline, convert seconds into screen pixels, and simulate dragging keyframes. That takes around 150 KB of images and DOM text for every action, and it often fails. With WebMCP, `propose_edits([...])` is a single structured tool call of about 2 KB that either works cleanly or returns a clear error.
 
-So: the agent's vision answers *what's interesting*; WebMCP answers *make it happen*.
+The agent's vision finds what is interesting, and WebMCP makes the changes happen.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A["🤖 Agent — ChatGPT in-app browser / Chrome"]
+    A["Agent - ChatGPT in-app browser / Chrome"]
 
-    A -->|"1 · read<br/>get_video_summary, probe_frames"| T
-    A -->|"2 · propose<br/>propose_edits"| T
+    A -->|"1 - read: get_video_summary, probe_frames"| T
+    A -->|"2 - propose: propose_edits"| T
 
-    T["<b>WebMCP layer</b> — 30 tools<br/>document.modelContext.registerTool()"]
-    T --> S["<b>Snapping + dual time-space</b><br/>word-boundary safe · timeline ↔ source rebase"]
-    S --> G["<b>Staged ghost edits</b><br/>shown as a reviewable diff"]
+    T["WebMCP layer - 30 tools<br/>document.modelContext.registerTool()"]
+    T --> S["Snapping and dual time-space<br/>word-boundary safe, timeline to source remapping"]
+    T --> G["Staged ghost edits<br/>shown as a reviewable diff"]
 
-    H["👤 Human"] -->|"3 · review & commit"| G
-    G --> P["<b>Project store</b> — Zustand + OPFS"]
+    H["Human"] -->|"3 - review and commit"| G
+    G --> P["Project store - Zustand and OPFS"]
 
-    P --> R["Canvas2D renderer → live preview"]
-    P --> E["WebCodecs encoder → MP4 / WebM"]
+    P --> R["Canvas2D renderer -> live preview"]
+    P --> E["WebCodecs encoder -> MP4 / WebM"]
 
     R -.->|"agent and human see the same frame"| A
 ```
 
-Two design decisions carry most of the weight:
+Two main design choices make this work:
 
-**Dual time-space.** Panoptik stores edits in absolute *source* seconds; agents reason in *timeline* seconds. Cuts and speed changes make those diverge. Every tool boundary translates between them, so an agent's timestamps stay correct even after the timeline has been re-cut underneath it.
+Dual time-space. Panoptik stores all edits in source seconds, but agents think in timeline seconds. When clips are cut or speed is changed, these two times become different. Every tool automatically converts between them, so the agent's timestamps stay accurate even after previous cuts change the timeline.
 
-**Deterministic snapping.** Agent-proposed edits are not applied verbatim. They're snapped: cuts avoid word boundaries (±150ms), zooms centre on real click telemetry, transitions resolve collisions, speed ops are kept from overlapping. The model supplies intent; the engine enforces correctness.
+Deterministic snapping. The engine does not apply agent proposals blindly. It snaps cuts so they do not chop words (+/- 150ms), centers zooms on recorded mouse clicks, avoids transition overlaps, and stops speed changes from colliding. The model gives the creative idea, and the engine makes sure the math is correct.
 
 ## The tools
 
 <details>
-<summary><b>Read</b> — understand the video (10 tools)</summary>
+<summary>Read - inspect the video (10 tools)</summary>
 
-`get_video_summary` · `get_scene_detail` · `get_project_state` · `list_clips` · `list_scenes` · `get_transcript` · `get_silence_intervals` · `get_click_log` · `inspect_timeline` · `get_director_guidelines`
+`get_video_summary`, `get_scene_detail`, `get_project_state`, `list_clips`, `list_scenes`, `get_transcript`, `get_silence_intervals`, `get_click_log`, `inspect_timeline`, `get_director_guidelines`
 
-`get_video_summary` is the entry point: transcript phrases, scene breakdown, silence intervals, dead air, facecam position, and the director playbook — in one call. `get_scene_detail` drills into a single scene rather than paying for the whole thing.
+`get_video_summary` is the first tool to call: it returns transcript text, scenes, silence periods, dead air, camera position, and editor guidelines in one response. `get_scene_detail` lets the agent look closely at one specific scene without downloading the whole project data.
 </details>
 
 <details>
-<summary><b>See</b> — ground claims in actual pixels (2 tools)</summary>
+<summary>See - check actual frame pixels (2 tools)</summary>
 
-`probe_frames` — samples frames at given timestamps, returns base64 snapshots with an optional A1–C3 grid overlay for visual grounding.
+`probe_frames` - takes sample frames at chosen timestamps and returns image information with an optional A1-C3 grid for visual grounding.
 
-`locate_visual_target` — turns "zoom on the search bar" into a safe focal point via three tiers: click telemetry (confidence 1.0) → parsed VLM bounding box / grid cell → centred fallback.
+`locate_visual_target` - converts an instruction like "zoom on the search bar" into coordinates using three fallback steps: recorded click data (confidence 1.0), then visual model grid detection, then center fallback.
 </details>
 
 <details>
-<summary><b>Edit</b> — propose changes (13 tools)</summary>
+<summary>Edit - propose changes (13 tools)</summary>
 
-`propose_edits` — the main tool: one atomic batch of cut / zoom / text / speed / transition / background ops, snapped and applied together.
+`propose_edits` - the main tool: runs a single batch of cut, zoom, text, speed, transition, and background changes together with snapping.
 
-Single-purpose tools for narrower asks: `propose_zoom_points` · `add_text_overlay` · `generate_captions` · `set_background` · `split_clip` · `delete_clip` · `set_clip_transition` · `set_clip_speed` · `set_aspect` · `add_music`, plus `split_segment` and `set_speed` kept as compatibility aliases.
+Smaller tools for single tasks: `propose_zoom_points`, `add_text_overlay`, `generate_captions`, `set_background`, `split_clip`, `delete_clip`, `set_clip_transition`, `set_clip_speed`, `set_aspect`, `add_music`, plus `split_segment` and `set_speed` for backward compatibility.
 </details>
 
 <details>
-<summary><b>Commit & export</b> — human-gated (5 tools)</summary>
+<summary>Commit and export - human approval required (5 tools)</summary>
 
-`commit_staged_changes` (opens the diff dialog) · `discard_staged_changes` · `export_clip` (confirm-gated, encodes locally and hands back a download) · `ai_auto_director` (one-click full edit plan) · `cloud_transcribe`
+`commit_staged_changes` (shows the diff confirmation box), `discard_staged_changes`, `export_clip` (asks for confirmation, then encodes locally and gives a download link), `ai_auto_director` (creates a full edit plan), `cloud_transcribe`
 </details>
 
 ## Try it
@@ -95,47 +95,47 @@ pnpm install
 pnpm dev
 ```
 
-Open <http://localhost:3000/editor>. Requires Node 20+ and a Chromium browser (WebCodecs + OPFS).
+Open <http://localhost:3000/editor>. This needs Node 20+ and a Chromium browser with WebCodecs and OPFS support.
 
-**To drive it with an agent:**
+To use it with an AI agent:
 
-1. **ChatGPT in-app browser** — open Panoptik there and the tools register themselves.
-2. **Chrome** — enable `chrome://flags/#enable-webmcp-testing`.
-3. **DevTools console** — no agent needed:
+1. ChatGPT in-app browser: open Panoptik there and the tools register automatically.
+2. Chrome: enable `chrome://flags/#enable-webmcp-testing`.
+3. DevTools console (no agent needed):
    ```js
    await window.__panoptik_call_tool("get_video_summary");
    await window.__panoptik_call_tool("propose_zoom_points", { timestamps: [2.5, 6.0], scale: 2.2 });
    ```
 
-Every call — input, duration, output — shows up live in the **Agent Tool Trace** panel. The full agent protocol is in [docs/LLM_WEBMCP_DIRECTOR_GUIDE.md](docs/LLM_WEBMCP_DIRECTOR_GUIDE.md).
+Every tool call shows up live in the Agent Tool Trace box with its name, time taken, and return value. The guide for agents is in [docs/LLM_WEBMCP_DIRECTOR_GUIDE.md](docs/LLM_WEBMCP_DIRECTOR_GUIDE.md).
 
 ## What stays on your machine
 
-All video work is local: decoding, rendering, zoom, transitions, audio mixing, and MP4/WebM export never touch a network.
+All video processing stays on your computer. Decoding, rendering, zooms, transitions, audio mixing, and export to MP4 or WebM never send video data across the network.
 
-The exceptions are opt-in and named as such: speech-to-text (Groq Whisper, via your own key or a hosted proxy) and `ai_auto_director`. **Air-gapped mode** blocks both and keeps the local tool pipeline working.
+The only optional network features are speech transcription (Groq Whisper, with your own key or free proxy) and `ai_auto_director`. Air-gapped mode turns both off and keeps all local editing tools working.
 
 ## Repo layout
 
 ```
 apps/web/           Next.js editor
-  src/webmcp/         ← the WebMCP layer: tools, snapping, time-space, lifecycle
+  src/webmcp/         <- WebMCP layer: tools, snapping, time translation, lifecycle
   src/components/     Timeline, PreviewCanvas, Inspector, ToolTrace
-  src/stores/         Zustand project store with undo/redo
-packages/engine/    decode · render · encode · audio · timeStretch · record · opfs
-packages/project-schema/   Project types + migrations
-packages/utils/     Shared math and easings
+  src/stores/         Zustand project store with undo and redo
+packages/engine/    decode, render, encode, audio, timeStretch, record, opfs
+packages/project-schema/   Project types and migrations
+packages/utils/     Shared math and easing functions
 ```
 
 ```bash
-pnpm test        # unit + integration suites
-pnpm typecheck   # tsc across the monorepo
+pnpm test        # unit and integration tests
+pnpm typecheck   # typescript check across the monorepo
 ```
 
-## Also in the box
+## Also included
 
-Zoom keyframes with easing · distributed cross-cut transitions (fade, dip, slide, wipe, zoom) · facecam PiP with shape/border/glow styling that morphs across cuts · multi-track audio with auto-ducking · WSOLA pitch-preserving speed changes · OPFS project persistence · export to MP4 (H.264/AAC) or WebM (VP9/Opus) at up to 4K/60.
+Smooth zoom keyframes with easing curves, transitions between cuts (fade, dip, slide, wipe, zoom), facecam picture-in-picture with shapes and borders, multi-track audio with automatic ducking, pitch-preserving speed changes using WSOLA, project saving with OPFS, and export to MP4 (H.264/AAC) or WebM (VP9/Opus) up to 4K at 60 fps.
 
 ## License
 
-AGPL-3.0 for the app (`apps/web`); MIT for the engine and schema packages.
+AGPL-3.0 for the web app (`apps/web`); MIT for the engine and schema packages.
